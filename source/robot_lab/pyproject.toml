@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools", "wheel", "toml"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robot_lab"
+version = "2.0"
+dependencies = [
+    "psutil",
+    "lxml",
+    "transformations",
+    "pybullet",
+    "colorama"
+]
+
+[tool.setuptools.packages.find]
+include = ["robot_lab*"]
+

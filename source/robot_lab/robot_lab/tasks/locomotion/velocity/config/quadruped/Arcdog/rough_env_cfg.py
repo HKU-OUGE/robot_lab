@@ -101,7 +101,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = -3.5
         self.rewards.base_height_l2.weight = -2.5
-        self.rewards.base_height_l2.params["target_height"] = 0.42
+        self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -170,7 +170,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # 测试 暂时取消
         self.rewards.joint_power.weight = -2e-5
         self.rewards.stand_still_without_cmd.weight = 0.1
-        self.rewards.joint_position_penalty.weight = -0.05
+        self.rewards.joint_position_penalty.weight = -0.1
         # self.rewards.joint_position_penalty.weight = 0.0
         self.rewards.feet_height_exp.weight = 4.0
         self.rewards.feet_height_exp.params["target_height"] = 0.20
@@ -178,7 +178,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.foot_link_name
         ]  
         self.rewards.feet_height_body_exp.weight = 2.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.36
+        self.rewards.feet_height_body_exp.params["target_height"] = -0.38
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]

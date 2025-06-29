@@ -34,7 +34,7 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 # Pre-defined configs
 ##
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-from isaaclab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
+# from isaaclab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
 
 
 ##
