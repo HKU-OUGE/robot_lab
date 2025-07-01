@@ -1,3 +1,14 @@
 
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/agents/__pycache__
 /source/robot_lab/robot_lab/tasks/locomotion/__pycache__
+/logs
+/outputs
+/source/robot_lab/robot_lab/__pycache__
+/source/robot_lab/robot_lab/assets/__pycache__
+/source/robot_lab/robot_lab/tasks/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/humanoid/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/mdp/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/__pycache__
