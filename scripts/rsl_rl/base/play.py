@@ -55,11 +55,10 @@ import gymnasium as gym
 import time
 import torch
 
-import carb
-import omni
 import rsl_rl_utils
 from rsl_rl.runners import OnPolicyRunner
 
+from isaaclab.devices import Se2Keyboard
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.assets import retrieve_file_path
@@ -95,26 +94,17 @@ def main():
     env_cfg.events.randomize_apply_external_force_torque = None
     env_cfg.events.push_robot = None
 
-    # env_cfg.commands.base_velocity.rel_standing_envs = 0.0
-    # env_cfg.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.5)
-    # env_cfg.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-    # env_cfg.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
-    # env_cfg.commands.base_velocity.ranges.heading = (0.0, 0.0)
-
-    env_cfg.terminations.illegal_contact = None
-
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
-        cmd_vel = torch.zeros((env_cfg.scene.num_envs, 3), dtype=torch.float32)
-        system_input = carb.input.acquire_input_interface()
-        system_input.subscribe_to_keyboard_events(
-            omni.appwindow.get_default_app_window().get_keyboard(),
-            lambda event: rsl_rl_utils.sub_keyboard_event(event, cmd_vel, lin_vel=1.0, ang_vel=1.0),
+        controller = Se2Keyboard(
+            v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
+            v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
+            omega_z_sensitivity=env_cfg.commands.base_velocity.ranges.ang_vel_z[1],
         )
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: cmd_vel.clone().to(env.device),
+            func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
         )
 
     # specify directory for logging experiments
@@ -153,7 +143,7 @@ def main():
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # wrap around environment for rsl-rl
-    env = RslRlVecEnvWrapper(env)
+    env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
@@ -163,22 +153,31 @@ def main():
     # obtain the trained policy for inference
     policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
 
+    # extract the neural network module
+    # we do this in a try-except to maintain backwards compatibility.
+    try:
+        # version 2.3 onwards
+        policy_nn = ppo_runner.alg.policy
+    except AttributeError:
+        # version 2.2 and below
+        policy_nn = ppo_runner.alg.actor_critic
+
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
     export_policy_as_onnx(
-        actor_critic=ppo_runner.alg.policy,
+        policy=policy_nn,
         normalizer=ppo_runner.obs_normalizer,
         path=export_model_dir,
         filename="policy.onnx",
     )
     export_policy_as_jit(
-        actor_critic=ppo_runner.alg.policy,
+        policy=policy_nn,
         normalizer=ppo_runner.obs_normalizer,
         path=export_model_dir,
         filename="policy.pt",
     )
 
-    dt = env.unwrapped.physics_dt
+    dt = env.unwrapped.step_dt
 
     # reset environment
     obs, _ = env.get_observations()
@@ -193,8 +192,6 @@ def main():
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, _, _ = env.step(actions)
-            # print(f"\n【OBS】observation_space: '{env.observation_space}'")
-            # print(f"【ACT】action_space: '{env.action_space}' \n")
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
