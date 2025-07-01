@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2025 Tang Tianyang
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
@@ -11,27 +11,26 @@ from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import (
 # Pre-defined configs
 ##
 # use cloud assets
-# from isaaclab_assets.robots.unitree import ARCLAB_ARCDOG_CFG  # isort: skip
+# from isaaclab_assets.robots.unitree import CUHKLRLSirius_CFG  # isort: skip
 # use local assets
-from robot_lab.assets.arclab import ARCLAB_ARCDOG_CFG  # isort: skip
+from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_CFG  # isort: skip
 
 
 @configclass
-class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
-    base_link_name = "body"
-    trunk_link_name = "base"
-    hip_link_name = ".*_thigh"
+class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
+    base_link_name = "base"
+    trunk_link_name = "trunk"
+    hip_link_name = ".*thigh"
     knee_link_name = ".*_calf"
-    abad_link_name = ".*_hip"
+    abad_link_name = ".*hip"
     foot_link_name = ".*_foot"
-    extension_link_name = ".*_box"
 
     # fmt: off
     joint_names = [
-        "FL_HAA", "FL_HFE", "FL_KFE", "FL_box_joint",
-        "FR_HAA", "FR_HFE", "FR_KFE", "FR_box_joint",
-        "RL_HAA", "RL_HFE", "RL_KFE", "RL_box_joint",
-        "RR_HAA", "RR_HFE", "RR_KFE", "RR_box_joint",
+        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
     ]
     # fmt: on
 
@@ -41,7 +40,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Sence------------------------------
         # switch robot to unitree a1
-        self.scene.robot = ARCLAB_ARCDOG_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = CUHKLRL_SIRIUS_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = (
             "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         )
@@ -194,7 +193,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     ("RR_foot", "RL_foot"),
         # ) 
         # If the weight of rewards is 0, set rewards to None
-        if self.__class__.__name__ == "ArclabArcdogRoughEnvCfg":
+        if self.__class__.__name__ == "CUHKLRLSiriusRoughEnvCfg":
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
@@ -204,6 +203,5 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.abad_link_name,
             self.knee_link_name,
             self.hip_link_name,
-            # self.extension_link_name
         ]
         # ------------------------------Commands------------------------------

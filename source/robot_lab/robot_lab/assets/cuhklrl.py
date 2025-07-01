@@ -1,14 +1,14 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2025-2026 Tang Tianyang
 # SPDX-License-Identifier: Apache-2.0
 
 """Configuration for Arclab robots.
 
 The following configurations are available:
 
-* :obj:`ARCLAB_ARCDOG_CFG`: Arcdog robot with DC motor model for the legs
+* :obj:`CUHKLRL_SIRIUS_CFG`: Sirius robot with DC motor model for the legs
 
 
-Reference: https://github.com/ruihuang1124/arcdog_ros
+Reference: https://github.com/ruihuang1124/quadruped_control_ros2
 """
 
 import isaaclab.sim as sim_utils
@@ -22,9 +22,9 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 ##
 
 
-ARCLAB_ARCDOG_CFG = ArticulationCfg(
+CUHKLRL_SIRIUS_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog/arcdog.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius/sirius.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -42,29 +42,25 @@ ARCLAB_ARCDOG_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.45),
         joint_pos={
-            "FL_HAA": 0.00,
-            "FR_HAA": -0.00,
-            "RL_HAA": 0.00,
-            "RR_HAA": -0.00,
-            "FL_HFE": 0.60,
-            "FR_HFE": 0.60,
-            "RL_HFE": 0.60,
-            "RR_HFE": 0.60,
-            "FL_KFE": -0.95,
-            "FR_KFE": -0.95,
-            "RL_KFE": -0.95,
-            "RR_KFE": -0.95,
-            "FL_box_joint": 0.075,
-            "FR_box_joint": 0.075,
-            "RL_box_joint": 0.075,
-            "RR_box_joint": 0.075,
+            "FL_hip_joint": 0.00,
+            "FR_hip_joint": -0.00,
+            "RL_hip_joint": 0.00,
+            "RR_hip_joint": -0.00,
+            "FL_thigh_joint": 0.00,
+            "FR_thigh_joint": 0.00,
+            "RL_thigh_joint": 0.00,
+            "RR_thigh_joint": 0.00,
+            "FL_calf_joint": -0.00,
+            "FR_calf_joint": -0.00,
+            "RL_calf_joint": -0.00,
+            "RR_calf_joint": -0.00,
         },
         joint_vel={".*": 0.0},
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        "legs_fe": DCMotorCfg(
-            joint_names_expr=[".*FE"],
+        "legs_hip": DCMotorCfg(
+            joint_names_expr=[".*hip_joint"],
             effort_limit=100.0,
             saturation_effort=100.0,
             velocity_limit=30.0,
@@ -72,8 +68,8 @@ ARCLAB_ARCDOG_CFG = ArticulationCfg(
             damping=0.5,
             friction=0.0,
         ),
-        "legs_aa": DCMotorCfg(
-            joint_names_expr=[".*AA"],
+        "legs_thigh": DCMotorCfg(
+            joint_names_expr=[".*thigh_joint"],
             effort_limit=100.0,
             saturation_effort=100.0,
             velocity_limit=30.0,
@@ -81,16 +77,16 @@ ARCLAB_ARCDOG_CFG = ArticulationCfg(
             damping=0.5,
             friction=0.0,
         ),
-        "extensions": DCMotorCfg(
-            joint_names_expr=[".*_box_joint"],  
-            effort_limit=200.0,
-            saturation_effort=200.0,
-            velocity_limit=0.05,
-            stiffness=10000.0,
-            damping=200.0,
+        "legs_calf": DCMotorCfg(
+            joint_names_expr=[".*_calf_joint"],  
+            effort_limit=100.0,
+            saturation_effort=100.0,
+            velocity_limit=30.0,
+            stiffness=20.0,
+            damping=0.5,
             friction=0.0,
         ),
     },
 )
-"""Configuration of Unitree A1 using DC motor.
+"""Configuration of Sirius using DC motor.
 """
