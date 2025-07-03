@@ -76,7 +76,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
-        self.actions.joint_pos.clip = {".*": (-45.0, 45.0)}
+        self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names
 
         # ------------------------------Events------------------------------
@@ -99,8 +99,8 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = -3.5
-        self.rewards.base_height_l2.weight = -2.5
-        self.rewards.base_height_l2.params["target_height"] = 0.45
+        self.rewards.base_height_l2.weight = -3.5
+        self.rewards.base_height_l2.params["target_height"] = 0.52
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -154,6 +154,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
+        self.rewards.feet_air_time.params["mode_time"] = 0.32
         self.rewards.feet_contact.weight = 0.5
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
@@ -177,7 +178,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.foot_link_name
         ]  
         self.rewards.feet_height_body_exp.weight = 2.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.42
+        self.rewards.feet_height_body_exp.params["target_height"] = -0.38
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
