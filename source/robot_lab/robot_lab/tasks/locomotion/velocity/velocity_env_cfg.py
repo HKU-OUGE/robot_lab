@@ -34,8 +34,8 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 # Pre-defined configs
 ##
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-from isaaclab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
-from isaaclab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
+# from isaaclab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
+# from isaaclab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
 
 
 ##
@@ -52,8 +52,8 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         # terrain_generator=SLOPE_TERRAINS_CFG,
-        # terrain_generator=ROUGH_TERRAINS_CFG,
-        terrain_generator=NOISE_TERRAINS_CFG,
+        terrain_generator=ROUGH_TERRAINS_CFG,
+        # terrain_generator=NOISE_TERRAINS_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -129,8 +129,8 @@ class CommandsCfg:
         heading_control_stiffness=0.5,
         debug_vis=True,
         ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            # lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
-            lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)
+            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+            # lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)
         ),
     )
 
