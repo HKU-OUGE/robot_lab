@@ -15,10 +15,10 @@ class AMPLoader:
     ROT_SIZE = 4  # base rot
     LINEAR_VEL_SIZE = 3  # base v
     ANGULAR_VEL_SIZE = 3  # base omega
-    JOINT_POS_SIZE = 16  # joint theta
-    JOINT_VEL_SIZE = 16  # joint dtheta
-    TAR_TOE_POS_LOCAL_SIZE = 16  # foot pos
-    TAR_TOE_VEL_LOCAL_SIZE = 16  # foot v
+    JOINT_POS_SIZE = 12  # joint theta
+    JOINT_VEL_SIZE = 12  # joint dtheta
+    TAR_TOE_POS_LOCAL_SIZE = 12  # foot pos
+    TAR_TOE_VEL_LOCAL_SIZE = 12  # foot v
 
     ROOT_POS_START_IDX = 0
     ROOT_POS_END_IDX = ROOT_POS_START_IDX + POS_SIZE

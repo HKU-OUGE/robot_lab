@@ -13,3 +13,8 @@
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/mdp/__pycache__
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/__pycache__
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/__pycache__
+/.vscode
+*.log
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/__pycache__
+/source/robot_lab/robot_lab/terrains/config/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/__pycache__

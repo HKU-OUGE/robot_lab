@@ -33,9 +33,9 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 ##
 # Pre-defined configs
 ##
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-# from isaaclab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
-# from isaaclab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
 
 
 ##
@@ -267,7 +267,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=""),
-            "mass_distribution_params": (-1.0, 1.0),             #过大会导致算出负数质量
+            "mass_distribution_params": (0.0, 0.00001),             #过大会导致算出负数质量
             "operation": "add",
         },
     )
