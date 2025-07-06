@@ -19,18 +19,24 @@ from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_CFG  # isort: skip
 @configclass
 class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     base_link_name = "base"
-    trunk_link_name = "unitree_imu"
-    hip_link_name = "difference.*"
-    knee_link_name = "shank.*"
-    abad_link_name = "thigh.*"
-    foot_link_name = ".*_FOOT"
+    trunk_link_name = "trunk"
+    hip_link_name = ".*_hip"
+    knee_link_name = ".*_calf"
+    abad_link_name = ".*_thigh"
+    foot_link_name = ".*_foot"
 
     # fmt: off
+    # joint_names = [
+    #     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+    #     "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+    #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+    # ]
     joint_names = [
-        "LF_HAA", "LF_HFE", "LF_KFE",
-        "LH_HAA", "LH_HFE", "LH_KFE",
-        "RF_HAA", "RF_HFE", "RF_KFE",
-        "RH_HAA", "RH_HFE", "RH_KFE",
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
     ]
     # fmt: on
 
@@ -185,8 +191,8 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 5.0
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
-            ("LF_FOOT", "RH_FOOT"),
-            ("LH_FOOT", "RF_FOOT"),
+            ("FL_foot", "RR_foot"),
+            ("FR_foot", "RL_foot"),
         )
         # pronking
         # self.rewards.feet_gait.params["synced_feet_pair_names"] = (

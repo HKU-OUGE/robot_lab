@@ -12,6 +12,7 @@ from isaaclab.managers import ManagerTermBase
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.utils.math import quat_apply_inverse
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -370,10 +371,16 @@ def feet_height_body_exp(
     ].unsqueeze(1)
     footvel_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
     for i in range(len(asset_cfg.body_ids)):
-        footpos_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
+        # footpos_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
+        #     asset.data.root_quat_w, cur_footpos_translated[:, i, :]
+        # )
+        footpos_in_body_frame[:, i, :] = quat_apply_inverse(
             asset.data.root_quat_w, cur_footpos_translated[:, i, :]
         )
-        footvel_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
+        # footvel_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
+        #     asset.data.root_quat_w, cur_footvel_translated[:, i, :]
+        # )
+        footvel_in_body_frame[:, i, :] = quat_apply_inverse(
             asset.data.root_quat_w, cur_footvel_translated[:, i, :]
         )
     height_error = torch.square(footpos_in_body_frame[:, :, 2] - target_height).view(env.num_envs, -1)

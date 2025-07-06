@@ -24,7 +24,7 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 
 CUHKLRL_SIRIUS_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_v3_modified/sirius.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius/sirius.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -42,25 +42,25 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.55),
         joint_pos={
-            "LF_HAA": 0.01,
-            "LH_HAA": 0.01,
-            "RF_HAA": -0.01,
-            "RH_HAA": -0.01,
-            "LF_HFE": 0.720,
-            "LH_HFE": -0.720,
-            "RF_HFE": 0.720,
-            "RH_HFE": -0.720,
-            "LF_KFE": -1.84,
-            "LH_KFE": 1.84,
-            "RF_KFE": -1.84,
-            "RH_KFE": 1.84,
+            "FL_hip_joint": 0.00,
+            "FR_hip_joint": 0.00,
+            "RL_hip_joint": -0.00,
+            "RR_hip_joint": -0.00,
+            "FL_thigh_joint": 0.67,
+            "FR_thigh_joint": 0.67,
+            "RL_thigh_joint": -0.67,
+            "RR_thigh_joint": -0.67,
+            "FL_calf_joint": -1.3,
+            "FR_calf_joint": -1.3,
+            "RL_calf_joint": 1.3,
+            "RR_calf_joint": 1.3,
         },
         joint_vel={".*": 0.0},
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
         "legs_hip": DCMotorCfg(
-            joint_names_expr=[".*HAA"],
+            joint_names_expr=[".*hip_joint"],
             effort_limit=35.0,
             saturation_effort=50.0,
             velocity_limit=45.0,
@@ -69,7 +69,7 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
             friction=0.0,
         ),
         "legs_thigh": DCMotorCfg(
-            joint_names_expr=[".*HFE"],
+            joint_names_expr=[".*thigh_joint"],
             effort_limit=35.0,
             saturation_effort=50.0,
             velocity_limit=45.0,
@@ -78,7 +78,7 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
             friction=0.0,
         ),
         "legs_calf": DCMotorCfg(
-            joint_names_expr=[".*KFE"],  
+            joint_names_expr=[".*calf_joint"],  
             effort_limit=80.0,
             saturation_effort=100.0,
             velocity_limit=45.0,

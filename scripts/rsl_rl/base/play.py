@@ -15,6 +15,8 @@ import os
 import sys
 
 from isaaclab.app import AppLauncher
+from isaaclab.utils.dict import print_dict
+# import json
 
 # local imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -76,6 +78,10 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
+    print("\n==== [env_cfg 配置结构] ====\n")
+    print_dict(env_cfg.to_dict(), nesting=4)
+    # with open("env_cfg_debug.json", "w") as f:
+    #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # make a smaller scene for play
