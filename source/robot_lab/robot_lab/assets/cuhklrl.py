@@ -88,5 +88,85 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
         ),
     },
 )
+
+CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel.usd",
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=True,
+            linear_damping=0.0,
+            angular_damping=0.05,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=2.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.55),
+        joint_pos={
+            "LF_HAA": 0.00,
+            "LH_HAA": 0.00,
+            "RF_HAA": -0.00,
+            "RH_HAA": -0.00,
+            "LF_HFE": 0.67,
+            "LH_HFE": -0.67,
+            "RF_HFE": 0.67,
+            "RH_HFE": -0.67,
+            "LF_KFE": -1.3,
+            "LH_KFE": 1.3,
+            "RF_KFE": -1.3,
+            "RH_KFE": 1.3,
+            "LF_WHEEL": 0.00,
+            "LH_WHEEL": 0.00,
+            "RF_WHEEL": 0.00,
+            "RH_WHEEL": 0.00,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "legs_hip": DCMotorCfg(
+            joint_names_expr=[".*_HAA"],
+            effort_limit=35.0,
+            saturation_effort=50.0,
+            velocity_limit=45.0,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
+        ),
+        "legs_thigh": DCMotorCfg(
+            joint_names_expr=[".*_HFE"],
+            effort_limit=35.0,
+            saturation_effort=50.0,
+            velocity_limit=45.0,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
+        ),
+        "legs_calf": DCMotorCfg(
+            joint_names_expr=[".*_KFE"],  
+            effort_limit=80.0,
+            saturation_effort=100.0,
+            velocity_limit=45.0,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
+        ),
+        "legs_wheel": DCMotorCfg(
+            joint_names_expr=[".*_WHEEL"],  
+            effort_limit=80.0,
+            saturation_effort=100.0,
+            velocity_limit=45.0,
+            stiffness=0.0,
+            damping=0.5,
+            friction=0.0,
+        ),
+    },
+)
 """Configuration of Sirius using DC motor.
 """
