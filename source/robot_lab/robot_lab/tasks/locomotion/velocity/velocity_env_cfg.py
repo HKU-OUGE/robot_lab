@@ -51,8 +51,8 @@ class MySceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        # terrain_generator=SLOPE_TERRAINS_CFG,
-        terrain_generator=ROUGH_TERRAINS_CFG,
+        terrain_generator=SLOPE_TERRAINS_CFG,
+        # terrain_generator=ROUGH_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
@@ -69,6 +69,7 @@ class MySceneCfg(InteractiveSceneCfg):
         ),
         debug_vis=False,
     )
+
     # robots
     robot: ArticulationCfg = MISSING
     # sensors
@@ -693,12 +694,29 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
+        # if getattr(self.curriculum, "terrain_levels", None) is not None:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = True
+        # else:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = False
+        # Check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
+        # This generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
-            if self.scene.terrain.terrain_generator is not None:
-                self.scene.terrain.terrain_generator.curriculum = True
+            # Check if terrain type is 'usd'
+            if self.scene.terrain.terrain_type == "usd":
+                # For USD terrain, return False and skip terrain generator curriculum
+                print("Skipping terrain generator curriculum for USD terrain.")
+                self.scene.terrain.terrain_generator.curriculum = False  # or handle it as needed
+            else:
+                # Only enable curriculum if terrain generator is available for other terrain types
+                if self.scene.terrain.terrain_generator is not None:
+                    self.scene.terrain.terrain_generator.curriculum = True
         else:
+            # Handle the case when terrain generator curriculum is not enabled
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
 
     def disable_zero_weight_rewards(self):
         """If the weight of rewards is 0, set rewards to None"""
