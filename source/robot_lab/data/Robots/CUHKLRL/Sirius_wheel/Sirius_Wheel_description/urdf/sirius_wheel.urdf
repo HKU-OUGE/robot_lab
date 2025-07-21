@@ -193,6 +193,14 @@
   <!--            </plugin>-->
   <!--        </visual>-->
   <!--    </gazebo>-->
+  <link name="base"/>
+
+  <joint name="base_joint" type="fixed">
+    <parent link="base"/>
+    <child link="trunk"/>
+    <origin rpy="0 -1.57 0" xyz="0 0 0"/>
+  </joint>
+
   <gazebo reference="trunk">
     <mu1>0.6</mu1>
     <mu2>0.6</mu2>

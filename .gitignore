@@ -29,3 +29,4 @@ env_cfg_debug.json
 /source/robot_lab/robot_lab.egg-info
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/__pycache__
 /source/robot_lab/robot_lab.egg-info
+*.pyc
