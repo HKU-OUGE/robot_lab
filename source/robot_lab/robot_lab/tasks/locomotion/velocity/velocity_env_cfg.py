@@ -341,26 +341,15 @@ class EventCfg:
     randomize_reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
-        # params={
-        #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-        #     "velocity_range": {
-        #         "x": (-0.5, 0.5),
-        #         "y": (-0.5, 0.5),
-        #         "z": (-0.5, 0.5),
-        #         "roll": (-0.5, 0.5),
-        #         "pitch": (-0.5, 0.5),
-        #         "yaw": (-0.5, 0.5),
-        #     },
-        # },
         params={
-            "pose_range": {"x": (-5.0, 0.0), "y": (0.0, 0.0), "yaw": (0.0, 0.0)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         },
     )
@@ -380,6 +369,7 @@ class RewardsCfg:
 
     # General
     # UNUESD is_alive
+    is_alive = RewTerm(func=mdp.is_alive, weight=0.0)
     is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
 
     # Root penalties
