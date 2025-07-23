@@ -49,7 +49,12 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from isaaclab.utils.math import quat_rotate
+try:
+    from isaaclab.utils.math import quat_apply
+except ImportError:
+    from isaaclab.utils.math import quat_rotate as quat_apply  # fallback
+
+
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 from isaaclab_tasks.utils import parse_env_cfg
 
@@ -109,10 +114,10 @@ def main():
                 frames = env.unwrapped.amp_loader.get_full_frame_at_time_batch(np.array([traj_idx]), np.array([t]))
                 positions = env.unwrapped.amp_loader.get_root_pos_batch(frames)
                 orientations = env.unwrapped.amp_loader.get_root_rot_batch(frames)  # xyzw
-                # Func quat_rotate() and Isaacsim/IsaacLab all need wxyz
+                # Func quat_apply() and Isaacsim/IsaacLab all need wxyz
                 orientations = torch.cat((orientations[:, -1].unsqueeze(1), orientations[:, :-1]), dim=1)
-                lin_vel = quat_rotate(orientations, env.unwrapped.amp_loader.get_linear_vel_batch(frames))
-                ang_vel = quat_rotate(orientations, env.unwrapped.amp_loader.get_angular_vel_batch(frames))
+                lin_vel = quat_apply(orientations, env.unwrapped.amp_loader.get_linear_vel_batch(frames))
+                ang_vel = quat_apply(orientations, env.unwrapped.amp_loader.get_angular_vel_batch(frames))
                 velocities = torch.cat([lin_vel, ang_vel], dim=-1)
                 env.unwrapped.robot.write_root_pose_to_sim(
                     torch.cat([positions, orientations], dim=-1), env_ids=env_ids
