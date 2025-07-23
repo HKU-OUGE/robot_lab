@@ -36,6 +36,7 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 from robot_lab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
 from robot_lab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
 from robot_lab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import STAIR_TERRAINS_CFG  # isort: skip
 
 
 ##
@@ -51,8 +52,8 @@ class MySceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        terrain_generator=SLOPE_TERRAINS_CFG,
-        # terrain_generator=ROUGH_TERRAINS_CFG,
+        # terrain_generator=SLOPE_TERRAINS_CFG,
+        terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
@@ -78,7 +79,7 @@ class MySceneCfg(InteractiveSceneCfg):
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         attach_yaw_only=True,
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     height_scanner_base = RayCasterCfg(
@@ -666,7 +667,7 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 20.0
+        self.episode_length_s = 7
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation

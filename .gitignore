@@ -30,3 +30,5 @@ env_cfg_debug.json
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/quadruped/Sirius/__pycache__
 /source/robot_lab/robot_lab.egg-info
 *.pyc
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/agents/__pycache__
