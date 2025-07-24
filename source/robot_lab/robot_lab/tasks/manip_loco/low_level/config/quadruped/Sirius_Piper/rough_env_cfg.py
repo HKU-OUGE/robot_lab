@@ -25,6 +25,7 @@ class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
     knee_link_name = ".*_calf"
     abad_link_name = ".*_thigh"
     foot_link_name = ".*_foot"
+    gripper_base_link_name="gripper_base"
 
     # fmt: off
     # joint_names = [
@@ -38,6 +39,20 @@ class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
         "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+    ]
+
+    joint_names_arm = [
+        "joint1", "joint2", "joint3", 
+        "joint4", "joint5", "joint6", 
+        "joint7", "joint8",
+    ]
+
+    joint_names_full = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+        "joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7", "joint8",
     ]
     # fmt: on
 
@@ -153,7 +168,7 @@ class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
         ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 6.0
+        self.rewards.track_lin_vel_xy_exp.weight = 8.0
         self.rewards.track_ang_vel_z_exp.weight = 6.0
 
         # Others
@@ -178,9 +193,16 @@ class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
         self.rewards.joint_power.weight = -2e-5
         self.rewards.stand_still_without_cmd.weight = 0.1
         self.rewards.joint_position_penalty.weight = -0.1
+        self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = (
+            self.joint_names
+        )
+        self.rewards.arm_joint_position_penalty.weight = -0.1
+        self.rewards.arm_joint_position_penalty.params["asset_cfg"].joint_names = (
+            self.joint_names_arm
+        )
         # self.rewards.joint_position_penalty.weight = 0.0
         self.rewards.feet_height_exp.weight = 4.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.20
+        self.rewards.feet_height_exp.params["target_height"] = 0.15
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]  
@@ -209,7 +231,7 @@ class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
             self.base_link_name,
             self.trunk_link_name,
             self.abad_link_name,
-            self.knee_link_name,
+            # self.knee_link_name,
             self.hip_link_name,
         ]
         # ------------------------------Commands------------------------------

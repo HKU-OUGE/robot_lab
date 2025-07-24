@@ -106,7 +106,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = -3.5
         self.rewards.base_height_l2.weight = -3.5
-        self.rewards.base_height_l2.params["target_height"] = 0.52
+        self.rewards.base_height_l2.params["target_height"] = 0.445
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -208,7 +208,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.base_link_name,
             self.trunk_link_name,
             self.abad_link_name,
-            self.knee_link_name,
-            self.hip_link_name,
+            # self.knee_link_name,
+            # self.hip_link_name,
         ]
         # ------------------------------Commands------------------------------

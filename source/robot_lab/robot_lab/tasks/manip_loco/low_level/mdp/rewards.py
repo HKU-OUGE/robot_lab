@@ -68,6 +68,25 @@ def joint_position_penalty(
     # return torch.sum(reward, dim=1)
 
 
+def arm_joint_position_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    stand_still_scale: float,
+) -> torch.Tensor:
+    """Penalize joint position error from default on the articulation."""
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    reward = stand_still_scale * torch.linalg.norm(
+        (asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]), dim=1
+    )
+    return reward
+    # * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 1)
+    # reward = torch.square(
+    #     asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    # )
+    # return torch.sum(reward, dim=1)
+
+
 class GaitReward(ManagerTermBase):
     """Gait enforcing reward term for quadrupeds.
 
@@ -418,3 +437,493 @@ def base_height_l2(
         adjusted_target_height = target_height
     # Compute the L2 squared penalty
     return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+
+
+
+def tracking_ee_sphere(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    error_scale: torch.Tensor,
+    target_spherical_pos: torch.Tensor,
+    sphere_center_cfg: SceneEntityCfg = SceneEntityCfg("target_entity"),
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    base_cfg: SceneEntityCfg = SceneEntityCfg("robot.base_link"),
+) -> torch.Tensor:
+    """Reward for tracking end-effector position in spherical coordinates.
+    
+    Computes an exponential reward based on the difference between current EE
+    position and target position in spherical coordinates relative to a center point.
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        error_scale: Scaling factors for [radial, polar, azimuthal] errors.
+        target_spherical_pos: Target position in spherical coordinates (r, θ, φ).
+        sphere_center_cfg: Configuration for the spherical coordinate center entity.
+        ee_cfg: Configuration for the end-effector entity.
+        base_cfg: Configuration for the base entity (for coordinate rotation).
+        
+    Returns:
+        The computed exponential tracking reward.
+    """
+    # Extract scene entities
+    ee_entity = env.scene[ee_cfg.name]
+    base_entity = env.scene[base_cfg.name]
+    center_entity = env.scene[sphere_center_cfg.name]
+    
+    # Get positions and orientations
+    ee_pos = ee_entity.data.pos_w  # [num_envs, 3]
+    center_pos = center_entity.data.pos_w  # [num_envs, 3]
+    base_quat = base_entity.data.quat_w  # [num_envs, 4]
+    
+    # Compute vector from center to EE
+    center_to_ee = ee_pos - center_pos  # [num_envs, 3]
+    
+    # Rotate vector to base frame (ignoring base yaw)
+    center_to_ee_local = quat_rotate_inverse(base_quat, center_to_ee)
+    
+    # Convert Cartesian to spherical coordinates
+    r, theta, phi = cartesian_to_spherical(center_to_ee_local)
+    current_spherical = torch.stack([r, theta, phi], dim=-1)  # [num_envs, 3]
+    
+    # Compute absolute errors in each spherical component
+    abs_errors = torch.abs(current_spherical - target_spherical_pos.to(ee_pos.device))
+    
+    # Scale errors by component-specific factors
+    scaled_errors = abs_errors * error_scale.to(ee_pos.device)
+    
+    # Sum errors across components
+    total_error = torch.sum(scaled_errors, dim=-1)  # [num_envs]
+    
+    # Exponential reward based on total error
+    return torch.exp(-total_error / tracking_sigma)
+
+
+def tracking_ee_world(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    target_position: torch.Tensor,
+    sigma_scale: float = 2.0,
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector position in Cartesian world coordinates.
+    
+    Computes an exponential reward based on the L1 distance between current EE
+    position and target position in world coordinates.
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        target_position: Target position in world coordinates [x, y, z].
+        sigma_scale: Scaling factor applied to tracking_sigma (default=2.0).
+        ee_cfg: Configuration for the end-effector entity.
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed exponential tracking reward, or (reward, error) if return_error=True.
+    """
+    # Extract end-effector entity
+    ee_entity: RigidObject = env.scene[ee_cfg.name]
+    # ee_entity = env.scene[ee_cfg.name]
+    
+    # Get current end-effector position
+    ee_pos = ee_entity.data.body_pos_w  # [num_envs, 3]
+    
+    # Ensure target position has correct shape
+    if target_position.ndim == 1:
+        target_position = target_position.unsqueeze(0).repeat(ee_pos.shape[0], 1)
+    
+    # Move target to same device as ee_pos
+    target_position = target_position.to(ee_pos.device)
+    
+    # Compute L1 position error (absolute difference per axis, summed)
+    ee_pos_error = torch.sum(torch.abs(ee_pos - target_position), dim=1)
+    
+    # Compute exponential reward
+    adjusted_sigma = tracking_sigma * sigma_scale
+    reward = torch.exp(-ee_pos_error / adjusted_sigma)
+    
+    # Return based on flag
+    if return_error:
+        return reward, ee_pos_error
+    return reward
+
+
+def tracking_ee_sphere_walking(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    error_scale: torch.Tensor,
+    target_spherical_pos: torch.Tensor,
+    walking_cmd_entity_cfg: SceneEntityCfg = SceneEntityCfg("command"),
+    sphere_center_cfg: SceneEntityCfg = SceneEntityCfg("target_entity"),
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    base_cfg: SceneEntityCfg = SceneEntityCfg("robot.base_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector position in spherical coordinates during walking.
+    
+    Computes an exponential reward based on EE position tracking, but only applied
+    when the robot is in walking mode (as determined by the walking command entity).
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        error_scale: Scaling factors for [radial, polar, azimuthal] errors.
+        target_spherical_pos: Target position in spherical coordinates (r, θ, φ).
+        walking_cmd_entity_cfg: Entity that provides walking command mask.
+        sphere_center_cfg: Configuration for the spherical coordinate center entity.
+        ee_cfg: Configuration for the end-effector entity.
+        base_cfg: Configuration for the base entity (for coordinate rotation).
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed tracking reward (masked by walking state), or (reward, error) if return_error=True.
+    """
+    # Extract scene entities
+    ee_entity = env.scene[ee_cfg.name]
+    base_entity = env.scene[base_cfg.name]
+    center_entity = env.scene[sphere_center_cfg.name]
+    cmd_entity = env.scene[walking_cmd_entity_cfg.name]
+    
+    # Get positions and orientations
+    ee_pos = ee_entity.data.pos_w
+    center_pos = center_entity.data.pos_w
+    base_quat = base_entity.data.quat_w
+    
+    # Compute vector from center to EE and rotate to base frame
+    center_to_ee = ee_pos - center_pos
+    center_to_ee_local = math_utils.quat_rotate_inverse(base_quat, center_to_ee)
+    
+    # Convert Cartesian to spherical coordinates
+    r, theta, phi = math_utils.cartesian_to_spherical(center_to_ee_local)
+    current_spherical = torch.stack([r, theta, phi], dim=-1)
+    
+    # Compute absolute errors and scale
+    abs_errors = torch.abs(current_spherical - target_spherical_pos.to(ee_pos.device))
+    scaled_errors = abs_errors * error_scale.to(ee_pos.device)
+    total_error = torch.sum(scaled_errors, dim=-1)
+    
+    # Compute exponential reward
+    reward = torch.exp(-total_error / tracking_sigma)
+    
+    # Apply walking mask - assume cmd_entity has a 'mask' attribute
+    # This could be a binary mask or a probability mask
+    if hasattr(cmd_entity.data, 'mask'):
+        walking_mask = cmd_entity.data.mask
+    else:
+        # Fallback: check if the command is non-zero
+        walking_mask = torch.norm(cmd_entity.data.command[:, :2], dim=1) > 0.1
+    
+    # Apply mask to reward and error
+    reward = reward * walking_mask
+    total_error = total_error * walking_mask
+    
+    # Return based on flag
+    if return_error:
+        return reward, total_error
+    return reward
+
+def tracking_ee_sphere_standing(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    error_scale: torch.Tensor,
+    target_spherical_pos: torch.Tensor,
+    walking_cmd_entity_cfg: SceneEntityCfg = SceneEntityCfg("command"),
+    sphere_center_cfg: SceneEntityCfg = SceneEntityCfg("target_entity"),
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    base_cfg: SceneEntityCfg = SceneEntityCfg("robot.base_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector position in spherical coordinates during standing.
+    
+    Computes an exponential reward based on EE position tracking, but only applied
+    when the robot is in standing mode (not walking).
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        error_scale: Scaling factors for [radial, polar, azimuthal] errors.
+        target_spherical_pos: Target position in spherical coordinates (r, θ, φ).
+        walking_cmd_entity_cfg: Entity that provides walking command mask.
+        sphere_center_cfg: Configuration for the spherical coordinate center entity.
+        ee_cfg: Configuration for the end-effector entity.
+        base_cfg: Configuration for the base entity (for coordinate rotation).
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed tracking reward (masked by standing state), or (reward, error) if return_error=True.
+    """
+    # Extract scene entities
+    ee_entity = env.scene[ee_cfg.name]
+    base_entity = env.scene[base_cfg.name]
+    center_entity = env.scene[sphere_center_cfg.name]
+    cmd_entity = env.scene[walking_cmd_entity_cfg.name]
+    
+    # Get positions and orientations
+    ee_pos = ee_entity.data.pos_w
+    center_pos = center_entity.data.pos_w
+    base_quat = base_entity.data.quat_w
+    
+    # Compute vector from center to EE and rotate to base frame
+    center_to_ee = ee_pos - center_pos
+    center_to_ee_local = math_utils.quat_rotate_inverse(base_quat, center_to_ee)
+    
+    # Convert Cartesian to spherical coordinates
+    r, theta, phi = math_utils.cartesian_to_spherical(center_to_ee_local)
+    current_spherical = torch.stack([r, theta, phi], dim=-1)
+    
+    # Compute absolute errors and scale
+    abs_errors = torch.abs(current_spherical - target_spherical_pos.to(ee_pos.device))
+    scaled_errors = abs_errors * error_scale.to(ee_pos.device)
+    total_error = torch.sum(scaled_errors, dim=-1)
+    
+    # Compute exponential reward
+    reward = torch.exp(-total_error / tracking_sigma)
+    
+    # Get walking mask and create standing mask (inverse)
+    if hasattr(cmd_entity.data, 'mask'):
+        walking_mask = cmd_entity.data.mask
+    else:
+        # Fallback: check if the command is non-zero
+        walking_mask = torch.norm(cmd_entity.data.command[:, :2], dim=1) > 0.1
+    
+    standing_mask = ~walking_mask
+    
+    # Apply standing mask to reward and error
+    reward = reward * standing_mask
+    total_error = total_error * standing_mask
+    
+    # Return based on flag
+    if return_error:
+        return reward, total_error
+    return reward
+
+
+def tracking_ee_cartesian(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    base_quat: torch.Tensor,  # 基座朝向四元数
+    spherical_center: torch.Tensor,  # 球坐标中心点
+    cartesian_offset: torch.Tensor,  # 局部笛卡尔偏移量
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector position in Cartesian coordinates relative to a base frame.
+    
+    Computes the target position by:
+        1. Applying base rotation to the cartesian offset
+        2. Adding to the spherical center position
+    Then computes L1 error between current EE position and this target.
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        base_quat: Base orientation quaternion [w, x, y, z] - [num_envs, 4]
+        spherical_center: Center point in world coordinates - [num_envs, 3]
+        cartesian_offset: Local Cartesian offset relative to base frame - [num_envs, 3]
+        ee_cfg: Configuration for the end-effector entity.
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed exponential tracking reward, or (reward, error) if return_error=True.
+    """
+    # Extract end-effector entity
+    ee_entity = env.scene[ee_cfg.name]
+    ee_pos = ee_entity.data.pos_w  # [num_envs, 3]
+    
+    # Ensure inputs have correct shape and device
+    base_quat = base_quat.to(ee_pos.device)
+    spherical_center = spherical_center.to(ee_pos.device)
+    cartesian_offset = cartesian_offset.to(ee_pos.device)
+    
+    # Apply base rotation to cartesian offset
+    rotated_offset = math_utils.quat_apply(base_quat, cartesian_offset)
+    
+    # Compute target position in world frame
+    target_ee = spherical_center + rotated_offset
+    
+    # Compute L1 position error
+    ee_pos_error = torch.sum(torch.abs(ee_pos - target_ee), dim=1)
+    
+    # Compute exponential reward
+    reward = torch.exp(-ee_pos_error / tracking_sigma)
+    
+    # Return based on flag
+    if return_error:
+        return reward, ee_pos_error
+    return reward
+
+
+def tracking_ee_orientation(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    target_euler: torch.Tensor,
+    error_scale: torch.Tensor = None,
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector orientation.
+    
+    Computes an exponential reward based on the difference between current EE
+    orientation and target orientation in Euler angles.
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        target_euler: Target orientation in Euler angles (roll, pitch, yaw) [radians].
+        error_scale: Scaling factors for each Euler angle component (default=[1.0, 1.0, 1.0]).
+        ee_cfg: Configuration for the end-effector entity.
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed exponential tracking reward, or (reward, error) if return_error=True.
+    """
+    # Extract end-effector entity
+    ee_entity = env.scene[ee_cfg.name]
+    
+    # Get current end-effector orientation (quaternion)
+    ee_quat = ee_entity.data.quat_w  # [num_envs, 4] (w, x, y, z)
+    
+    # Convert current orientation to Euler angles
+    ee_euler = math_utils.quat_to_euler_angles(ee_quat, convention="XYZ")  # [num_envs, 3]
+    
+    # Ensure target_euler has correct shape
+    if target_euler.ndim == 1:
+        target_euler = target_euler.unsqueeze(0).repeat(ee_euler.shape[0], 1)
+    target_euler = target_euler.to(ee_euler.device)
+    
+    # Set default error scaling
+    if error_scale is None:
+        error_scale = torch.tensor([1.0, 1.0, 1.0])
+    if error_scale.ndim == 1:
+        error_scale = error_scale.unsqueeze(0).repeat(ee_euler.shape[0], 1)
+    error_scale = error_scale.to(ee_euler.device)
+    
+    # Compute angular differences with wrapping to [-π, π]
+    angular_diff = ee_euler - target_euler
+    
+    # Wrap angles to [-π, π]
+    angular_diff_wrapped = math_utils.wrap_to_pi_minuspi(angular_diff)
+    
+    # Compute absolute errors and scale
+    abs_errors = torch.abs(angular_diff_wrapped)
+    scaled_errors = abs_errors * error_scale
+    total_error = torch.sum(scaled_errors, dim=1)
+    
+    # Compute exponential reward
+    reward = torch.exp(-total_error / tracking_sigma)
+    
+    # Return based on flag
+    if return_error:
+        return reward, total_error
+    return reward
+
+
+def arm_energy_abs_sum(
+    env: ManagerBasedRLEnv,
+    arm_joint_cfg: SceneEntityCfg = SceneEntityCfg("robot.arm_joints"),
+    gripper_joint_cfg: SceneEntityCfg = SceneEntityCfg("robot.gripper_joints"),
+    return_energy: bool = False,
+) -> torch.Tensor:
+    """Penalty for absolute mechanical energy consumption of the arm joints.
+    
+    Computes the instantaneous absolute power consumption for each arm joint as:
+        power = |torque * velocity|
+    Then sums over all arm joints.
+    
+    Note: This excludes gripper joints and any other non-arm joints.
+    
+    Args:
+        env: The environment instance.
+        arm_joint_cfg: Configuration for the arm joints.
+        gripper_joint_cfg: Configuration for the gripper joints (to exclude).
+        return_energy: If True, returns a tuple (penalty, energy); otherwise only penalty.
+        
+    Returns:
+        The computed energy penalty (sum of absolute joint powers), 
+        or (penalty, energy) if return_energy=True.
+    """
+    # Extract joint entities
+    arm_joints = env.scene[arm_joint_cfg.name]
+    gripper_joints = env.scene[gripper_joint_cfg.name]
+    
+    # Get joint torques and velocities for ARM joints only
+    # Note: We assume arm_joints contains ONLY the joints we want to consider
+    arm_torques = arm_joints.data.applied_torque
+    arm_velocities = arm_joints.data.joint_vel
+    
+    # Compute instantaneous power for each joint: |torque * velocity|
+    joint_power = torch.abs(arm_torques * arm_velocities)
+    
+    # Sum power across all arm joints
+    total_power = torch.sum(joint_power, dim=1)
+    
+    # Return based on flag
+    if return_energy:
+        return total_power, total_power
+    return total_power
+
+def tracking_ee_orientation_roll_yaw(
+    env: ManagerBasedRLEnv,
+    tracking_sigma: float,
+    target_euler: torch.Tensor,
+    error_scale: torch.Tensor = None,
+    ee_cfg: SceneEntityCfg = SceneEntityCfg("robot.ee_link"),
+    return_error: bool = False,
+) -> torch.Tensor:
+    """Reward for tracking end-effector roll and yaw orientation.
+    
+    Computes an exponential reward based on the difference between current EE
+    orientation and target orientation in Euler angles, considering only roll and yaw.
+    
+    Args:
+        env: The environment instance.
+        tracking_sigma: Controls the decay rate of the exponential reward.
+        target_euler: Target orientation in Euler angles (roll, pitch, yaw) [radians].
+        error_scale: Scaling factors for each Euler angle component (default=[1.0, 0.0, 1.0]).
+        ee_cfg: Configuration for the end-effector entity.
+        return_error: If True, returns a tuple (reward, error); otherwise only reward.
+        
+    Returns:
+        The computed exponential tracking reward, or (reward, error) if return_error=True.
+    """
+    # Extract end-effector entity
+    ee_entity = env.scene[ee_cfg.name]
+    
+    # Get current end-effector orientation (quaternion)
+    ee_quat = ee_entity.data.quat_w  # [num_envs, 4] (w, x, y, z)
+    
+    # Convert current orientation to Euler angles
+    ee_euler = math_utils.quat_to_euler_angles(ee_quat, convention="XYZ")  # [num_envs, 3]
+    
+    # Ensure target_euler has correct shape
+    if target_euler.ndim == 1:
+        target_euler = target_euler.unsqueeze(0).repeat(ee_euler.shape[0], 1)
+    target_euler = target_euler.to(ee_euler.device)
+    
+    # Set default error scaling (only roll and yaw)
+    if error_scale is None:
+        error_scale = torch.tensor([1.0, 0.0, 1.0])  # 默认只考虑滚转和偏航
+    if error_scale.ndim == 1:
+        error_scale = error_scale.unsqueeze(0).repeat(ee_euler.shape[0], 1)
+    error_scale = error_scale.to(ee_euler.device)
+    
+    # Compute angular differences with wrapping to [-π, π]
+    angular_diff = ee_euler - target_euler
+    angular_diff_wrapped = math_utils.wrap_to_pi_minuspi(angular_diff)
+    
+    # Apply error scaling and select only roll (index 0) and yaw (index 2)
+    scaled_errors = torch.abs(angular_diff_wrapped) * error_scale
+    roll_yaw_errors = scaled_errors[:, [0, 2]]  # 只取滚转和偏航分量
+    
+    # Compute total error for roll and yaw
+    total_error = torch.sum(roll_yaw_errors, dim=1)
+    
+    # Compute exponential reward
+    reward = torch.exp(-total_error / tracking_sigma)
+    
+    # Return based on flag
+    if return_error:
+        return reward, total_error
+    return reward
