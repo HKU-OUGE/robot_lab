@@ -3,8 +3,11 @@
 
 from isaaclab.utils import configclass
 from isaaclab.managers import RewardTermCfg as RewTerm
-from robot_lab.tasks.manip_loco.low_level.low_level_env_cfg import(
-    LowLevelEnvCfg
+# from robot_lab.tasks.manip_loco.low_level.low_level_env_cfg import(
+#     LowLevelEnvCfg
+# )
+from robot_lab.tasks.manip_loco.low_level.wbc_env_cfg import(
+    LocomotionVelocityRoughEnvCfg
 )
 
 ##
@@ -18,220 +21,37 @@ from robot_lab.assets.arclab_atec import ARCLAB_ATEC_CFG
 
 
 @configclass
-class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelEnvCfg):
-    base_link_name = "base"
-    trunk_link_name = "trunk"
-    hip_link_name = ".*_hip"
-    knee_link_name = ".*_calf"
-    abad_link_name = ".*_thigh"
-    foot_link_name = ".*_foot"
-    gripper_base_link_name="gripper_base"
-
-    # fmt: off
-    # joint_names = [
-    #     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-    #     "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-    #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-    #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-    # ]
-    joint_names = [
-        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
-        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
-        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
-        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-    ]
-
-    joint_names_arm = [
-        "joint1", "joint2", "joint3", 
-        "joint4", "joint5", "joint6", 
-        "joint7", "joint8",
-    ]
-
-    joint_names_full = [
-        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
-        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
-        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
-        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        "joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7", "joint8",
-    ]
-    # fmt: on
-
+class CUHKLRLSiriusPiperRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
-        # ------------------------------Sence------------------------------
-        # switch robot to unitree a1
         self.scene.robot = ARCLAB_ATEC_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.height_scanner.prim_path = (
-            "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        )
-        self.scene.height_scanner_base.prim_path = (
-            "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        )
-        # # scale down the terrains because the robot is small
-        # self.scene.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (
-        #     0.025,
-        #     0.1,
-        # )
-        # self.scene.terrain.terrain_generator.sub_terrains[
-        #     "random_rough"
-        # ].noise_range = (0.01, 0.06)
-        # self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_step = (
-        #     0.01
-        # )
+        # # event
+        self.events.push_robot = None #type :ignore
 
-        # ------------------------------Observations------------------------------
-        self.observations.policy.base_lin_vel.scale = 2.0
-        self.observations.policy.base_ang_vel.scale = 0.25
-        self.observations.policy.joint_pos.scale = 1.0
-        self.observations.policy.joint_vel.scale = 0.05
-        self.observations.policy.base_lin_vel = None
-        self.observations.policy.height_scan = None
-        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = (
-            self.joint_names
-        )
-        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = (
-            self.joint_names
-        )
+        self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
 
-        # ------------------------------Actions------------------------------
-        # reduce action scale
-        self.actions.joint_pos.scale = 0.25
-        self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
-        self.actions.joint_pos.joint_names = self.joint_names
 
-        # ------------------------------Events------------------------------
-        self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [
-            self.base_link_name
-        ]
-        self.events.randomize_com_positions.params["asset_cfg"].body_names = [
-            self.base_link_name
-        ]
-        self.events.randomize_apply_external_force_torque.params[
-            "asset_cfg"
-        ].body_names = [self.base_link_name]
+@configclass
+class CUHKLRLSiriusPiperRoughEnvCfg_PLAY(CUHKLRLSiriusPiperRoughEnvCfg):
+    def __post_init__(self):
+        # post init of parent
+        super().__post_init__()
 
-        # ------------------------------Rewards------------------------------
-        # General
-        # UNUESD self.rewards.is_alive.weight = 0
-        self.rewards.is_terminated.weight = 0
+        # make a smaller scene for play
+        self.scene.num_envs = 50
+        self.scene.env_spacing = 2.5
+        # spawn the robot randomly in the grid (instead of their terrain levels)
+        self.scene.terrain.max_init_terrain_level = None
+        # reduce the number of terrains to save memory
+        if self.scene.terrain.terrain_generator is not None:
+            self.scene.terrain.terrain_generator.num_rows = 5
+            self.scene.terrain.terrain_generator.num_cols = 5
+            self.scene.terrain.terrain_generator.curriculum = False
 
-        # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -3.5
-        self.rewards.base_height_l2.weight = -3.5
-        self.rewards.base_height_l2.params["target_height"] = 0.50
-        self.rewards.base_height_l2.params["asset_cfg"].body_names = [
-            self.base_link_name
-        ]
-        self.rewards.body_lin_acc_l2.weight = 0
-        self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [
-            self.base_link_name
-        ]
-        # # 添加对 a_1, a_3, a_5, a_7 的目标关节角奖励，90度
-        # self.rewards.create_joint_deviation_l1_rewterm(
-        #     attr_name="knee_target_pose_l1",
-        #     weight=-1.0,
-        #     joint_names_pattern=["a_1", "a_3", "a_5", "a_7"]
-        # )
-
-        # Joint penaltie
-        # self.rewards.joint_torques_l2.weight = -2.5e-5
-        # 测试 暂时取消此惩罚
-        self.rewards.joint_torques_l2.weight = 0
-        # UNUESD self.rewards.joint_vel_l1.weight = 0.0
-        self.rewards.joint_vel_l2.weight = -0.005
-        self.rewards.joint_acc_l2.weight = -3.0e-8
-        # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_l1", 0, [""])
-        self.rewards.joint_pos_limits.weight = -5.0
-        # 禁止超速
-        self.rewards.joint_vel_limits.weight = -5.0
-
-        # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
-        # UNUESD self.rewards.action_l2.weight = 0.0
-
-        # Contact sensor
-        self.rewards.undesired_contacts.weight = -1.5
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*{self.foot_link_name}).*"
-        ]
-        # self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-        #     "body", "trunk", "hip.*", "upper.*", "lower.*"
-        # ]
-
-        self.rewards.contact_forces.weight = 0.0005
-        self.rewards.contact_forces.params["sensor_cfg"].body_names = [
-            self.foot_link_name
-        ]
-
-        # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 8.0
-        self.rewards.track_ang_vel_z_exp.weight = 6.0
-
-        # Others
-        self.rewards.feet_air_time.weight = 4.0
-        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [
-            self.foot_link_name
-        ]
-        self.rewards.feet_air_time.params["mode_time"] = 0.32
-        self.rewards.feet_contact.weight = 0.5
-        self.rewards.feet_contact.params["sensor_cfg"].body_names = [
-            self.foot_link_name
-        ]
-        self.rewards.feet_stumble.weight = -10.0
-        self.rewards.feet_stumble.params["sensor_cfg"].body_names = [
-            self.foot_link_name
-        ]
-        self.rewards.feet_slide.weight = -0.5
-        self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
-        # self.rewards.joint_power.weight = -2e-5
-        # 测试 暂时取消
-        self.rewards.joint_power.weight = -2e-5
-        self.rewards.stand_still_without_cmd.weight = 0.1
-        self.rewards.joint_position_penalty.weight = -0.1
-        self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = (
-            self.joint_names
-        )
-        self.rewards.arm_joint_position_penalty.weight = -0.1
-        self.rewards.arm_joint_position_penalty.params["asset_cfg"].joint_names = (
-            self.joint_names_arm
-        )
-        # self.rewards.joint_position_penalty.weight = 0.0
-        self.rewards.feet_height_exp.weight = 4.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.15
-        self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
-            self.foot_link_name
-        ]  
-        self.rewards.feet_height_body_exp.weight = 2.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.38
-        self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
-            self.foot_link_name
-        ]
-        self.rewards.feet_gait.weight = 5.0
-        # trotting
-        self.rewards.feet_gait.params["synced_feet_pair_names"] = (
-            ("FL_foot", "RR_foot"),
-            ("FR_foot", "RL_foot"),
-        )
-        # pronking
-        # self.rewards.feet_gait.params["synced_feet_pair_names"] = (
-        #     ("FL_foot", "FR_foot"),
-        #     ("RR_foot", "RL_foot"),
-        # ) 
-        # If the weight of rewards is 0, set rewards to None
-        if self.__class__.__name__ == "CUHKLRLSiriusPiperRoughEnvCfg":
-            self.disable_zero_weight_rewards()
-
-        # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
-            self.base_link_name,
-            self.trunk_link_name,
-            self.abad_link_name,
-            # self.knee_link_name,
-            self.hip_link_name,
-        ]
-        # ------------------------------Commands------------------------------
+        # disable randomization for play
+        self.observations.policy.enable_corruption = False
+        # remove random pushing event
+        self.events.base_external_force_torque = None
+        self.events.push_robot = None

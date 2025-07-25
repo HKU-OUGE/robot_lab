@@ -15,7 +15,7 @@ from . import agents
 ##
 
 gym.register(
-    id="RobotLab-Isaac-ManipLocoLowLevel-Flat-Go2-Arm-V0",
+    id="RobotLab-Isaac-ManipLocoLowLevel-Flat-Go2-Arm-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     # entry_point="robot_lab.tasks.manip_loco.low_level.low_level_loc_vel_env:ManagerRLEnv",
     # entry_point="ManagerRLEnv",
