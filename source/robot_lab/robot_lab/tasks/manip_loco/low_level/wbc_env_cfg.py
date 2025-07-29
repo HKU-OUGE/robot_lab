@@ -311,12 +311,12 @@ class ObservationsCfg:
         # priv 
         # must have a prefix of "priv_". 
         # priv_base_orientation = ObsTerm(func=observations.root_yaw_angle_w) # dim = 1
-        priv_mass_base = ObsTerm(func=observations.get_mass_base)# dim = 1
-        priv_mass_ee = ObsTerm(func=observations.get_mass_ee) # dim = 1
-        priv_joint_torques = ObsTerm(func=observations.get_joints_torques) # dim = 18
-        priv_base_lin_vel = ObsTerm(func=observations.base_lin_vel)  # dim = 3
-        priv_feet_contact = ObsTerm(func=observations.feet_contact,
-                               params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")}) # dim = 4 bool
+        # priv_mass_base = ObsTerm(func=observations.get_mass_base)# dim = 1
+        # priv_mass_ee = ObsTerm(func=observations.get_mass_ee) # dim = 1
+        # priv_joint_torques = ObsTerm(func=observations.get_joints_torques) # dim = 18
+        # priv_base_lin_vel = ObsTerm(func=observations.base_lin_vel)  # dim = 3
+        # priv_feet_contact = ObsTerm(func=observations.feet_contact,
+        #                        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")}) # dim = 4 bool
         # more priv_obs:
         # priv_xxx = xxx
         
