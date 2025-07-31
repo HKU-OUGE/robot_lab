@@ -209,7 +209,7 @@ class CommandsCfg:
         resampling_time_range=(6.0,8.0),
         debug_vis=True,
         is_QuadrupedARM=True,
-        curriculum_coeff = 1000,      # Optimal accuracy is achieved at num_env=4096, while other settings may lead to suboptimal results.         
+        curriculum_coeff = 4096,      # Optimal accuracy is achieved at num_env=4096, while other settings may lead to suboptimal results.         
         ranges_final =commands_cfg.UniformPoseCommandCfg.Ranges(
             pos_x=(0.58, 0.78),
             pos_y=(-0.35, 0.35),
@@ -242,7 +242,7 @@ class CommandsCfg:
         rel_standing_envs=0.1,
         debug_vis=True,
         is_QuadrupedARM=True,
-        curriculum_coeff= 1000,     # Optimal accuracy is achieved at num_env=4096, while other settings may lead to suboptimal results.        
+        curriculum_coeff= 4096,     # Optimal accuracy is achieved at num_env=4096, while other settings may lead to suboptimal results.        
         ranges=commands_cfg.UniformVelocityCommandCfg.Ranges(
             lin_vel_x=(0.2, 1.0), lin_vel_y=(-0.5, 0.5), ang_vel_z=(-0.5, 0.5),heading=(-0.0, 0.0)
         ),
@@ -294,19 +294,63 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
         # observation terms (order preserved)
-        base_ang_vel = ObsTerm(func=observations.base_ang_vel, history_length=10,noise=Unoise(n_min=-0.1, n_max=0.1))  # dim = 3
-        joint_pos = ObsTerm(func=observations.joint_pos_rel, history_length=10,noise=Unoise(n_min=-0.01, n_max=0.01)) # dim = 20 - 2
-        joint_vel = ObsTerm(func=observations.joint_vel_rel, history_length=10, noise=Unoise(n_min=-0.5, n_max=0.5)) # dim = 20 - 2
-        actions = ObsTerm(func=observations.last_action, history_length=10) # dim = 18
-        velocity_commands = ObsTerm(func=observations.generated_commands, history_length=10,
-                                    params={"command_name": "base_velocity"}) # dim = 3
+        base_ang_vel = ObsTerm(
+            func=observations.base_ang_vel, 
+            history_length=10,
+            noise=Unoise(n_min=-0.2, n_max=0.2),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        joint_pos = ObsTerm(
+            func=observations.joint_pos_rel,
+            history_length=10,
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        joint_vel = ObsTerm(
+            func=observations.joint_vel_rel,
+            history_length=10,
+            noise=Unoise(n_min=-1.5, n_max=1.5),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        actions = ObsTerm(
+            func=observations.last_action,
+            history_length=10,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        velocity_commands = ObsTerm(
+            func=observations.generated_commands,
+            history_length=10,
+            params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
         Quadruped_pose_command = ObsTerm(func=observations.generated_commands, history_length=10,
                                    params={"command_name": "ee_pose"}) # dim = 7
         projected_gravity = ObsTerm(
             func=observations.projected_gravity,
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            history_length=10
-        )        # dim = 3
+            history_length=10,
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+
+        # base_ang_vel = ObsTerm(func=observations.base_ang_vel, history_length=10,noise=Unoise(n_min=-0.1, n_max=0.1))  # dim = 3
+        # joint_pos = ObsTerm(func=observations.joint_pos_rel, history_length=10,noise=Unoise(n_min=-0.01, n_max=0.01)) # dim = 20 - 2
+        # joint_vel = ObsTerm(func=observations.joint_vel_rel, history_length=10, noise=Unoise(n_min=-0.5, n_max=0.5)) # dim = 20 - 2
+        # actions = ObsTerm(func=observations.last_action, history_length=10) # dim = 18
+        # velocity_commands = ObsTerm(func=observations.generated_commands, history_length=10,
+        #                             params={"command_name": "base_velocity"}) # dim = 3
+        # Quadruped_pose_command = ObsTerm(func=observations.generated_commands, history_length=10,
+        #                            params={"command_name": "ee_pose"}) # dim = 7
+        # projected_gravity = ObsTerm(
+        #     func=observations.projected_gravity,
+        #     noise=Unoise(n_min=-0.1, n_max=0.1),
+        #     history_length=10
+        # )        # dim = 3
         
         # priv 
         # must have a prefix of "priv_". 
@@ -477,46 +521,6 @@ class TerminationsCfg:
         func=mdp.illegal_contact,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_thigh"), "threshold":0.5},
     )
-    # calf_contact = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_calf"), "threshold": 0.5},
-    # )
-    # arm_contact_1 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link1"), "threshold": 0.5},
-    # )
-    # arm_contact_2 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link2"), "threshold": 0.5},
-    # )
-    # arm_contact_3 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link3"), "threshold": 0.5},
-    # )
-    # arm_contact_4 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link4"), "threshold": 0.5},
-    # )
-    # arm_contact_5 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link5"), "threshold": 0.5},
-    # )
-    # arm_contact_6 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link6"), "threshold": 0.5},
-    # )
-    # arm_contact_7 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link7"), "threshold": 0.5},
-    # )
-    # arm_contact_8 = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="link8"), "threshold": 0.5},
-    # )
-    # arm_contact_gripper_base = DoneTerm(
-    #     func=mdp.illegal_contact,
-    #     params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="gripper_base"), "threshold": 0.5},
-    # )
 
 
 
@@ -537,7 +541,7 @@ class CurriculumCfg:
 
 
 @configclass
-class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
+class LowLevelWBCEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the locomotion velocity-tracking environment."""
 
     # Scene settings

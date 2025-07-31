@@ -7,7 +7,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 #     LowLevelEnvCfg
 # )
 from robot_lab.tasks.manip_loco.low_level.wbc_env_cfg import(
-    LocomotionVelocityRoughEnvCfg
+    LowLevelWBCEnvCfg
 )
 
 ##
@@ -21,7 +21,7 @@ from robot_lab.assets.arclab_atec import ARCLAB_ATEC_CFG
 
 
 @configclass
-class CUHKLRLSiriusPiperRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
+class CUHKLRLSiriusPiperRoughEnvCfg(LowLevelWBCEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
