@@ -31,6 +31,28 @@ def base_ang_vel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCf
     # print("base_ang_vel: ",asset.data.root_ang_vel_b)
     return asset.data.root_ang_vel_b
 
+# def joint_pos_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+#     """The joint positions of the asset w.r.t. the default joint positions.
+
+#     Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their positions returned.
+#     """
+#     # extract the used quantities (to enable type-hinting)
+#     asset: Articulation = env.scene[asset_cfg.name]
+#     ## QuadrupedARM
+#     # asset_cfg.joint_ids =  [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
+#     joint_ids, _ = asset.find_joints([ "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+#                         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint", 
+#                         "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint", 
+#                         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+#                         "joint1", "joint2", "joint3", 
+#                         "joint4", "joint5", "joint6",
+#                         ],preserve_order=True)
+#     ## QuadrupedARM 
+#     # print("joint_pos*****",asset.data.joint_pos[:, joint_ids] )
+#     # print("joint_pos_rel",asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids])
+#     return asset.data.joint_pos[:, joint_ids] - asset.data.default_joint_pos[:, joint_ids]
+
+
 def joint_pos_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """The joint positions of the asset w.r.t. the default joint positions.
 
@@ -38,20 +60,30 @@ def joint_pos_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityC
     """
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
-    ## QuadrupedARM
-    # asset_cfg.joint_ids =  [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    joint_ids, _ = asset.find_joints([ "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-                        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-                        "joint1", "joint2", "joint3", 
-                        "joint4", "joint5", "joint6"
-                        ],preserve_order=True)
-    ## QuadrupedARM 
-    # print("joint_pos*****",asset.data.joint_pos[:, joint_ids] )
-    # print("joint_pos_rel",asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids])
-    return asset.data.joint_pos[:, joint_ids] - asset.data.default_joint_pos[:, joint_ids]
+    return asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
 
+
+
+# def joint_vel_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")):
+#     """The joint velocities of the asset w.r.t. the default joint velocities.
+
+#     Note: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their velocities returned.
+#     """
+#     # extract the used quantities (to enable type-hinting)
+#     asset: Articulation = env.scene[asset_cfg.name]
+#     ## QuadrupedARM
+#     # asset_cfg.joint_ids =  [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
+
+#     joint_ids, _ = asset.find_joints(["FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+#                         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint", 
+#                         "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint", 
+#                         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+#                         "joint1", "joint2", "joint3", 
+#                         "joint4", "joint5", "joint6",
+#                         ],preserve_order=True)
+#     ## QuadrupedARM 
+#     # print("joint_vel_rel",asset.data.joint_vel[:, asset_cfg.joint_ids] - asset.data.default_joint_vel[:, asset_cfg.joint_ids])
+#     return asset.data.joint_vel[:, joint_ids] - asset.data.default_joint_vel[:, joint_ids]
 
 def joint_vel_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")):
     """The joint velocities of the asset w.r.t. the default joint velocities.
@@ -60,19 +92,7 @@ def joint_vel_rel(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = SceneEntityC
     """
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
-    ## QuadrupedARM
-    # asset_cfg.joint_ids =  [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-
-    joint_ids, _ = asset.find_joints([ "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-                        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-                        "joint1", "joint2", "joint3", 
-                        "joint4", "joint5", "joint6"
-                        ],preserve_order=True)
-    ## QuadrupedARM 
-    # print("joint_vel_rel",asset.data.joint_vel[:, asset_cfg.joint_ids] - asset.data.default_joint_vel[:, asset_cfg.joint_ids])
-    return asset.data.joint_vel[:, joint_ids] - asset.data.default_joint_vel[:, joint_ids]
+    return asset.data.joint_vel[:, asset_cfg.joint_ids] - asset.data.default_joint_vel[:, asset_cfg.joint_ids]
 
 
 def last_action(env: ManagerBasedEnv, action_name: str | None = None) -> torch.Tensor:
@@ -148,12 +168,12 @@ def randomize_static_friction(env: ManagerBasedEnv, asset_cfg: SceneEntityCfg = 
 
 def get_joints_torques(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     asset: Articulation = env.scene[asset_cfg.name]
-    joint, _ = asset.find_joints([ "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-                                "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-                                "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-                                "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-                                "joint1"       , "joint2"      , "joint3"        , 
-                                "joint4", "joint5"   , "joint6"
+    joint, _ = asset.find_joints(["FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+                        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint", 
+                        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint", 
+                        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+                        "joint1", "joint2", "joint3", 
+                        "joint4", "joint5", "joint6",
                                 ],preserve_order=True)
     return asset.data.applied_torque[:, joint]
 

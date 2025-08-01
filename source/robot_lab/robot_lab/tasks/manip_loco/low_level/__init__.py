@@ -14,6 +14,6 @@ Reference:
     https://github.com/leggedrobotics/legged_gym
 """
 
-from .low_level_loc_vel_env import *  # noqa
+# from .low_level_loc_vel_env import *  # noqa
 # from .low_level_env_cfg import *
 from .low_level_loc_vel_env_cfg import *

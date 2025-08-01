@@ -12,6 +12,20 @@ from robot_lab.assets.arclab_atec import ARCLAB_ATEC_CFG
 
 @configclass
 class CUHKLRLSiriusPiperFlatEnvCfg(LowLevelWBCEnvCfg):
+
+    # fmt: off
+    # joint_names = [
+    #     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+    #     "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+    #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+    # ]
+    joint_names = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
+    ]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -22,7 +36,15 @@ class CUHKLRLSiriusPiperFlatEnvCfg(LowLevelWBCEnvCfg):
 
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
-
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = (
+            self.joint_names
+        )
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = (
+            self.joint_names
+        )
+        self.actions.joint_pos.joint_names = (
+            self.joint_names
+        )
 class CUHKLRLSiriusPiperFlatEnvCfg_PLAY(CUHKLRLSiriusPiperFlatEnvCfg):
     def __post_init__(self) -> None:
         # post init of parent

@@ -257,33 +257,51 @@ class CommandsCfg:
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", 
-                                           joint_names=[
-                                                    "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-                                                    "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-                                                    "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-                                                    "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-                                                    ],
-                                           scale = {"FR_hip_joint": 0.25, "FR_thigh_joint": 0.25, "FR_calf_joint": 0.25,
-                                                    "FL_hip_joint": 0.25, "FL_thigh_joint": 0.25, "FL_calf_joint": 0.25,
-                                                    "RR_hip_joint": 0.25, "RR_thigh_joint": 0.25, "RR_calf_joint": 0.25,
-                                                    "RL_hip_joint": 0.25, "RL_thigh_joint": 0.25, "RL_calf_joint": 0.25,}, 
-                                         use_default_offset=True,
-                                         preserve_order=True,
-    )   
-    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-                                          joint_names=[
-                                              "joint1", "joint2", "joint3", 
-                                              "joint4", "joint5", "joint6"],
-                                           scale = {"joint1":        0.5, # 0.8
-                                                    "joint2":     0.5, # 0.35
-                                                    "joint3":        0.5, # 0.35
-                                                    "joint4": 0.5, # 0.35
-                                                    "joint5":  0.5, # 0.35
-                                                    "joint6": 0.5}, # 0.35
-                                            use_default_offset=True,
-                                            preserve_order=True,
+    joint_pos = mdp.JointPositionActionCfg(
+        asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True, clip=None, preserve_order=True
     )
+
+    # joint_pos = mdp.JointPositionActionCfg(asset_name="robot", 
+    #                                        joint_names=[
+    #                                                 "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+    #                                                 "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+    #                                                 "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+    #                                                 "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    #                                                 ],
+    #                                        scale = {"FR_hip_joint": 0.25, "FR_thigh_joint": 0.25, "FR_calf_joint": 0.25,
+    #                                                 "FL_hip_joint": 0.25, "FL_thigh_joint": 0.25, "FL_calf_joint": 0.25,
+    #                                                 "RR_hip_joint": 0.25, "RR_thigh_joint": 0.25, "RR_calf_joint": 0.25,
+    #                                                 "RL_hip_joint": 0.25, "RL_thigh_joint": 0.25, "RL_calf_joint": 0.25,}, 
+    #                                      use_default_offset=True,
+    #                                      preserve_order=True,
+    # )   
+    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+    #                                       joint_names=[
+    #                                           "joint1", "joint2", "joint3", 
+    #                                           "joint4", "joint5", "joint6"],
+    #                                        scale = {"joint1":        0.5, # 0.8
+    #                                                 "joint2":     0.5, # 0.35
+    #                                                 "joint3":        0.5, # 0.35
+    #                                                 "joint4": 0.5, # 0.35
+    #                                                 "joint5":  0.5, # 0.35
+    #                                                 "joint6": 0.5}, # 0.35
+    #                                         use_default_offset=True,
+    #                                         preserve_order=True,
+    # )
+
+    # joint_pos = mdp.JointPositionActionCfg(asset_name="robot", 
+    #                                        joint_names=[
+    #                                            "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+    #                                            "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint", 
+    #                                            "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint", 
+    #                                            "FR_calf_joint", "RL_calf_joint", "RR_calf_joint", "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",],
+    #                                        scale = {"FL_hip_joint": 0.25, "FR_hip_joint": 0.25, "RL_hip_joint": 0.25,
+    #                                            "RR_hip_joint": 0.25, "FL_thigh_joint": 0.25, "FR_thigh_joint": 0.25, 
+    #                                            "RL_thigh_joint": 0.25, "RR_thigh_joint": 0.25, "FL_calf_joint": 0.25, 
+    #                                            "FR_calf_joint": 0.25, "RL_calf_joint": 0.25, "RR_calf_joint": 0.25, "joint1": 0.5, "joint2": 0.5, "joint3": 0.5, "joint4": 0.5, "joint5": 0.5, "joint6": 0.5,}, 
+    #                                      use_default_offset=True,
+    #                                      preserve_order=True,
+    # )   
 
 
 @configclass
@@ -303,6 +321,7 @@ class ObservationsCfg:
         )
         joint_pos = ObsTerm(
             func=observations.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
             history_length=10,
             noise=Unoise(n_min=-0.01, n_max=0.01),
             clip=(-100.0, 100.0),
@@ -310,6 +329,7 @@ class ObservationsCfg:
         )
         joint_vel = ObsTerm(
             func=observations.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
             history_length=10,
             noise=Unoise(n_min=-1.5, n_max=1.5),
             clip=(-100.0, 100.0),
