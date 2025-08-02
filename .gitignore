@@ -32,3 +32,8 @@ env_cfg_debug.json
 *.pyc
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/__pycache__
 /source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/agents/__pycache__
+_out_sdrec/rgb_0145.png
+/_out_sdrec
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/agents/__pycache__
+/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel

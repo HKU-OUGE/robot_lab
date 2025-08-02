@@ -85,7 +85,7 @@ def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # make a smaller scene for play
-    env_cfg.scene.num_envs = 50
+    env_cfg.scene.num_envs = args_cli.num_envs
     # spawn the robot randomly in the grid (instead of their terrain levels)
     env_cfg.scene.terrain.max_init_terrain_level = None
     # reduce the number of terrains to save memory
@@ -195,14 +195,32 @@ def main():
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
+            if timestep == 0:
+                print("\n====== [Action Vector Mapping] ======")
+                idx = 0
+                for group_name, term in env.unwrapped.action_manager._terms.items():
+                    print(f"[ACTION GROUP] {group_name}")
+
+                    # ✅ 关键修改：使用 term._joint_names，而非 term._asset.joint_names
+                    joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+
+                    term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+
+                    for i, val in enumerate(term_actions):
+                        joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                        print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}")
+                    idx += term.action_dim
+                print("=====================================\n")
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, _, _ = env.step(actions)
-        if args_cli.video:
             timestep += 1
+        if args_cli.video:
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
+        elif timestep > 10:
+            timestep = 0
 
         if args_cli.keyboard:
             rsl_rl_utils.camera_follow(env)

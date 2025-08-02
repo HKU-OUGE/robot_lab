@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ---------------- 配置部分（可自定义） ----------------
-TASK_NAME="RobotLab-Isaac-Velocity-Flat-Sirius-v0"
+TASK_NAME="RobotLab-Isaac-Velocity-Stand-CUHKLRL-SiriusW-v0"
 NUM_ENVS=50
 LOG_DIR="logs"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
