@@ -38,6 +38,7 @@ parser.add_argument(
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
+parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -78,8 +79,9 @@ def main():
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
     )
-    print("\n==== [env_cfg 配置结构] ====\n")
-    print_dict(env_cfg.to_dict(), nesting=4)
+    # if args_cli.debug:
+    #     print("\n==== [env_cfg 配置结构] ====\n")
+    #     print_dict(env_cfg.to_dict(), nesting=4)
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
@@ -188,6 +190,63 @@ def main():
     # reset environment
     obs, _ = env.get_observations()
     timestep = 0
+    debug_print = False
+    if args_cli.debug and not debug_print:
+        # print obs & action dim
+        print("\n========== [OBSERVATION / ACTION SHAPE INFO] ==========", flush=True)
+        try:
+            # print observation vector shape
+            if isinstance(obs, dict):
+                flat_obs_shape = sum([v.numel() for v in obs.values()])
+                print(f"[OBS] Total flattened shape: {flat_obs_shape} (from {len(obs)} components)", flush=True)
+            else:
+                print(f"[OBS] shape: {tuple(obs.shape)}", flush=True)
+            
+            # print action vector shape
+            action_tensor = env.unwrapped.action_manager.action
+            print(f"[ACTION] shape: {tuple(action_tensor.shape)}", flush=True)
+        except Exception as e:
+            print(f"[WARN] Cannot access shape info: {e}", flush=True)
+        print("========================================================\n", flush=True)
+
+        # print obs group -> term list
+        print("\n========== [OBS GROUP MEMBERS LIST & INFO] ==========", flush=True)
+        try:
+            obs_mgr = env.unwrapped.observation_manager
+            for group_name, term_names in obs_mgr._group_obs_term_names.items():
+                print(f"[OBS GROUP] {group_name}: {term_names}", flush=True)
+                for idx, name in enumerate(term_names):
+                    term_cfg = obs_mgr._group_obs_term_cfgs[group_name][idx]
+                    shape = obs_mgr._group_obs_term_dim[group_name][idx]
+                    func_name = getattr(term_cfg.func, '__name__', str(term_cfg.func))
+                    noise_type = type(term_cfg.noise).__name__ if term_cfg.noise else None
+                    # print detailed info
+                    print(f"  [OBS NAME] {name}", flush=True)
+                    print(f"    [FUNC]        {func_name}", flush=True)
+                    print(f"    [SHAPE]       {shape}", flush=True)
+                    print(f"    [HISTORY]     len={term_cfg.history_length} flatten={term_cfg.flatten_history_dim}", flush=True)
+                    print(f"    [CLIP]        {term_cfg.clip}", flush=True)
+                    print(f"    [SCALE]       {term_cfg.scale}", flush=True)
+                    print(f"    [NOISE]       {noise_type}", flush=True)
+        except Exception as e:
+            print(f"[WARN] Observation manager terms not accessible: {e}", flush=True)
+        print("======================================================\n", flush=True)
+
+        # print action space vector
+        print("\n====== [Action Vector Mapping] ======", flush=True)
+        idx = 0
+        for group_name, term in env.unwrapped.action_manager._terms.items():
+            print(f"[ACTION GROUP] {group_name}", flush=True)
+            joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+            term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+            for i, val in enumerate(term_actions):
+                joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+            idx += term.action_dim
+        print("=====================================\n", flush=True)
+
+        debug_print = True
+        time.sleep(0.1)  # avoid stdout loss
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -195,33 +254,14 @@ def main():
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
-            if timestep == 0:
-                print("\n====== [Action Vector Mapping] ======")
-                idx = 0
-                for group_name, term in env.unwrapped.action_manager._terms.items():
-                    print(f"[ACTION GROUP] {group_name}")
-
-                    # ✅ 关键修改：使用 term._joint_names，而非 term._asset.joint_names
-                    joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-
-                    term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-
-                    for i, val in enumerate(term_actions):
-                        joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                        print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}")
-                    idx += term.action_dim
-                print("=====================================\n")
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, _, _ = env.step(actions)
-            timestep += 1
         if args_cli.video:
+            timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-        elif timestep > 10:
-            timestep = 0
-
         if args_cli.keyboard:
             rsl_rl_utils.camera_follow(env)
 
