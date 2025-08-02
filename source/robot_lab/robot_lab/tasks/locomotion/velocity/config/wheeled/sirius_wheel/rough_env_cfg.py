@@ -73,22 +73,22 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.terrain.usd_path ="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_B/Flat_Mountain_B.usd"
-        self.scene.terrain = TerrainImporterCfg(
-            prim_path="/World/ground",
-            terrain_type="usd",  # 使用 .usd 文件作为地形
-            usd_path="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_A/Flat_Mountain_A.usd",  # 指定 .usd 文件路径
-            collision_group=-1,
-            visual_material=None,  # 可选：设置视觉材质
-            max_init_terrain_level=5,
-            debug_vis=False,
-        )
+        # self.scene.terrain = TerrainImporterCfg(
+        #     prim_path="/World/ground",
+        #     terrain_type="usd",  # 使用 .usd 文件作为地形
+        #     usd_path="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_A/Flat_Mountain_A.usd",  # 指定 .usd 文件路径
+        #     collision_group=-1,
+        #     visual_material=None,  # 可选：设置视觉材质
+        #     max_init_terrain_level=5,
+        #     debug_vis=False,
+        # )
         # self.scene.terrain.terrain_generator = None
         # # no height scan
         # self.scene.height_scanner = None
         # self.observations.policy.height_scan = None
         # self.observations.critic.height_scan = None
         # no terrain curriculum
-        self.curriculum.terrain_levels = None
+        # self.curriculum.terrain_levels = None
         # ------------------------------Observations------------------------------
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
         self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(

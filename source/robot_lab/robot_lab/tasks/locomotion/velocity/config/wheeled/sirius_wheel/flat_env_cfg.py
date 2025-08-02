@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 import isaaclab.sim as sim_utils
 from isaaclab.utils import configclass
-
+from isaaclab.sim.schemas import CollisionPropertiesCfg
+from isaaclab.sim.schemas import RigidBodyPropertiesCfg
 from .rough_env_cfg import CUHKLRLSiriusWRoughEnvCfg
 from isaaclab.terrains import TerrainImporterCfg
-
+from isaaclab.assets import RigidObjectCfg
 @configclass
 class CUHKLRLSiriusWFlatEnvCfg(CUHKLRLSiriusWRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
-
+            # spawn a usd file of a table into the scene
+        # cfg = sim_utils.UsdFileCfg(usd_path="/home/ouge/Iveco_Daily_Van_2014_origin.usda", scale=(0.01, 0.01, 0.01), collision_props=CollisionPropertiesCfg(collision_enabled=True), rigid_props=RigidBodyPropertiesCfg(rigid_body_enabled=True))
+        # cfg.func("/World/Objects/Van", cfg, translation=(10.0, 10.0, 0.55))
         # override rewards
         self.rewards.base_height_l2.params["sensor_cfg"] = None
         # change terrain to flat
