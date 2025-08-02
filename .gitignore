@@ -18,6 +18,3 @@ env_cfg_debug.json
 /_out_sdrec/
 _out_sdrec/*.png
 
-# Optional: ignore specific config data or temporary terrain files
-/source/robot_lab/robot_lab/tasks/locomotion/velocity/config/wheeled/sirius_wheel/
-
