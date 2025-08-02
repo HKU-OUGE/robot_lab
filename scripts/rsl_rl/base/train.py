@@ -20,6 +20,12 @@ from isaaclab.app import AppLauncher
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import cli_args
 
+# add obs&action dict
+obs_action_info = {
+    "observation_groups": {},
+    "action_groups": {}
+}
+
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
@@ -30,6 +36,7 @@ parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--recovery_mode", action="store_true", default=False, help="Whether to use recovery mode.")
+parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -76,6 +83,22 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
+def make_serializable(info: dict):
+    """Convert tensor and object fields into serializable types for YAML."""
+    def tensor_to_list(val):
+        if isinstance(val, torch.Tensor):
+            return val.cpu().tolist()
+        return val
+
+    serializable_info = {}
+    for key, value in info.items():
+        if isinstance(value, dict):
+            serializable_info[key] = make_serializable(value)
+        elif isinstance(value, list):
+            serializable_info[key] = [make_serializable(v) if isinstance(v, dict) else tensor_to_list(v) for v in value]
+        else:
+            serializable_info[key] = tensor_to_list(value)
+    return serializable_info
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
@@ -114,7 +137,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         }
         env_cfg.rewards.upward.weight = 0.5
         env_cfg.terminations.illegal_contact = None
-
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
     log_root_path = os.path.abspath(log_root_path)
@@ -163,12 +185,96 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         # load previously trained model
         runner.load(resume_path)
 
+    if args_cli.debug:
+        import time
+        print("\n========== [OBSERVATION / ACTION SHAPE INFO] ==========", flush=True)
+        try:
+            obs, _ = runner.env.reset()
+            if isinstance(obs, dict):
+                total_shape = sum([v.numel() for v in obs.values()])
+                print(f"[OBS] Total shape (dict): {total_shape}", flush=True)
+                for k, v in obs.items():
+                    print(f"  - {k:20s}: shape = {tuple(v.shape)}", flush=True)
+            elif isinstance(obs, torch.Tensor):
+                print(f"[OBS] shape: {tuple(obs.shape)}", flush=True)
+            else:
+                print(f"[OBS] type={type(obs)}, content={obs}", flush=True)
+            # print action vector shape
+            action_tensor = env.unwrapped.action_manager.action
+            print(f"[ACTION] shape: {tuple(action_tensor.shape)}", flush=True)
+        except Exception as e:
+            print(f"[WARN] Cannot access shape info: {e}", flush=True)
+        print("========================================================\n", flush=True)
+
+        obs_action_info = {"observation_groups": {}, "action_groups": {}}
+
+        print("\n========== [OBS GROUP MEMBERS LIST & INFO] ==========", flush=True)
+        try:
+            obs_mgr = runner.env.env.unwrapped.observation_manager
+            for group_name, term_names in obs_mgr._group_obs_term_names.items():
+                print(f"[OBS GROUP] {group_name}: {term_names}", flush=True)
+                obs_action_info["observation_groups"][group_name] = []
+
+                for idx, name in enumerate(term_names):
+                    term_cfg = obs_mgr._group_obs_term_cfgs[group_name][idx]
+                    shape = obs_mgr._group_obs_term_dim[group_name][idx]
+                    func_name = getattr(term_cfg.func, '__name__', str(term_cfg.func))
+                    noise_type = type(term_cfg.noise).__name__ if term_cfg.noise else None
+
+                    info = {
+                        "name": name,
+                        "shape": shape,
+                        "func": func_name,
+                        "history_length": term_cfg.history_length,
+                        "flatten_history_dim": term_cfg.flatten_history_dim,
+                        "clip": term_cfg.clip,
+                        "scale": term_cfg.scale,
+                        "noise": noise_type
+                    }
+
+                    obs_action_info["observation_groups"][group_name].append(info)
+
+                    # print detailed info
+                    print(f"  [OBS NAME] {name}", flush=True)
+                    print(f"    [FUNC]        {func_name}", flush=True)
+                    print(f"    [SHAPE]       {shape}", flush=True)
+                    print(f"    [HISTORY]     len={term_cfg.history_length} flatten={term_cfg.flatten_history_dim}", flush=True)
+                    print(f"    [CLIP]        {term_cfg.clip}", flush=True)
+                    print(f"    [SCALE]       {term_cfg.scale}", flush=True)
+                    print(f"    [NOISE]       {noise_type}", flush=True)
+        except Exception as e:
+            print(f"[WARN] Observation manager terms not accessible: {e}", flush=True)
+        print("======================================================\n", flush=True)
+
+
+        print("\n====== [Action Vector Mapping] ======", flush=True)
+        try:
+            idx = 0
+            for group_name, term in runner.env.unwrapped.action_manager._terms.items():
+                action_group = {
+                    "action_dim": term.action_dim,
+                    "joint_names": getattr(term, "_joint_names", [f"joint_{i}" for i in range(term.action_dim)])
+                }
+                obs_action_info["action_groups"][group_name] = action_group
+                print(f"[ACTION GROUP] {group_name}", flush=True)
+                joint_names = getattr(term, "_joint_names", [f"joint_{i}" for i in range(term.action_dim)])
+                term_actions = runner.env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+                for i, val in enumerate(term_actions):
+                    joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                idx += term.action_dim
+        except Exception as e:
+            print(f"[WARN] Action manager info not available: {e}", flush=True)
+        print("=====================================\n", flush=True)
+        safe_obs_action_info = make_serializable(obs_action_info)
+        dump_yaml(os.path.join(log_dir, "params", "obs_action.yaml"), safe_obs_action_info)
+        dump_pickle(os.path.join(log_dir, "params", "obs_action.pkl"), safe_obs_action_info)
+        time.sleep(0.1)
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
     dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
     dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
-
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
