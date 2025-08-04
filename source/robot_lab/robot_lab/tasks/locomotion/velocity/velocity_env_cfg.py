@@ -36,6 +36,7 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 from robot_lab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
 from robot_lab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
 from robot_lab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import STAIR_TERRAINS_CFG  # isort: skip
 
 
 ##
@@ -52,7 +53,7 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         # terrain_generator=SLOPE_TERRAINS_CFG,
-        terrain_generator=ROUGH_TERRAINS_CFG,
+        terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
@@ -69,21 +70,22 @@ class MySceneCfg(InteractiveSceneCfg):
         ),
         debug_vis=False,
     )
+
     # robots
     robot: ArticulationCfg = MISSING
     # sensors
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        attach_yaw_only=True,
+        ray_alignment='yaw',
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     height_scanner_base = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        attach_yaw_only=True,
+        ray_alignment='yaw',
         pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.1, 0.1)),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
@@ -340,26 +342,15 @@ class EventCfg:
     randomize_reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
-        # params={
-        #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-        #     "velocity_range": {
-        #         "x": (-0.5, 0.5),
-        #         "y": (-0.5, 0.5),
-        #         "z": (-0.5, 0.5),
-        #         "roll": (-0.5, 0.5),
-        #         "pitch": (-0.5, 0.5),
-        #         "yaw": (-0.5, 0.5),
-        #     },
-        # },
         params={
-            "pose_range": {"x": (-5.0, 0.0), "y": (0.0, 0.0), "yaw": (0.0, 0.0)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         },
     )
@@ -379,6 +370,7 @@ class RewardsCfg:
 
     # General
     # UNUESD is_alive
+    is_alive = RewTerm(func=mdp.is_alive, weight=0.0)
     is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
 
     # Root penalties
@@ -675,11 +667,11 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 20.0
+        self.episode_length_s = 7
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
-        self.sim.disable_contact_processing = True
+        # self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # update sensor update periods
@@ -693,12 +685,29 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
+        # if getattr(self.curriculum, "terrain_levels", None) is not None:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = True
+        # else:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = False
+        # Check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
+        # This generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
-            if self.scene.terrain.terrain_generator is not None:
-                self.scene.terrain.terrain_generator.curriculum = True
+            # Check if terrain type is 'usd'
+            if self.scene.terrain.terrain_type == "usd":
+                # For USD terrain, return False and skip terrain generator curriculum
+                print("Skipping terrain generator curriculum for USD terrain.")
+                self.scene.terrain.terrain_generator.curriculum = False  # or handle it as needed
+            else:
+                # Only enable curriculum if terrain generator is available for other terrain types
+                if self.scene.terrain.terrain_generator is not None:
+                    self.scene.terrain.terrain_generator.curriculum = True
         else:
+            # Handle the case when terrain generator curriculum is not enabled
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
 
     def disable_zero_weight_rewards(self):
         """If the weight of rewards is 0, set rewards to None"""
