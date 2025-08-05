@@ -24,7 +24,7 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 
 ARCLAB_ATEC_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_Piper/sirius_piper.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_Piper/no78/sirius_piper.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -50,6 +50,7 @@ ARCLAB_ATEC_CFG = ArticulationCfg(
             "FR_thigh_joint": 0.8,
             "RL_thigh_joint": -0.8,
             "RR_thigh_joint": -0.8,
+            "joint1": 0.0,
             "FL_calf_joint": -1.6,
             "FR_calf_joint": -1.6,
             "RL_calf_joint": 1.6,
@@ -61,7 +62,6 @@ ARCLAB_ATEC_CFG = ArticulationCfg(
             # "forearm_roll": 0.0,
             # "wrist_angle": -0.5,
             # "wrist_rotate": 0.0,
-            # "joint1": 0.0,
             "joint2": 2.0,
             "joint3": -1.5,
             "joint4": 0.0,
@@ -90,6 +90,15 @@ ARCLAB_ATEC_CFG = ArticulationCfg(
             damping=2.0,
             friction=0.0,
         ),
+        "piper_arm_1": DCMotorCfg(
+            joint_names_expr=["joint1",],
+            effort_limit=40.5,
+            saturation_effort=23.5,
+            velocity_limit=30.0,
+            stiffness=10.0,
+            damping=0.5,
+            friction=0.0,
+        ),
         "legs_calf": DCMotorCfg(
             joint_names_expr=[".*calf_joint"],  
             effort_limit=80.0,
@@ -99,9 +108,12 @@ ARCLAB_ATEC_CFG = ArticulationCfg(
             damping=2.0,
             friction=0.0,
         ),
-        "piper_arm": DCMotorCfg(
-            # joint_names_expr=["joint1","joint2","joint3",
+        "piper_arm_26": DCMotorCfg(
+            # joint_names_expr=["joint1","joint3",
             #                   "joint4","joint5","joint6",
+            #                   ],
+            # joint_names_expr=["joint2","joint3",
+            #                   "joint4","joint5","joint6", "joint1",
             #                   ],
             joint_names_expr=["joint2","joint3",
                               "joint4","joint5","joint6",

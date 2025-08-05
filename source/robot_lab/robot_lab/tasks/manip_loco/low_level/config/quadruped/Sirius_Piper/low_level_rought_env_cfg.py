@@ -71,11 +71,30 @@ class CUHKLRLSiriusPiperLowLevelRoughEnvCfg(LowLevelEnvCfg):
     joint_names = [
         "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
-        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "joint1", "FL_calf_joint",
         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
         "joint2","joint3",
         "joint4","joint5","joint6",
     ]
+
+    # joint_names = [
+    #     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+    #     "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+    #     "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+    #     "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+    #     "joint1", "joint3",
+    #     "joint4","joint5","joint6",
+    # ]
+
+    # joint_names = [
+    #     "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+    #     "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+    #     "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+    #     "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+    #     "joint3",
+    #     # "joint2","joint3",
+    #     # "joint4","joint5","joint6",
+    # ]
 
     # fmt: on
 
@@ -117,6 +136,9 @@ class CUHKLRLSiriusPiperLowLevelRoughEnvCfg(LowLevelEnvCfg):
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = (
             self.joint_names
         )
+        # self.observations.policy.actions.params["action_name"] = (
+        #     self.joint_names
+        # )
 
         # ------------------------------Actions------------------------------
         # reduce action scale
