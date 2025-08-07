@@ -1,10 +1,13 @@
+# ==============================================================================
 # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
-
+#
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
-#
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
+# ==============================================================================
 
 import inspect
 import math
@@ -33,10 +36,7 @@ import robot_lab.tasks.locomotion.velocity.mdp as mdp
 ##
 # Pre-defined configs
 ##
-from robot_lab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-from robot_lab.terrains.config.rough import SLOPE_TERRAINS_CFG  # isort: skip
-from robot_lab.terrains.config.rough import NOISE_TERRAINS_CFG  # isort: skip
-from robot_lab.terrains.config.rough import STAIR_TERRAINS_CFG  # isort: skip
+from robot_lab.terrains.config.rough import *
 
 
 ##
@@ -78,7 +78,7 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment='yaw',
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.4, 0.8]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -86,10 +86,11 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment='yaw',
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.1, 0.1)),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.05, 0.05)),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
+    ray_caster = None
     # camera = CameraCfg(
     #     prim_path="{ENV_REGEX_NS}/Robot/body/camera",
     #     update_period=0.1,
@@ -667,7 +668,7 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 4
-        self.episode_length_s = 7
+        self.episode_length_s = 20
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
@@ -678,6 +679,8 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+        if self.scene.ray_caster is not None:
+            self.scene.ray_caster.update_period = self.decimation * self.sim.dt
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
         # if self.scene.camera is not None:

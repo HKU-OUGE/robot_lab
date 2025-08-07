@@ -2,6 +2,9 @@
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
+
 
 """Configuration for custom terrains."""
 
@@ -137,5 +140,47 @@ PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
             size=(20.0, 10.0)
         ),
     },
+)
+
+
+FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=2.0,        # 地形边界，防止掉落
+    num_rows=1,
+    num_cols=1,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+            proportion=1.0,                           # 完全生成此地形
+            ring_width_range=(0.5, 1.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.50, 0.80),             # 环的离地高度范围
+            ring_thickness=0.4,                       # 环厚度（z 方向）
+            platform_width=5.0,                       # 地形中心的方形平台大小
+            size=(10.0, 10.0),                        # 每块地形大小
+        )
+    }
+)
+
+PIT_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=2.0,
+    num_rows=1,
+    num_cols=1,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
+            proportion=1.0,                          
+            pit_depth_range=(0.4, 1.0),              # 坑的深度范围
+            platform_width=5.0,                      # 中心平台宽度
+            double_pit=False,                         # 启用双层坑（更难）
+            size=(10.0, 10.0),                       # 每块子地形的大小
+        )
+    }
 )
 """Rough terrains configuration."""

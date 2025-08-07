@@ -1,10 +1,13 @@
+# ==============================================================================
 # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
-
+#
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
-#
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
+# ==============================================================================
 
 """Script to train RL agent with RSL-RL."""
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2025 Tianyang TANG
 # SPDX-License-Identifier: Apache-2.0
 import isaaclab.sim as sim_utils
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -8,6 +8,10 @@ from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
 from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
+from isaaclab.managers import SceneEntityCfg
 ##
 # Pre-defined configs
 ##
@@ -19,7 +23,7 @@ class CUHKLRLSiriusWActionsCfg(ActionsCfg):
     """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(
-        asset_name="robot", joint_names=[""], scale=0.25, use_default_offset=True, clip=None, preserve_order=True
+        asset_name="robot", joint_names=[""], scale=0.5, use_default_offset=True, clip=None, preserve_order=True
     )
 
     joint_vel = mdp.JointVelocityActionCfg(
@@ -94,6 +98,19 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.height_scanner_base = None
+        self.scene.height_scanner = None
+        self.scene.ray_caster = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+            mesh_prim_paths=["/World/ground"],
+            ray_alignment="yaw",
+            pattern_cfg=patterns.LidarPatternCfg(
+                channels=5, vertical_fov_range=[-45, 45], horizontal_fov_range=[-180, 180], horizontal_res=5.0
+            ),
+            # debug_vis=not args_cli.headless,
+            debug_vis=True,
+        )
         # self.scene.terrain = TerrainImporterCfg(
         #     prim_path="/World/ground",
         #     terrain_type="usd",  # 使用 .usd 文件作为地形
@@ -118,16 +135,26 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
-        self.observations.policy.height_scan = None
+        # self.observations.policy.height_scan = None
+        self.observations.policy.height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
-
+        self.observations.critic.height_scan = ObsTerm(
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
+        )
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.scale = 0.5
         self.actions.joint_vel.scale = 5.0
-        self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
-        self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
+        self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
+        self.actions.joint_vel.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
         # self.actions.joint_pos.joint_names = [
@@ -159,16 +186,17 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # }
         # ------------------------------Rewards------------------------------
         # General
-        # UNUESD self.rewards.is_alive.weight = 0
-        self.rewards.is_terminated.weight = 0
+        self.rewards.is_alive.weight = 0.1
+        self.rewards.is_terminated.weight = -0.25
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.ang_vel_xy_l2.weight = -0.1
+        self.rewards.ang_vel_xy_l2.weight = -0.2
         self.rewards.flat_orientation_l2.weight = 0
         self.rewards.base_height_l2.weight = -1.0
         self.rewards.base_height_l2.params["target_height"] = 0.9
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
+        # self.rewards.base_height_l2.params["sensor_cfg"] = SceneEntityCfg("ray_caster"),
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
 
@@ -193,7 +221,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = [self.wheel_joint_name]
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.0005
+        self.rewards.action_rate_l2.weight = -0.005
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
@@ -203,13 +231,13 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.contact_foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.0
-        self.rewards.track_ang_vel_z_exp.weight = 1.5
+        self.rewards.track_lin_vel_xy_exp.weight = 3.5
+        self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
-        self.rewards.feet_air_time.weight = 0
-        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.air_foot_link_name]
-        self.rewards.feet_contact.weight = 0
+        self.rewards.feet_air_time.weight = 0.5
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_contact.weight = 0.5
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.contact_foot_link_name]
         self.rewards.feet_stumble.weight = -10.0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -223,8 +251,8 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_position_penalty.weight = -0.25
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 100
-        self.rewards.feet_height_exp.weight = 0
-        self.rewards.feet_height_exp.params["target_height"] = 0.1
+        self.rewards.feet_height_exp.weight = 0.1
+        self.rewards.feet_height_exp.params["target_height"] = 0.3
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.contact_foot_link_name]
         self.rewards.feet_height_body_exp.weight = 0
         self.rewards.feet_height_body_exp.params["target_height"] = -0.8
@@ -243,15 +271,15 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
 
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         # ------------------------------Terrains------------------------------
         # self.scene.terrain.terrain_type = "plane"
         # self.scene.terrain.terrain_generator = None
-        # # no height scan
-        # self.scene.height_scanner = None
-        # self.observations.policy.height_scan = None
-        # self.observations.critic.height_scan = None
-        # # no terrain curriculum
+        # # # no height scan
+        # # self.scene.height_scanner = None
+        # # self.observations.policy.height_scan = None
+        # # self.observations.critic.height_scan = None
+        # # # no terrain curriculum
         # self.curriculum.terrain_levels = None

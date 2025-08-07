@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2025 Tianyang TANG
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
@@ -8,7 +8,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 3000
+    max_iterations = 6000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_rough"
     empirical_normalization = False

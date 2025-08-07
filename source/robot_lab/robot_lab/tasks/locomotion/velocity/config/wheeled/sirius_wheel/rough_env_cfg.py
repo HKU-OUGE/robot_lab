@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2025 Tianyang TANG
 # SPDX-License-Identifier: Apache-2.0
 import isaaclab.sim as sim_utils
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -7,7 +7,9 @@ from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
 from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg
-
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
+from isaaclab.managers import ObservationTermCfg as ObsTerm
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
 ##
 # Pre-defined configs
 ##
@@ -89,7 +91,30 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.observations.critic.height_scan = None
         # no terrain curriculum
         # self.curriculum.terrain_levels = None
+
+        self.scene.height_scanner = None
+        self.scene.ray_caster = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/trunk",
+            offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+            mesh_prim_paths=["/World/ground"],
+            ray_alignment="yaw",
+            pattern_cfg=patterns.LidarPatternCfg(
+                channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
+            ),
+            # debug_vis=not args_cli.headless,
+            debug_vis=True,
+        )
         # ------------------------------Observations------------------------------
+        self.observations.policy.height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
+            noise=Unoise(n_min=-0.1, n_max=0.1),
+            clip=(-1.0, 1.0),
+            scale=1.0,
+        )
+        self.observations.critic.height_scan = ObsTerm(
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
+        )
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
         self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=[self.wheel_joint_name]
@@ -102,8 +127,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.scale = 0.05
-        self.observations.policy.base_lin_vel = None
-        self.observations.policy.height_scan = None
+        # self.observations.policy.base_lin_vel = None
+        # self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
@@ -130,10 +155,10 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -2.0
-        self.rewards.ang_vel_xy_l2.weight = -0.05
+        self.rewards.ang_vel_xy_l2.weight = -0.1
         self.rewards.flat_orientation_l2.weight = -0.5
         self.rewards.base_height_l2.weight = -1.0
-        self.rewards.base_height_l2.params["target_height"] = 0.60
+        self.rewards.base_height_l2.params["target_height"] = 0.61
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]

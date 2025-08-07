@@ -2,6 +2,8 @@
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
 
 """Pre-defined terrain configurations for the terrain generator."""
 
