@@ -145,9 +145,9 @@ PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
 
 FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(10.0, 10.0),       # 整个 terrain tile 尺寸
-    border_width=2.0,        # 地形边界，防止掉落
-    num_rows=1,
-    num_cols=1,
+    border_width=20.0,        # 地形边界，防止掉落
+    num_rows=10,
+    num_cols=20,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
@@ -165,22 +165,30 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
 )
 
 PIT_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
-    border_width=2.0,
-    num_rows=1,
-    num_cols=1,
+    size=(20.0, 20.0),       # 整个 terrain tile 尺寸
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
-            proportion=1.0,                          
-            pit_depth_range=(0.4, 1.0),              # 坑的深度范围
+            proportion=0.5,                          
+            pit_depth_range=(0.6, 1.2),              # 坑的深度范围
             platform_width=5.0,                      # 中心平台宽度
             double_pit=False,                         # 启用双层坑（更难）
-            size=(10.0, 10.0),                       # 每块子地形的大小
-        )
+            size=(20.0, 20.0),                       # 每块子地形的大小
+        ),
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.4,
+            step_height_range=(0.6, 1.2),
+            step_width=1.5,
+            platform_width=5.0,
+            border_width=5.0,
+            holes=False,
+        ),
     }
 )
 """Rough terrains configuration."""
