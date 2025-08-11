@@ -91,6 +91,8 @@ class MySceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/ground"],
     )
     ray_caster = None
+
+    main_camera = None
     # camera = CameraCfg(
     #     prim_path="{ENV_REGEX_NS}/Robot/body/camera",
     #     update_period=0.1,
@@ -683,6 +685,8 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.ray_caster.update_period = self.decimation * self.sim.dt
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
+        if self.scene.main_camera is not None:
+            self.scene.main_camera.update_period = self.decimation * self.sim.dt
         # if self.scene.camera is not None:
         #     self.scene.camera.update_period = self.sim.dt
 

@@ -1,15 +1,17 @@
 # Copyright (c) 2024-2025 Tianyang TANG
 # SPDX-License-Identifier: Apache-2.0
 import isaaclab.sim as sim_utils
+from isaaclab.envs.mdp import observations as obs_terms
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, ObservationsCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
+from isaaclab.managers import ObservationGroupCfg as ObsGroup
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg, TiledCameraCfg
 ##
 # Pre-defined configs
 ##
@@ -46,12 +48,49 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         func=mdp.joint_torques_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
     )
 
+@configclass
+class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
+    """Reward terms for the MDP."""
+    @configclass
+    class PolicyCfg(ObservationsCfg.PolicyCfg):
+        front_depth_feat = ObsTerm(
+            func=obs_terms.image_features,
+            params={
+                "sensor_cfg": SceneEntityCfg("main_camera"),
+                "data_type": "distance_to_image_plane",
+                "model_name": "resnet18",
+                # "token_pool": "mean",
+                # "model_device": "cpu",
+            },
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        def __post_init__(self):
+            super().__post_init__()
+
+    @configclass
+    class CriticCfg(ObservationsCfg.CriticCfg):
+        front_depth_feat = ObsTerm(
+            func=obs_terms.image_features,
+            params={
+                "sensor_cfg": SceneEntityCfg("main_camera"),
+                "data_type": "distance_to_image_plane",
+                "model_name": "resnet18",
+            },
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        def __post_init__(self):
+            super().__post_init__()
+
+    policy: PolicyCfg = PolicyCfg()
+    critic: CriticCfg = CriticCfg()
 
 @configclass
 class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: CUHKLRLSiriusWActionsCfg = CUHKLRLSiriusWActionsCfg()
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
-
+    # observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT"
     wheel_joint_name = ".*_WHEEL"
@@ -64,7 +103,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
     ]
     # fmt: on
-
+    non_wheel_joint_names = joint_names[:-4]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -76,6 +115,22 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator = FLOATING_RING_TERRAINS_CFG
+        # self.scene.main_camera = TiledCameraCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/trunk/front_cam",  
+        #     width=64, height=64,
+        #     data_types=["distance_to_image_plane"], 
+        #     spawn=sim_utils.PinholeCameraCfg(
+        #         focal_length=24.0, focus_distance=2.0,
+        #         horizontal_aperture=20.955, clipping_range=(0.1, 20.0)
+        #     ),
+        #     offset=CameraCfg.OffsetCfg(
+        #         pos=(0.25, 0.0, 0.15),
+        #         rot=(1.0, 0.0, 0.0, 0.0),
+        #         convention="ros",
+        #     ),
+        #     history_length=1,
+        #     debug_vis=False, 
+        # )
         # self.scene.terrain.usd_path ="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_B/Flat_Mountain_B.usd"
         # self.scene.terrain = TerrainImporterCfg(
         #     prim_path="/World/ground",
@@ -117,13 +172,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
         )
-        self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
-        self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[self.wheel_joint_name]
+        self.observations.policy.joint_pos.func = mdp.joint_pos_rel
+        self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
         )
-        self.observations.critic.joint_pos.func = mdp.joint_pos_rel_without_wheel
-        self.observations.critic.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[self.wheel_joint_name]
+        self.observations.critic.joint_pos.func = mdp.joint_pos_rel
+        self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
@@ -131,7 +186,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         # self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = None
-        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
 
         # ------------------------------Actions------------------------------
