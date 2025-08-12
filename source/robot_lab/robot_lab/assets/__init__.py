@@ -5,6 +5,8 @@
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
 
 """Package containing asset and sensor configurations."""
 

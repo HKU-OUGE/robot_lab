@@ -1,10 +1,13 @@
+# ==============================================================================
 # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
-
+#
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
-#
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
+# ==============================================================================
 
 """Script to play a checkpoint if an RL agent from RSL-RL."""
 
@@ -87,7 +90,7 @@ def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # make a smaller scene for play
-    env_cfg.scene.num_envs = 50
+    env_cfg.scene.num_envs = args_cli.num_envs
     # spawn the robot randomly in the grid (instead of their terrain levels)
     env_cfg.scene.terrain.max_init_terrain_level = None
     # reduce the number of terrains to save memory
@@ -114,6 +117,14 @@ def main():
         env_cfg.observations.policy.velocity_commands = ObsTerm(
             func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
         )
+        
+        def reset_env_callback():
+            print("[INFO] 'R' key pressed: Resetting environment.")
+            nonlocal obs
+            obs, _ = env.reset()
+
+        controller.add_callback("R", reset_env_callback)
+
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -263,7 +274,6 @@ def main():
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-
         if args_cli.keyboard:
             rsl_rl_utils.camera_follow(env)
 

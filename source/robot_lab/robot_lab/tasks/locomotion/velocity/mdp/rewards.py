@@ -371,11 +371,14 @@ def feet_height_body_exp(
     ].unsqueeze(1)
     footvel_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
     for i in range(len(asset_cfg.body_ids)):
-        footpos_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
+        # footpos_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
+        #     asset.data.root_quat_w, cur_footpos_translated[:, i, :]
+        # )
+        footpos_in_body_frame[:, i, :] = quat_apply_inverse(
             asset.data.root_quat_w, cur_footpos_translated[:, i, :]
         )
-        # footpos_in_body_frame[:, i, :] = quat_apply_inverse(
-        #     asset.data.root_quat_w, cur_footpos_translated[:, i, :]
+        # footvel_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
+        #     asset.data.root_quat_w, cur_footvel_translated[:, i, :]
         # )
         footvel_in_body_frame[:, i, :] = math_utils.quat_rotate_inverse(
             asset.data.root_quat_w, cur_footvel_translated[:, i, :]
