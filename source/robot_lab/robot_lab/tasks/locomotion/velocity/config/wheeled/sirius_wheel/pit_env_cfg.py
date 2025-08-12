@@ -106,13 +106,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     debug_vis=True,
         # )
         # ------------------------------Observations------------------------------
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            scale=1.0,
-        )
+        # self.observations.policy.height_scan = ObsTerm(
+        #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
+        # )
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
         )
@@ -135,8 +131,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 5.0
+        self.actions.joint_pos.scale = 0.35
+        self.actions.joint_vel.scale = 8.0
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -155,11 +151,11 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = 0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -0.5
-        self.rewards.ang_vel_xy_l2.weight = -0.5
-        self.rewards.flat_orientation_l2.weight = -0.1
-        self.rewards.base_height_l2.weight = -0.2
-        self.rewards.base_height_l2.params["target_height"] = 0.65
+        self.rewards.lin_vel_z_l2.weight = 0.0
+        self.rewards.ang_vel_xy_l2.weight = -0.2
+        self.rewards.flat_orientation_l2.weight = -0.05
+        self.rewards.base_height_l2.weight = -0.05
+        self.rewards.base_height_l2.params["target_height"] = 0.55
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -208,6 +204,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
+        self.rewards.upward.weight = 0.0005
         self.rewards.joint_power.weight = 0.0
         self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.stand_still_without_cmd.weight = 0
@@ -215,15 +212,15 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_position_penalty.weight = -0.5
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.2
-        self.rewards.feet_height_exp.weight = 0
-        self.rewards.feet_height_exp.params["target_height"] = 0.1
+        self.rewards.feet_height_exp.weight = 1.0
+        self.rewards.feet_height_exp.params["target_height"] = 0.2
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height_body_exp.weight = 0
         self.rewards.feet_height_body_exp.params["target_height"] = -0.4
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RH_FOOT"), ("RF_FOOT", "LH_FOOT"))
-        self.rewards.wheel_spin_in_air_penalty.weight = -0.01
+        self.rewards.wheel_spin_in_air_penalty.weight = -0.05
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
 
@@ -235,6 +232,6 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
