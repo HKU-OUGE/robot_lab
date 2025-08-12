@@ -110,12 +110,12 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 0.4]),
-            debug_vis=False,
+            debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.height_scanner_base = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/trunk",
-            offset=RayCasterCfg.OffsetCfg(pos=(-0.5, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(-0.3, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.02, 0.02)),
             debug_vis=True,
@@ -170,8 +170,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = 0.0
         self.rewards.ang_vel_xy_l2.weight = -0.2
         self.rewards.flat_orientation_l2.weight = -0.05
-        self.rewards.base_height_l2.weight = -0.05
-        self.rewards.base_height_l2.params["target_height"] = 0.55
+        self.rewards.base_height_l2.weight = -0.5
+        self.rewards.base_height_l2.params["target_height"] = 0.62
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -213,22 +213,22 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_contact.weight = 0
+        self.rewards.feet_contact.weight = 1.0
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_stumble.weight = -10.0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.upward.weight = 0.0005
+        self.rewards.upward.weight = 0.001
         self.rewards.joint_power.weight = 0.0
         self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.stand_still_without_cmd.weight = 0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_position_penalty.weight = -0.5
+        self.rewards.joint_position_penalty.weight = -0.1
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.2
-        self.rewards.feet_height_exp.weight = 1.0
+        self.rewards.feet_height_exp.weight = 0.0
         self.rewards.feet_height_exp.params["target_height"] = 0.2
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_height_body_exp.weight = 0
