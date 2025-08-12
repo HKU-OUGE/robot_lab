@@ -105,6 +105,22 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     # debug_vis=not args_cli.headless,
         #     debug_vis=True,
         # )
+        self.scene.height_scanner = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 0.4]),
+            debug_vis=False,
+            mesh_prim_paths=["/World/ground"],
+        )
+        self.scene.height_scanner_base = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(-0.5, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.02, 0.02)),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
         #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
