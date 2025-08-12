@@ -106,7 +106,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     debug_vis=True,
         # )
         self.scene.height_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
+            prim_path="{ENV_REGEX_NS}/Robot/trunk",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 0.4]),
@@ -114,7 +114,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.height_scanner_base = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
+            prim_path="{ENV_REGEX_NS}/Robot/trunk",
             offset=RayCasterCfg.OffsetCfg(pos=(-0.5, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.02, 0.02)),
