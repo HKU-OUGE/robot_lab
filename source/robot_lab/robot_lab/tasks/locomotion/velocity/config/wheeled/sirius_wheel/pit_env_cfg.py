@@ -109,13 +109,13 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
             prim_path="{ENV_REGEX_NS}/Robot/trunk",
             offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
             ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[2.0, 0.4]),
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.5, 0.4]),
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.height_scanner_base = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/trunk",
-            offset=RayCasterCfg.OffsetCfg(pos=(-0.3, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.02, 0.02)),
             debug_vis=True,
@@ -147,8 +147,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.35
-        self.actions.joint_vel.scale = 8.0
+        self.actions.joint_pos.scale = 0.5
+        self.actions.joint_vel.scale = 12.0
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -171,7 +171,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.2
         self.rewards.flat_orientation_l2.weight = -0.05
         self.rewards.base_height_l2.weight = -0.5
-        self.rewards.base_height_l2.params["target_height"] = 0.62
+        self.rewards.base_height_l2.params["target_height"] = 0.65
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -207,7 +207,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.0
+        self.rewards.track_lin_vel_xy_exp.weight = 4.0
         self.rewards.track_ang_vel_z_exp.weight = 1.5
 
         # Others
@@ -220,12 +220,12 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.upward.weight = 0.001
+        self.rewards.upward.weight = 0.0005
         self.rewards.joint_power.weight = 0.0
         self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.stand_still_without_cmd.weight = 0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_position_penalty.weight = -0.1
+        self.rewards.joint_position_penalty.weight = -0.5
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.2
         self.rewards.feet_height_exp.weight = 0.0
@@ -248,6 +248,6 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)

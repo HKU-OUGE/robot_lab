@@ -176,14 +176,14 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
             proportion=0.5,                          
-            pit_depth_range=(0.2, 1.2),              # 坑的深度范围
+            pit_depth_range=(0.01, 1.2),              # 坑的深度范围
             platform_width=5.0,                      # 中心平台宽度
             double_pit=False,                         # 启用双层坑（更难）
             size=(20.0, 20.0),                       # 每块子地形的大小
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.4,
-            step_height_range=(0.2, 1.2),
+            step_height_range=(0.01, 1.0),
             step_width=1.5,
             platform_width=5.0,
             border_width=5.0,

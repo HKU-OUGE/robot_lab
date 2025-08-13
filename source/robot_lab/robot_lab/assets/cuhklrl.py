@@ -107,7 +107,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.58),
+        pos=(0.0, 0.0, 0.67),
         joint_pos={
             "LF_HAA": 0.00,
             "LH_HAA": 0.00,
