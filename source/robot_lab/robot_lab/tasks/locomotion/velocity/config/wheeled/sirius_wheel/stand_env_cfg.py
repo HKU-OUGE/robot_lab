@@ -102,17 +102,17 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.height_scanner_base = None
         self.scene.height_scanner = None
-        self.scene.ray_caster = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
-            mesh_prim_paths=["/World/ground"],
-            ray_alignment="yaw",
-            pattern_cfg=patterns.LidarPatternCfg(
-                channels=5, vertical_fov_range=[-45, 45], horizontal_fov_range=[-180, 180], horizontal_res=5.0
-            ),
-            # debug_vis=not args_cli.headless,
-            debug_vis=True,
-        )
+        # self.scene.ray_caster = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/base",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+        #     mesh_prim_paths=["/World/ground"],
+        #     ray_alignment="yaw",
+        #     pattern_cfg=patterns.LidarPatternCfg(
+        #         channels=5, vertical_fov_range=[-45, 45], horizontal_fov_range=[-180, 180], horizontal_res=5.0
+        #     ),
+        #     # debug_vis=not args_cli.headless,
+        #     debug_vis=True,
+        # )
         # self.scene.terrain = TerrainImporterCfg(
         #     prim_path="/World/ground",
         #     terrain_type="usd",  # 使用 .usd 文件作为地形
@@ -138,19 +138,19 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            scale=1.0,
-        )
+        # self.observations.policy.height_scan = ObsTerm(
+        #     func=mdp.height_scan,
+        #     params={"sensor_cfg": SceneEntityCfg("ray_caster")},
+        #     noise=Unoise(n_min=-0.1, n_max=0.1),
+        #     clip=(-1.0, 1.0),
+        #     scale=1.0,
+        # )
 
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
-        self.observations.critic.height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
-        )
+        # self.observations.critic.height_scan = ObsTerm(
+        #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
+        # )
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.5
@@ -289,11 +289,11 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         # ------------------------------Terrains------------------------------
-        # self.scene.terrain.terrain_type = "plane"
-        # self.scene.terrain.terrain_generator = None
-        # # # no height scan
-        # # self.scene.height_scanner = None
-        # # self.observations.policy.height_scan = None
-        # # self.observations.critic.height_scan = None
-        # # # no terrain curriculum
-        # self.curriculum.terrain_levels = None
+        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator = None
+        # no height scan
+        self.scene.height_scanner = None
+        self.observations.policy.height_scan = None
+        self.observations.critic.height_scan = None
+        # no terrain curriculum
+        self.curriculum.terrain_levels = None
