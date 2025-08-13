@@ -206,7 +206,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.2
-        self.rewards.flat_orientation_l2.weight = 0
+        self.rewards.flat_orientation_l2.weight = -3.5
         self.rewards.base_height_l2.weight = -1.0
         self.rewards.base_height_l2.params["target_height"] = 0.9
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -266,7 +266,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 100
         self.rewards.feet_height_exp.weight = 0.1
-        self.rewards.feet_height_exp.params["target_height"] = 0.3
+        self.rewards.feet_height_exp.params["targetheight"] = 0.3
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.contact_foot_link_name]
         self.rewards.feet_height_body_exp.weight = 0
         self.rewards.feet_height_body_exp.params["target_height"] = -0.8
@@ -282,8 +282,8 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = None
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)

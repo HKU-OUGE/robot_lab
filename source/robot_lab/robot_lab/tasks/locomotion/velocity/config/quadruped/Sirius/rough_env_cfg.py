@@ -156,7 +156,7 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 6.0
 
         # Others
-        self.rewards.feet_air_time.weight = 4.0
+        self.rewards.feet_air_time.weight = 2.0
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -175,10 +175,10 @@ class CUHKLRLSiriusRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_power.weight = -2e-5
         # 测试 暂时取消
         self.rewards.joint_power.weight = -2e-5
-        self.rewards.stand_still_without_cmd.weight = 0.1
+        self.rewards.stand_still_without_cmd.weight = 0.5
         self.rewards.joint_position_penalty.weight = -0.1
         # self.rewards.joint_position_penalty.weight = 0.0
-        self.rewards.feet_height_exp.weight = 4.0
+        self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.20
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
