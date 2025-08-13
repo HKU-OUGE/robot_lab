@@ -203,7 +203,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Contact sensor
         self.rewards.undesired_contacts.weight = -0.5
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
-        self.rewards.contact_forces.weight = 2.0
+        self.rewards.contact_forces.weight = 0.001
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
