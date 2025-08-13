@@ -12,6 +12,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import EventTermCfg as EventTerm
 ##
 # Pre-defined configs
 ##
@@ -173,17 +174,29 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["force_range"] = (-10.0, 10.0)
         self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
-        # self.events.randomize_reset_base.params = {
-        #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14), "pitch": (-1.57, -1.57)},
-        #     "velocity_range": {
-        #         "x": (0.0, 0.0),
-        #         "y": (0.0, 0.0),
-        #         "z": (0.0, 0.0),
-        #         "roll": (0.0, 0.0),
-        #         "pitch": (0.0, 0.0),
-        #         "yaw": (0.0, 0.0),
-        #     },
-        # }
+        self.events.randomize_reset_base.params = {
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14), "pitch": (1.57, 1.57)},
+            "velocity_range": {
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
+                "z": (0.0, 0.0),
+                "roll": (0.0, 0.0),
+                "pitch": (0.0, 0.0),
+                "yaw": (0.0, 0.0),
+            },
+        }
+        self.events.set_start_pose = EventTerm(
+            func=mdp.set_joint_positions_simple,
+            mode="reset",
+            params={
+                "joint_pos": {
+                    "LF_HAA": 0.00, "LH_HAA": 0.00, "RF_HAA": -0.00, "RH_HAA": -0.00,
+                    "LF_HFE": 0.67,  "LH_HFE": -0.67,  "RF_HFE": 0.67,  "RH_HFE": -0.67,
+                    "LF_KFE": -1.3, "LH_KFE": 1.3,  "RF_KFE": -1.3, "RH_KFE": 1.3,
+                    "LF_WHEEL": 0.00, "LH_WHEEL": 0.00, "RF_WHEEL": 0.00, "RH_WHEEL": 0.00,
+                }
+            },
+        )
         # ------------------------------Rewards------------------------------
         # General
         self.rewards.is_alive.weight = 0.1

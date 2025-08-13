@@ -19,6 +19,7 @@ import sys
 
 from isaaclab.app import AppLauncher
 from isaaclab.utils.dict import print_dict
+
 # import json
 
 # local imports
@@ -72,7 +73,7 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
-
+from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
 import robot_lab.tasks  # noqa: F401
 
 
@@ -109,20 +110,24 @@ def main():
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
-        controller = Se2Keyboard(
-            v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
-            v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
-            omega_z_sensitivity=env_cfg.commands.base_velocity.ranges.ang_vel_z[1],
+
+        kb_cfg = Se2KeyboardCfg(
+            v_x_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
+            v_y_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_y[1]),
+            omega_z_sensitivity=float(env_cfg.commands.base_velocity.ranges.ang_vel_z[1]),
+            # sim_device 默认即可；需要的话可传 env_cfg.sim.device
         )
+        controller = Se2Keyboard(kb_cfg)  # ← 用配置类构造
+
+        # 返回形状 [1, 3] 的 (vx, vy, wz)
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
+            func=lambda env: controller.advance().unsqueeze(0),
         )
-        
+
         def reset_env_callback():
             print("[INFO] 'R' key pressed: Resetting environment.")
             nonlocal obs
             obs, _ = env.reset()
-
         controller.add_callback("R", reset_env_callback)
 
 

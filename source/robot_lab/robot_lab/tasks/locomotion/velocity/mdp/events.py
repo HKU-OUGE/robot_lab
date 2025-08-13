@@ -196,3 +196,29 @@ def _randomize_prop_by_op(
             f"Unknown operation: '{operation}' for property randomization. Please use 'add', 'scale', or 'abs'."
         )
     return data
+
+
+def set_joint_positions_simple(env: ManagerBasedRLEnv, joint_pos: dict):
+    robot = env.scene["robot"]
+    q = robot.data.joint_pos.clone()   # [num_envs, num_dofs]
+    dq = robot.data.joint_vel.clone()
+
+    name_to_id = {name: i for i, name in enumerate(robot.joint_names)}
+    num_envs = q.shape[0]
+
+    for name, val in (joint_pos or {}).items():
+        j = name_to_id.get(name, None)
+        if j is None:
+            continue
+        if isinstance(val, (int, float)):
+            q[:, j] = float(val)
+        else:
+            v = torch.as_tensor(val, device=q.device, dtype=q.dtype)
+            if v.ndim == 0:
+                v = v.repeat(num_envs)
+            elif v.shape[0] != num_envs:
+                v = v.reshape(-1).repeat(num_envs)[:num_envs]
+            q[:, j] = v
+
+    dq[:] = 0.0
+    robot.write_joint_state_to_sim(q, dq)
