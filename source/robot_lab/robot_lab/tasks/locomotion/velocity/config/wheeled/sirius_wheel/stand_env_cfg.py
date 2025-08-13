@@ -76,7 +76,8 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
-        CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.pos=(0.0, 0.0, 1.0)
+        CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.pos=(0.0, 0.0, 0.63)
+        # CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.pos=(0.0, 0.0, 1.0)
         CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.joint_pos={
             "LF_HAA": 0.00,
             "LH_HAA": 0.00,

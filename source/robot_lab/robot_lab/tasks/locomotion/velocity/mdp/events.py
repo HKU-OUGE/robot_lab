@@ -198,27 +198,48 @@ def _randomize_prop_by_op(
     return data
 
 
-def set_joint_positions_simple(env: ManagerBasedRLEnv, joint_pos: dict):
+def set_joint_positions_simple(env: ManagerBasedRLEnv, env_ids, joint_pos: dict):
+    """
+    在 reset 阶段给指定 env_ids 设置 joint_pos，未指定的关节保持不变，所有关节速度清零。
+    仅需传入一个参数 joint_pos={name: value}（在 EventTerm.params 里）
+    """
     robot = env.scene["robot"]
-    q = robot.data.joint_pos.clone()   # [num_envs, num_dofs]
+    device = robot.data.joint_pos.device
+
+    # env_ids 可能是 None、list、torch.Tensor，统一成 1D LongTensor
+    if env_ids is None:
+        env_ids = torch.arange(robot.data.joint_pos.shape[0], device=device, dtype=torch.long)
+    elif not torch.is_tensor(env_ids):
+        env_ids = torch.as_tensor(env_ids, device=device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=device, dtype=torch.long)
+
+    # 复制当前状态
+    q  = robot.data.joint_pos.clone()  # [N, DoF]
     dq = robot.data.joint_vel.clone()
 
     name_to_id = {name: i for i, name in enumerate(robot.joint_names)}
-    num_envs = q.shape[0]
+    n_sel = env_ids.shape[0]
 
     for name, val in (joint_pos or {}).items():
         j = name_to_id.get(name, None)
         if j is None:
+            # 找不到关节名就跳过（或改成 raise 更严格）
             continue
-        if isinstance(val, (int, float)):
-            q[:, j] = float(val)
-        else:
-            v = torch.as_tensor(val, device=q.device, dtype=q.dtype)
-            if v.ndim == 0:
-                v = v.repeat(num_envs)
-            elif v.shape[0] != num_envs:
-                v = v.reshape(-1).repeat(num_envs)[:num_envs]
-            q[:, j] = v
 
-    dq[:] = 0.0
+        if isinstance(val, (int, float)):
+            q[env_ids, j] = float(val)
+        else:
+            v = torch.as_tensor(val, device=device, dtype=q.dtype)
+            if v.ndim == 0:
+                v = v.repeat(n_sel)
+            elif v.shape[0] != n_sel:
+                # 广播/截断到 env_ids 数量
+                v = v.reshape(-1).repeat(n_sel)[:n_sel]
+            q[env_ids, j] = v
+
+    # 速度清零（只清选中的 env，安全些）
+    dq[env_ids, :] = 0.0
+
+    # 写回仿真
     robot.write_joint_state_to_sim(q, dq)
