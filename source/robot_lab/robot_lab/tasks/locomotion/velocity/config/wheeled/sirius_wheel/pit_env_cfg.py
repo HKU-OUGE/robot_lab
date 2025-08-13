@@ -220,7 +220,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.upward.weight = 0.0005
+        # self.rewards.upward.weight = 0.0005
         self.rewards.joint_power.weight = 0.0
         self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.stand_still_without_cmd.weight = 0
