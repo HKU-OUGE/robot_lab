@@ -27,9 +27,12 @@ class CUHKLRLSiriusWFlatEnvCfg(CUHKLRLSiriusWRoughEnvCfg):
         self.observations.critic.height_scan = None
         # no terrain curriculum
         self.curriculum.terrain_levels = None
+        self.rewards.joint_position_penalty.weight = -2.5
+        self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
+        self.rewards.joint_position_penalty.params["velocity_threshold"] = 2.0
         self.commands.base_velocity.ranges.lin_vel_x = (-2.5, 2.5)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.ang_vel_z = (-2.0, 2.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-2.5, 2.5)
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWFlatEnvCfg":
             self.disable_zero_weight_rewards()
