@@ -63,7 +63,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
     ]
     # fmt: on
-
+    non_wheel_joint_names = joint_names[:-4]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -116,13 +116,21 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.observations.critic.height_scan = ObsTerm(
         #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
         # )
-        self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
-        self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[self.wheel_joint_name]
+        # self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
+        # self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=[self.wheel_joint_name]
+        # )
+        # self.observations.critic.joint_pos.func = mdp.joint_pos_rel_without_wheel
+        # self.observations.critic.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=[self.wheel_joint_name]
+        # )
+        self.observations.policy.joint_pos.func = mdp.joint_pos_rel
+        self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
         )
-        self.observations.critic.joint_pos.func = mdp.joint_pos_rel_without_wheel
-        self.observations.critic.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=[self.wheel_joint_name]
+        self.observations.critic.joint_pos.func = mdp.joint_pos_rel
+        self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
@@ -130,8 +138,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
-        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
-        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
+        # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
+        # self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
+        # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names[:-4]
 
         # ------------------------------Actions------------------------------
         # reduce action scale
