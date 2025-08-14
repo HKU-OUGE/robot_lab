@@ -121,8 +121,9 @@ def main():
 
         # 返回形状 [1, 3] 的 (vx, vy, wz)
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: controller.advance().unsqueeze(0),
+            func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
         )
+
 
         def reset_env_callback():
             print("[INFO] 'R' key pressed: Resetting environment.")

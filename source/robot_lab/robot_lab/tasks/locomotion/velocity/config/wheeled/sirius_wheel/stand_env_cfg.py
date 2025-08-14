@@ -266,7 +266,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 100
         self.rewards.feet_height_exp.weight = 0.1
-        self.rewards.feet_height_exp.params["targetheight"] = 0.3
+        self.rewards.feet_height_exp.params["target_height"] = 0.3
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.contact_foot_link_name]
         self.rewards.feet_height_body_exp.weight = 0
         self.rewards.feet_height_body_exp.params["target_height"] = -0.8
