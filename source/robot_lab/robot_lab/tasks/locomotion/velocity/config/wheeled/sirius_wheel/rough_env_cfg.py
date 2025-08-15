@@ -64,6 +64,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     ]
     # fmt: on
     non_wheel_joint_names = joint_names[:-4]
+    only_wheel_joint_names = joint_names[-4:]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -135,6 +136,10 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
+        self.observations.policy.joint_vel.func = mdp.joint_vel_rel
+        self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.only_wheel_joint_names, preserve_order=True
+        )
         self.observations.policy.joint_vel.scale = 0.05
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
