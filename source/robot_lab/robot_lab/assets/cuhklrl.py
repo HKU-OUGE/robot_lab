@@ -136,7 +136,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             saturation_effort=50.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_thigh": DCMotorCfg(
@@ -145,7 +145,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             saturation_effort=50.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_calf": DCMotorCfg(
@@ -154,7 +154,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             saturation_effort=100.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_wheel": DCMotorCfg(
@@ -163,7 +163,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             saturation_effort=100.0,
             velocity_limit=45.0,
             stiffness=0.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
     },
@@ -216,7 +216,7 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
             saturation_effort=50.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_thigh": DCMotorCfg(
@@ -225,7 +225,7 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
             saturation_effort=50.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_calf": DCMotorCfg(
@@ -234,7 +234,7 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
             saturation_effort=100.0,
             velocity_limit=45.0,
             stiffness=25.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
         "legs_wheel": DCMotorCfg(
@@ -243,7 +243,7 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
             saturation_effort=100.0,
             velocity_limit=45.0,
             stiffness=0.0,
-            damping=0.5,
+            damping=3.0,
             friction=0.0,
         ),
     },

@@ -78,24 +78,24 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # switch robot to unitree b2w
         CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.pos=(0.0, 0.0, 0.63)
         # CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.pos=(0.0, 0.0, 1.0)
-        CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.joint_pos={
-            "LF_HAA": 0.00,
-            "LH_HAA": 0.00,
-            "RF_HAA": -0.00,
-            "RH_HAA": -0.00,
-            "LF_HFE": 1.5,
-            "LH_HFE": 1.2,
-            "RF_HFE": 1.5,
-            "RH_HFE": 1.2,
-            "LF_KFE": -1.6,
-            "LH_KFE": 0.6,
-            "RF_KFE": -1.6,
-            "RH_KFE": 0.6,
-            "LF_WHEEL": 0.00,
-            "LH_WHEEL": 0.00,
-            "RF_WHEEL": 0.00,
-            "RH_WHEEL": 0.00,
-        }
+        # CUHKLRL_SIRIUS_WHEEL_STAND_CFG.init_state.joint_pos={
+        #     "LF_HAA": 0.00,
+        #     "LH_HAA": 0.00,
+        #     "RF_HAA": -0.00,
+        #     "RH_HAA": -0.00,
+        #     "LF_HFE": 1.5,
+        #     "LH_HFE": 1.2,
+        #     "RF_HFE": 1.5,
+        #     "RH_HFE": 1.2,
+        #     "LF_KFE": -1.6,
+        #     "LH_KFE": 0.6,
+        #     "RF_KFE": -1.6,
+        #     "RH_KFE": 0.6,
+        #     "LF_WHEEL": 0.00,
+        #     "LH_WHEEL": 0.00,
+        #     "RF_WHEEL": 0.00,
+        #     "RH_WHEEL": 0.00,
+        # }
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_STAND_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
@@ -175,29 +175,29 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["force_range"] = (-10.0, 10.0)
         self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
-        self.events.randomize_reset_base.params = {
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14), "pitch": (1.57, 1.57)},
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
-            },
-        }
-        self.events.set_start_pose = EventTerm(
-            func=mdp.set_joint_positions_simple,
-            mode="reset",
-            params={
-                "joint_pos": {
-                    "LF_HAA": 0.00, "LH_HAA": 0.00, "RF_HAA": -0.00, "RH_HAA": -0.00,
-                    "LF_HFE": 0.67,  "LH_HFE": -0.67,  "RF_HFE": 0.67,  "RH_HFE": -0.67,
-                    "LF_KFE": -1.3, "LH_KFE": 1.3,  "RF_KFE": -1.3, "RH_KFE": 1.3,
-                    "LF_WHEEL": 0.00, "LH_WHEEL": 0.00, "RF_WHEEL": 0.00, "RH_WHEEL": 0.00,
-                }
-            },
-        )
+        # self.events.randomize_reset_base.params = {
+        #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14), "pitch": (1.57, 1.57)},
+        #     "velocity_range": {
+        #         "x": (0.0, 0.0),
+        #         "y": (0.0, 0.0),
+        #         "z": (0.0, 0.0),
+        #         "roll": (0.0, 0.0),
+        #         "pitch": (0.0, 0.0),
+        #         "yaw": (0.0, 0.0),
+        #     },
+        # }
+        # self.events.set_start_pose = EventTerm(
+        #     func=mdp.set_joint_positions_simple,
+        #     mode="reset",
+        #     params={
+        #         "joint_pos": {
+        #             "LF_HAA": 0.00, "LH_HAA": 0.00, "RF_HAA": -0.00, "RH_HAA": -0.00,
+        #             "LF_HFE": 0.67,  "LH_HFE": -0.67,  "RF_HFE": 0.67,  "RH_HFE": -0.67,
+        #             "LF_KFE": -1.3, "LH_KFE": 1.3,  "RF_KFE": -1.3, "RH_KFE": 1.3,
+        #             "LF_WHEEL": 0.00, "LH_WHEEL": 0.00, "RF_WHEEL": 0.00, "RH_WHEEL": 0.00,
+        #         }
+        #     },
+        # )
         # ------------------------------Rewards------------------------------
         # General
         self.rewards.is_alive.weight = 0.1
@@ -285,9 +285,9 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)
         # ------------------------------Terrains------------------------------
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
