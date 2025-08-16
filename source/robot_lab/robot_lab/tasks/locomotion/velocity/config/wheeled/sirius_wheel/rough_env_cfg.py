@@ -141,6 +141,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             "robot", joint_names=self.only_wheel_joint_names, preserve_order=True
         )
         self.observations.policy.joint_vel.scale = 0.05
+        self.observations.policy.base_lin_vel = None
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
         # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
