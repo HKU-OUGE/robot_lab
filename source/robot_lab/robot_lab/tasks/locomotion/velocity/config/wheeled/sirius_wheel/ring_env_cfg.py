@@ -104,6 +104,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
     ]
     # fmt: on
     non_wheel_joint_names = joint_names[:-4]
+    only_wheel_joint_names = joint_names[-4:]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -162,16 +163,29 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             debug_vis=True,
         )
         # ------------------------------Observations------------------------------
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            scale=1.0,
-        )
+        # self.observations.policy.height_scan = ObsTerm(
+        #     func=mdp.height_scan,
+        #     params={"sensor_cfg": SceneEntityCfg("ray_caster")},
+        #     noise=Unoise(n_min=-0.1, n_max=0.1),
+        #     clip=(-1.0, 1.0),
+        #     scale=1.0,
+        # )
+        self.observations.policy.height_scan = None
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
         )
+        # self.observations.policy.joint_pos.func = mdp.joint_pos_rel
+        # self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
+        # )
+        # self.observations.critic.joint_pos.func = mdp.joint_pos_rel
+        # self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
+        # )
+        # self.observations.policy.base_lin_vel.scale = 2.0
+        # self.observations.policy.base_ang_vel.scale = 0.25
+        # self.observations.policy.joint_pos.scale = 1.0
+        # self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
@@ -180,10 +194,15 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
         )
+        self.observations.policy.joint_vel.func = mdp.joint_vel_rel
+        self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.only_wheel_joint_names, preserve_order=True
+        )
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.scale = 0.05
+        self.observations.policy.base_lin_vel = None
         # self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = None
         # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
