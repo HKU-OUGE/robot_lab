@@ -274,35 +274,24 @@ def action_sync(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, joint_groups:
 
 
 def feet_air_time(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    asset_cfg: SceneEntityCfg,
-    sensor_cfg: SceneEntityCfg,
-    mode_time: float,
-    velocity_threshold: float,
-    command_threshold: float,
+    env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float
 ) -> torch.Tensor:
-    """Reward longer feet air and contact time."""
+    """Reward long steps taken by the feet using L2-kernel.
+
+    This function rewards the agent for taking steps that are longer than a threshold. This helps ensure
+    that the robot lifts its feet off the ground and takes steps. The reward is computed as the sum of
+    the time for which the feet are in the air.
+
+    If the commands are small (i.e. the agent is not supposed to take a step), then the reward is zero.
+    """
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    asset: Articulation = env.scene[asset_cfg.name]
-    if contact_sensor.cfg.track_air_time is False:
-        raise RuntimeError("Activate ContactSensor's track_air_time!")
     # compute the reward
-    current_air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
-    current_contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
-
-    t_max = torch.max(current_air_time, current_contact_time)
-    t_min = torch.clip(t_max, max=mode_time)
-    stance_cmd_reward = torch.clip(current_contact_time - current_air_time, -mode_time, mode_time)
-    cmd = torch.linalg.norm(env.command_manager.get_command(command_name), dim=1).unsqueeze(dim=1).expand(-1, 4)
-    body_vel = torch.linalg.norm(asset.data.root_com_lin_vel_b[:, :2], dim=1).unsqueeze(dim=1).expand(-1, 4)
-    reward = torch.where(
-        torch.logical_or(cmd > command_threshold, body_vel > velocity_threshold),
-        torch.where(t_max < mode_time, t_min, 0),
-        stance_cmd_reward,
-    )
-    reward = torch.sum(reward, dim=1)
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
+    # no reward for zero command
+    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
@@ -361,17 +350,22 @@ def feet_distance_y_exp(
     cur_footsteps_translated = asset.data.body_link_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_link_pos_w[
         :, :
     ].unsqueeze(1)
-    footsteps_in_body_frame = torch.zeros(env.num_envs, 4, 3, device=env.device)
-    for i in range(4):
+    n_feet = len(asset_cfg.body_ids)
+    footsteps_in_body_frame = torch.zeros(env.num_envs, n_feet, 3, device=env.device)
+    for i in range(n_feet):
         footsteps_in_body_frame[:, i, :] = math_utils.quat_apply(
             math_utils.quat_conjugate(asset.data.root_link_quat_w), cur_footsteps_translated[:, i, :]
         )
-    stance_width_tensor = stance_width * torch.ones([env.num_envs, 1], device=env.device)
-    desired_ys = torch.cat(
-        [stance_width_tensor / 2, -stance_width_tensor / 2, stance_width_tensor / 2, -stance_width_tensor / 2], dim=1
+    side_sign = torch.tensor(
+        [1.0 if i % 2 == 0 else -1.0 for i in range(n_feet)],
+        device=env.device,
     )
+    stance_width_tensor = stance_width * torch.ones([env.num_envs, 1], device=env.device)
+    desired_ys = stance_width_tensor / 2 * side_sign.unsqueeze(0)
     stance_diff = torch.square(desired_ys - footsteps_in_body_frame[:, :, 1])
-    return torch.exp(-torch.sum(stance_diff, dim=1) / std)
+    reward = torch.exp(-torch.sum(stance_diff, dim=1) / (std**2))
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
 def feet_distance_xy_exp(
