@@ -158,24 +158,24 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
         # ------------------------------Events------------------------------
-        self.events.randomize_reset_base.params = {
-            "pose_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (0.0, 0.2),
-                "roll": (-3.14, 3.14),
-                "pitch": (-3.14, 3.14),
-                "yaw": (-3.14, 3.14),
-            },
-            "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
-            },
-        }
+        # self.events.randomize_reset_base.params = {
+        #     "pose_range": {
+        #         "x": (-0.5, 0.5),
+        #         "y": (-0.5, 0.5),
+        #         "z": (0.0, 0.2),
+        #         "roll": (-3.14, 3.14),
+        #         "pitch": (-3.14, 3.14),
+        #         "yaw": (-3.14, 3.14),
+        #     },
+        #     "velocity_range": {
+        #         "x": (-0.5, 0.5),
+        #         "y": (-0.5, 0.5),
+        #         "z": (-0.5, 0.5),
+        #         "roll": (-0.5, 0.5),
+        #         "pitch": (-0.5, 0.5),
+        #         "yaw": (-0.5, 0.5),
+        #     },
+        # }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
@@ -272,8 +272,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        self.terminations.illegal_contact = None
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)

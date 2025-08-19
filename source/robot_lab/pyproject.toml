@@ -10,9 +10,9 @@ dependencies = [
     "lxml",
     "transformations",
     "pybullet",
-    "colorama"
+    "colorama",
     "pyqt5",
-    "pin",
+    "pin"
 ]
 
 [tool.setuptools.packages.find]
