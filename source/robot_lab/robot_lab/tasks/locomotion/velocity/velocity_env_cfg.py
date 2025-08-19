@@ -499,7 +499,14 @@ class RewardsCfg:
             "expect_contact_num": 2,
         },
     )
-
+    feet_contact_without_cmd = RewTerm(
+        func=mdp.feet_contact_without_cmd,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "command_name": "base_velocity",
+        },
+    )
     feet_stumble = RewTerm(
         func=mdp.feet_stumble,
         weight=0.0,
@@ -588,6 +595,49 @@ class RewardsCfg:
         },
     )
 
+    wheel_vel_penalty = RewTerm(
+        func=mdp.wheel_vel_penalty,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "command_name": "base_velocity",
+            "velocity_threshold": 0.5,
+            "command_threshold": 0.1,
+        },
+    )
+
+    joint_mirror = RewTerm(
+        func=mdp.joint_mirror,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "mirror_joints": [["FR.*", "RL.*"], ["FL.*", "RR.*"]],
+        },
+    )
+
+    action_mirror = RewTerm(
+        func=mdp.action_mirror,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "mirror_joints": [["FR.*", "RL.*"], ["FL.*", "RR.*"]],
+        },
+    )
+
+    action_sync = RewTerm(
+        func=mdp.action_sync,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "joint_groups": [
+                ["FR_hip_joint", "FL_hip_joint", "RL_hip_joint", "RR_hip_joint"],
+                ["FR_thigh_joint", "FL_thigh_joint", "RL_thigh_joint", "RR_thigh_joint"],
+                ["FR_calf_joint", "FL_calf_joint", "RL_calf_joint", "RR_calf_joint"],
+            ],
+        },
+    )
+
     wheel_spin_in_air_penalty = RewTerm(
         func=mdp.wheel_spin_in_air_penalty,
         weight=0.0,
@@ -597,13 +647,7 @@ class RewardsCfg:
         },
     )
 
-    upward = RewTerm(
-        func=mdp.upward,
-        weight=0.0,
-        params={
-            "std": math.sqrt(0.25),
-        },
-    )
+    upward = RewTerm(func=mdp.upward, weight=0.0)
 
 
 @configclass
