@@ -11,6 +11,8 @@ dependencies = [
     "transformations",
     "pybullet",
     "colorama"
+    "pyqt5",
+    "pin",
 ]
 
 [tool.setuptools.packages.find]
