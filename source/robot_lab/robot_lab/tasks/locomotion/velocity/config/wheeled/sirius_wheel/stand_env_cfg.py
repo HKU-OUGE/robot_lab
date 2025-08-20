@@ -105,12 +105,12 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
-        self.episode_length_s = 10.0
+        self.episode_length_s = 20.0
         # self.only_positive_rewards = True
 
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.63)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.6)
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 1.0)
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
@@ -320,23 +320,23 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         if handstand_type == "front":
             air_foot_name = ".*F_FOOT"
             self.rewards.handstand_orientation_l2.weight = -1.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.5
+            self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 0.0, -1.0]
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.0
         elif handstand_type == "back":
             air_foot_name = ".*H_FOOT"
             self.rewards.handstand_orientation_l2.weight = -1.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.5
+            self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 0.0, 1.0]
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.0
         elif handstand_type == "left":
             air_foot_name = "L.*_FOOT"
             self.rewards.handstand_orientation_l2.weight = 0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, -1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.5
         elif handstand_type == "right":
             air_foot_name = "R.*_FOOT"
             self.rewards.handstand_orientation_l2.weight = 0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.5
         self.rewards.handstand_feet_height_exp.weight = 10
         self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
         self.rewards.handstand_feet_on_air.weight = 5.0
