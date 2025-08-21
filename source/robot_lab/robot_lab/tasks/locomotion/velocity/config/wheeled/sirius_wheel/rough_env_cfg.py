@@ -6,10 +6,12 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
+from isaaclab.managers import CommandTermCfg as CmdTerm
+
 ##
 # Pre-defined configs
 ##
@@ -28,6 +30,11 @@ class CUHKLRLSiriusWActionsCfg(ActionsCfg):
         asset_name="robot", joint_names=[""], scale=5.0, use_default_offset=True, clip=None, preserve_order=True
     )
 
+@configclass
+class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
+    """Action specifications for the MDP."""
+
+
 
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
@@ -45,12 +52,18 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         func=mdp.joint_torques_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
     )
 
+@configclass
+class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
+    """Reward terms for the MDP."""
+
+
 
 @configclass
 class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: CUHKLRLSiriusWActionsCfg = CUHKLRLSiriusWActionsCfg()
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
-
+    commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
+    observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT"
     wheel_joint_name = ".*_WHEEL"
@@ -274,6 +287,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
         # self.terminations.illegal_contact = None
+        # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)

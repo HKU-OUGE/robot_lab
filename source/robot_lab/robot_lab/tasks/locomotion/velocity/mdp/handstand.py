@@ -55,3 +55,4 @@ def handstand_orientation_l2(
     target_gravity_tensor = torch.tensor(target_gravity, device=env.device)
     # Penalize deviation of the projected gravity vector from the target
     return torch.sum(torch.square(asset.data.projected_gravity_b - target_gravity_tensor), dim=1)
+

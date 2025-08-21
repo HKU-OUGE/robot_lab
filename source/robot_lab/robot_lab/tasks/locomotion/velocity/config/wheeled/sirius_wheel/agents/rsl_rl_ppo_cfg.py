@@ -35,7 +35,7 @@ class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 @configclass
 class CUHKLRLSiriusWStandPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 3000
+    max_iterations = 5000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_stand"
     empirical_normalization = False

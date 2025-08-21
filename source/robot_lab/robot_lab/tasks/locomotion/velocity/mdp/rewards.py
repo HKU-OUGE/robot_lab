@@ -237,33 +237,25 @@ class GaitReward(ManagerTermBase):
         se_act_1 = torch.clip(torch.square(contact_time[:, foot_0] - air_time[:, foot_1]), max=self.max_err**2)
         return torch.exp(-(se_act_0 + se_act_1) / self.std)
 
-def joint_mirror(
-    env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg,
-    mirror_joints: list[list[str]],
-) -> torch.Tensor:
+def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joints: list[list[str]]) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
     if not hasattr(env, "joint_mirror_joints_cache") or env.joint_mirror_joints_cache is None:
+        # Cache joint positions for all pairs
         env.joint_mirror_joints_cache = [
-            [asset.find_joints(joint_name) for joint_name in joint_pair]
-            for joint_pair in mirror_joints
+            [asset.find_joints(joint_name) for joint_name in joint_pair] for joint_pair in mirror_joints
         ]
-
-    penalty = torch.zeros(env.num_envs, device=env.device)
+    reward = torch.zeros(env.num_envs, device=env.device)
+    # Iterate over all joint pairs
     for joint_pair in env.joint_mirror_joints_cache:
-        # Calculating joint symmetry differences
-        diff = asset.data.joint_pos[:, joint_pair[0][0]] - asset.data.joint_pos[:, joint_pair[1][0]]
-        penalty += torch.mean(torch.square(diff), dim=-1)
-
-    # Normalize to [0,1] to avoid numerical explosion
-    penalty = penalty / (len(mirror_joints) + 1e-6)
-
-    # this is a reward
-    reward = torch.exp(-5.0 * penalty)  # exp(-k*x) is smoother
-
-    # Posture constraints：The closer to upright, the higher the weight
-    upright_weight = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
-    reward *= upright_weight
+        # Calculate the difference for each pair and add to the total reward
+        diff = torch.sum(
+            torch.square(asset.data.joint_pos[:, joint_pair[0][0]] - asset.data.joint_pos[:, joint_pair[1][0]]),
+            dim=-1,
+        )
+        reward += diff
+    reward *= 1 / len(mirror_joints) if len(mirror_joints) > 0 else 0
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
 
@@ -642,3 +634,6 @@ def base_height_l2(
         adjusted_target_height = target_height
     # Compute the L2 squared penalty
     return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+
+
+
