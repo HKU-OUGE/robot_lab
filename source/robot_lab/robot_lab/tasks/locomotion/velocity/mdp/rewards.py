@@ -378,17 +378,19 @@ def feet_contact(
     reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
     return reward
 
+
 def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
     contact_sensor = env.scene.sensors[sensor_cfg.name]
-    # 若需要“持续接触”，建议换成 contact_sensor.contact_state(...) 或基于力阈值判断
-    contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]  # [N, K]
-    contact_num = contact.sum(dim=1)  # [N]
-    reward = (contact_num == expect_contact_num).float()  # 等于期望 → 奖励1，否则0
-
-    # 可适当降低阈值，或直接去掉
-    moving = (env.command_manager.get_command(command_name)[:, :2].norm(dim=1) > 0.02)
+    forces = contact_sensor.data.net_forces_w
+    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8)
+    contact_num = contact.sum(dim=1)
+    reward = (contact_num == expect_contact_num).float()
+    cmd = env.command_manager.get_command(command_name)
+    moving = (cmd[:, 0:2].norm(dim=1) > 0.02)
     reward = reward * moving.float()
     return reward
+
+
 
 
 def feet_contact_without_cmd(env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
