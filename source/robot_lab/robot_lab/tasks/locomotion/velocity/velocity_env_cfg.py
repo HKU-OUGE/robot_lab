@@ -499,6 +499,17 @@ class RewardsCfg:
             "expect_contact_num": 2,
         },
     )
+
+    feet_continue_contact = RewTerm(
+        func=mdp.feet_continue_contact,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "command_name": "base_velocity",
+            "expect_contact_num": 4,
+        },
+    )
+
     feet_contact_without_cmd = RewTerm(
         func=mdp.feet_contact_without_cmd,
         weight=0.0,
