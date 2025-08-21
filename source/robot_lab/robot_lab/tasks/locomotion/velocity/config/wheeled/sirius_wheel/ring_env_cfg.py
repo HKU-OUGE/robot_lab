@@ -150,18 +150,18 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # no terrain curriculum
         # self.curriculum.terrain_levels = None
 
-        self.scene.height_scanner = None
-        self.scene.ray_caster = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/trunk",
-            offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
-            mesh_prim_paths=["/World/ground"],
-            ray_alignment="yaw",
-            pattern_cfg=patterns.LidarPatternCfg(
-                channels=10, vertical_fov_range=[-25, 25], horizontal_fov_range=[-180, 180], horizontal_res=10.0
-            ),
-            # debug_vis=not args_cli.headless,
-            debug_vis=True,
-        )
+        # self.scene.height_scanner = None
+        # self.scene.ray_caster = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+        #     mesh_prim_paths=["/World/ground"],
+        #     ray_alignment="yaw",
+        #     pattern_cfg=patterns.LidarPatternCfg(
+        #         channels=10, vertical_fov_range=[-25, 25], horizontal_fov_range=[-180, 180], horizontal_res=10.0
+        #     ),
+        #     # debug_vis=not args_cli.headless,
+        #     debug_vis=True,
+        # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
         #     func=mdp.height_scan,
@@ -171,9 +171,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     scale=1.0,
         # )
         self.observations.policy.height_scan = None
-        self.observations.critic.height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
-        )
+        # self.observations.critic.height_scan = ObsTerm(
+        #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner_base")}, scale=1.0, clip=(-1.0, 1.0)
+        # )
         # self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         # self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
         #     "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
