@@ -264,7 +264,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -2.0
+        self.rewards.undesired_contacts.weight = -0.05
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
         self.rewards.contact_forces.weight = 0
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]

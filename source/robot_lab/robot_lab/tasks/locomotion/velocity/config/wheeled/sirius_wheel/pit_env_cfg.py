@@ -157,10 +157,12 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Events------------------------------
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
-        self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
-
+        # self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
+        # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
+        # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_com_positions = None
+        self.events.randomize_apply_external_force_torque = None
         # ------------------------------Rewards------------------------------
         # General
         # UNUESD self.rewards.is_alive.weight = 0
@@ -203,17 +205,17 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Contact sensor
         self.rewards.undesired_contacts.weight = -0.05
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
-        self.rewards.contact_forces.weight = 0.005
+        self.rewards.contact_forces.weight = 0.0005
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.0
+        self.rewards.track_lin_vel_xy_exp.weight = 1.5
         self.rewards.track_ang_vel_z_exp.weight = 1.5
 
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_continue_contact.weight = 2.0 
+        self.rewards.feet_continue_contact.weight = 0.5
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_stumble.weight = 0.0
@@ -226,7 +228,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.stand_still_without_cmd.weight = 0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_position_penalty.weight = -1.0
+        self.rewards.joint_position_penalty.weight = -0.5
         self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 100
         self.rewards.feet_height_exp.weight = 0.0
@@ -247,8 +249,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Terminations------------------------------
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        self.terminations.illegal_contact = None
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
