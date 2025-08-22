@@ -94,39 +94,39 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.curriculum.terrain_levels = None
 
         # self.scene.height_scanner = None
-        # self.scene.ray_caster = RayCasterCfg(
+        self.scene.ray_caster = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/trunk",
+            offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+            mesh_prim_paths=["/World/ground"],
+            ray_alignment="yaw",
+            pattern_cfg=patterns.LidarPatternCfg(
+                channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
+            ),
+            # debug_vis=not args_cli.headless,
+            debug_vis=True,
+        )
+        # self.scene.height_scanner = RayCasterCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
-        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
-        #     mesh_prim_paths=["/World/ground"],
-        #     ray_alignment="yaw",
-        #     pattern_cfg=patterns.LidarPatternCfg(
-        #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
-        #     ),
-        #     # debug_vis=not args_cli.headless,
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        #     ray_alignment='yaw',
+        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.5, 0.5]),
         #     debug_vis=True,
+        #     mesh_prim_paths=["/World/ground"],
         # )
-        self.scene.height_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/trunk",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-            ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.5, 0.5]),
-            debug_vis=True,
-            mesh_prim_paths=["/World/ground"],
-        )
-        self.scene.height_scanner_base = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/trunk",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-            ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.05, 0.05)),
-            debug_vis=True,
-            mesh_prim_paths=["/World/ground"],
-        )
+        # self.scene.height_scanner_base = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        #     ray_alignment='yaw',
+        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.05, 0.05)),
+        #     debug_vis=True,
+        #     mesh_prim_paths=["/World/ground"],
+        # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
         #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
         # )
         self.observations.critic.height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
         )
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
         self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
@@ -160,6 +160,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"]= (0.8, 1.2)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.7, 1.0)
+
         self.events.randomize_rigid_body_mass = None
         self.events.randomize_com_positions = None
         self.events.randomize_apply_external_force_torque = None
@@ -252,6 +255,6 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
