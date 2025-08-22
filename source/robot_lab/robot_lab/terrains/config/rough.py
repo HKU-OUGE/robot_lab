@@ -118,11 +118,19 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
             holes=False,
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
         ),
+        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+            proportion=0.2,                           # 完全生成此地形
+            ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.10, 0.40),             # 环的离地高度范围
+            ring_thickness=0.1,                       # 环厚度（z 方向）
+            platform_width=3.5,                       # 地形中心的方形平台大小
+            size=(5.0, 5.0),                        # 每块地形大小
+        )
     },
 )
 
