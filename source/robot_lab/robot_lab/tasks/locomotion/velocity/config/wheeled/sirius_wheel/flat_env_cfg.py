@@ -20,6 +20,11 @@ class CUHKLRLSiriusWFlatEnvCfg(CUHKLRLSiriusWRoughEnvCfg):
         # change terrain to flat
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
+        self.rewards.joint_mirror.weight = 0.1
+        self.rewards.joint_mirror.params["mirror_joints"] = [
+            ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
+            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+        ]
         # no height scan
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None

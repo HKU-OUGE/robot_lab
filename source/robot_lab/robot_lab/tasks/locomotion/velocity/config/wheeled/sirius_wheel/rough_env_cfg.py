@@ -275,11 +275,6 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
         # self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = 0.1
-        self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
-            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
-        ]
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRoughEnvCfg":
             self.disable_zero_weight_rewards()
@@ -291,4 +286,4 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (1.5, 1.5)

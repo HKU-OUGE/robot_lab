@@ -53,7 +53,7 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         # terrain_generator=SLOPE_TERRAINS_CFG,
-        terrain_generator=STAIR_TERRAINS_CFG,
+        terrain_generator=FLOATING_RING_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
         max_init_terrain_level=5,
         collision_group=-1,
