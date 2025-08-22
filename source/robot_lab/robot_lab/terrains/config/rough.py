@@ -103,16 +103,16 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.3,
-            step_height_range=(0.10, 0.15),
-            step_width=0.5,
+            step_height_range=(0.10, 0.55),
+            step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
             proportion=0.3,
-            step_height_range=(0.10, 0.15),
-            step_width=0.5,
+            step_height_range=(0.10, 0.55),
+            step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
@@ -186,7 +186,7 @@ FLOATING_CAR_TERRAINS_CFG = TerrainGeneratorCfg(
 )
 
 PIT_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    size=(10.0, 10.0),
     border_width=5.0,
     num_rows=10,
     num_cols=20,
@@ -196,20 +196,32 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
-            proportion=0.65,                          
+            proportion=0.25,                          
             pit_depth_range=(0.00, 0.5),              # 坑的深度范围
             platform_width=3.0,                      # 中心平台宽度
-            double_pit=False,                         # 启用双层坑（更难）
-            size=(5.0, 5.0),                       # 每块子地形的大小
+            double_pit=True,                         # 启用双层坑（更难）
+            size=(10.0, 10.0),                       # 每块子地形的大小
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.00, 0.5),
-            step_width=1.5,
-            platform_width=2.5,
-            border_width=2.5,
+            proportion=0.25,
+            step_height_range=(0.10, 0.5),
+            step_width=2.0,
+            platform_width=3.0,
+            border_width=1.0,
             holes=False,
         ),
-    }
+        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.25,
+            step_height_range=(0.10, 0.5),
+            step_width=2.0,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.25, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        ),
+    },
+
 )
 """Rough terrains configuration."""

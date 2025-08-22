@@ -115,7 +115,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator = FLOATING_CAR_TERRAINS_CFG
+        # self.scene.terrain.terrain_generator = FLOATING_CAR_TERRAINS_CFG
         # self.scene.main_camera = TiledCameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/trunk/front_cam",  
         #     width=64, height=64,

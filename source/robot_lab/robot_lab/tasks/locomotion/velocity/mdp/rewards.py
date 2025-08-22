@@ -382,7 +382,7 @@ def feet_contact(
 def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
     contact_sensor = env.scene.sensors[sensor_cfg.name]
     forces = contact_sensor.data.net_forces_w
-    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8)
+    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 1.0)
     contact_num = contact.sum(dim=1)
     reward = (contact_num == expect_contact_num).float()
     cmd = env.command_manager.get_command(command_name)
