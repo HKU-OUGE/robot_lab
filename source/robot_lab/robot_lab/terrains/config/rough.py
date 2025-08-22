@@ -123,14 +123,6 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
             proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
         ),
-        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.2,                           # 完全生成此地形
-            ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.10, 0.40),             # 环的离地高度范围
-            ring_thickness=0.1,                       # 环厚度（z 方向）
-            platform_width=3.5,                       # 地形中心的方形平台大小
-            size=(5.0, 5.0),                        # 每块地形大小
-        )
     },
 )
 
@@ -164,7 +156,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
             proportion=1.0,                           # 完全生成此地形
             ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.10, 0.40),             # 环的离地高度范围
+            ring_height_range=(0.15, 0.15),             # 环的离地高度范围
             ring_thickness=0.1,                       # 环厚度（z 方向）
             platform_width=5.0,                       # 地形中心的方形平台大小
             size=(10.0, 10.0),                        # 每块地形大小
@@ -204,31 +196,31 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
-            proportion=0.25,                          
-            pit_depth_range=(0.00, 0.5),              # 坑的深度范围
+            proportion=1.0,                     
+            pit_depth_range=(0.30, 0.5),              # 坑的深度范围
             platform_width=3.0,                      # 中心平台宽度
             double_pit=True,                         # 启用双层坑（更难）
             size=(10.0, 10.0),                       # 每块子地形的大小
         ),
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.25,
-            step_height_range=(0.10, 0.5),
-            step_width=2.0,
-            platform_width=3.0,
-            border_width=1.0,
-            holes=False,
-        ),
-        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.25,
-            step_height_range=(0.10, 0.5),
-            step_width=2.0,
-            platform_width=3.0,
-            border_width=1.0,
-            holes=False,
-        ),
-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.25, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
-        ),
+        # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+        #     proportion=0.25,
+        #     step_height_range=(0.10, 0.5),
+        #     step_width=2.0,
+        #     platform_width=3.0,
+        #     border_width=1.0,
+        #     holes=False,
+        # ),
+        # "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+        #     proportion=0.25,
+        #     step_height_range=(0.10, 0.5),
+        #     step_width=2.0,
+        #     platform_width=3.0,
+        #     border_width=1.0,
+        #     holes=False,
+        # ),
+        # "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+        #     proportion=0.25, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        # ),
     },
 
 )

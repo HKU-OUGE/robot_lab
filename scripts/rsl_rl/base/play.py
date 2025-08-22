@@ -268,6 +268,19 @@ def main():
         time.sleep(0.1)  # avoid stdout loss
     # simulate environment
     while simulation_app.is_running():
+        # print action space vector
+        if args_cli.debug and args_cli.keyboard:
+            print("\n====== [Action Vector Mapping] ======", flush=True)
+            idx = 0
+            for group_name, term in env.unwrapped.action_manager._terms.items():
+                print(f"[ACTION GROUP] {group_name}", flush=True)
+                joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+                term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+                for i, val in enumerate(term_actions):
+                    joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                idx += term.action_dim
+            print("=====================================\n", flush=True)
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
