@@ -97,6 +97,26 @@ def stand_still_without_cmd(
         torch.sum(torch.abs(diff_angle), dim=1) * command  # * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 1)
     )
 
+def wheels_stop_without_cmd(
+    env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """
+    当没有速度命令时，惩罚轮子转动（基于关节速度）。
+    """
+    # 提取机器人 articulation
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    # 获取这些关节的速度
+    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]  # [num_envs, num_wheel_joints]
+
+    # 判断命令是否为 "静止" （这里只看 base 线速度/角速度是否接近 0）
+    command = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) < 0.1
+
+    # 计算惩罚：轮子速度越大，惩罚越大
+    penalty = torch.sum(torch.abs(wheel_vel), dim=1)
+
+    return penalty * command
+
 
 def joint_position_penalty(
     env: ManagerBasedRLEnv,
