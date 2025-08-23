@@ -8,7 +8,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 6000
+    max_iterations = 10000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_rough"
     empirical_normalization = False

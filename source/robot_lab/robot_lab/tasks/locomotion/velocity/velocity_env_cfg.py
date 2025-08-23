@@ -729,10 +729,10 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 10
+        self.decimation = 4
         self.episode_length_s = 20
         # simulation settings
-        self.sim.dt = 0.002
+        self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
         # self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
