@@ -736,7 +736,15 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         # self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        # self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        # GPU 碰撞内存配置
+        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024
+        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024
+        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024
+        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024
+        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024
+        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024
+
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.height_scanner is not None:
