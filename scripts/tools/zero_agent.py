@@ -18,6 +18,7 @@ parser.add_argument(
 )
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--init_height", type=float, default=2.0, help="Initial robot base height (meters).")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -82,8 +83,8 @@ def main():
     env_cfg.rewards = EmptyRewardsCfg()
     if hasattr(env_cfg.scene, "robot") and hasattr(env_cfg.scene.robot, "init_state"):
         x, y, _ = env_cfg.scene.robot.init_state.pos
-        env_cfg.scene.robot.init_state.pos = (x, y, 2.0)
-        print(f"[INFO] Set robot initial height to 2.0 m (from {x}, {y})")
+        env_cfg.scene.robot.init_state.pos = (x, y, args_cli.init_height)
+        print(f"[INFO] Set robot initial height to {args_cli.init_height} m (from {x}, {y})")
         env_cfg.sim.gravity = (0.0, 0.0, 0.0)
         print("[INFO] Disabled global gravity in the simulation.")
     # create environment
