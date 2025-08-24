@@ -88,9 +88,9 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -3.5
-        self.rewards.base_height_l2.weight = -2.5
-        self.rewards.base_height_l2.params["target_height"] = 0.45
+        self.rewards.flat_orientation_l2.weight = -5.5
+        self.rewards.base_height_l2.weight = -5.5
+        self.rewards.base_height_l2.params["target_height"] = 0.36
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -115,14 +115,14 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_l1", 0, [""])
         self.rewards.joint_pos_limits.weight = -5.0
         # 禁止超速
-        self.rewards.joint_vel_limits.weight = -5.0
+        self.rewards.joint_vel_limits.weight = -1.0
 
         # Action penalties
         self.rewards.action_rate_l2.weight = -0.01
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -1.5
+        self.rewards.undesired_contacts.weight = -4.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*{self.foot_link_name}).*"
         ]
@@ -136,11 +136,11 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 6.0
-        self.rewards.track_ang_vel_z_exp.weight = 6.0
+        self.rewards.track_lin_vel_xy_exp.weight = 14.0
+        self.rewards.track_ang_vel_z_exp.weight = 4.5
 
         # Others
-        self.rewards.feet_air_time.weight = 4.0
+        self.rewards.feet_air_time.weight = 3.0
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -159,19 +159,19 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # 测试 暂时取消
         self.rewards.joint_power.weight = -2e-5
         self.rewards.stand_still_without_cmd.weight = 0.1
-        self.rewards.joint_position_penalty.weight = -0.1
+        self.rewards.joint_position_penalty.weight = -0.5
         # self.rewards.joint_position_penalty.weight = 0.0
-        self.rewards.feet_height_exp.weight = 4.0
+        self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.20
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]  
-        self.rewards.feet_height_body_exp.weight = 2.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.42
+        self.rewards.feet_height_body_exp.weight = 1.5
+        self.rewards.feet_height_body_exp.params["target_height"] = -0.35
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
-        self.rewards.feet_gait.weight = 5.0
+        self.rewards.feet_gait.weight = 3.0
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
             ("FL_foot", "RR_foot"),
@@ -189,10 +189,10 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
             self.base_link_name,
-            self.trunk_link_name,
-            self.abad_link_name,
-            self.knee_link_name,
-            self.hip_link_name,
+            # self.trunk_link_name,
+            # self.abad_link_name,
+            # self.knee_link_name,
+            # self.hip_link_name,
             # self.extension_link_name
         ]
         # ------------------------------Commands------------------------------
