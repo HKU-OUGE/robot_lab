@@ -197,7 +197,7 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
             proportion=1.0,                     
-            pit_depth_range=(0.35, 0.55),              # 坑的深度范围
+            pit_depth_range=(0.1, 0.35),              # 坑的深度范围
             platform_width=3.0,                      # 中心平台宽度
             double_pit=True,                         # 启用双层坑（更难）
             size=(10.0, 10.0),                       # 每块子地形的大小

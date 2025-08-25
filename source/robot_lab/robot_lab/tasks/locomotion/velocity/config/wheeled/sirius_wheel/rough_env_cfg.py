@@ -268,7 +268,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
         self.rewards.contact_forces.weight = 0
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
-
+        self.rewards.feet_continue_contact.weight = 0.5
+        self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
+        self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.0
         self.rewards.track_ang_vel_z_exp.weight = 1.5
