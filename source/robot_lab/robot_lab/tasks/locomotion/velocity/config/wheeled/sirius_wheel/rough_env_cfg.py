@@ -304,7 +304,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheels_stop_without_cmd.weight = -0.05
         self.rewards.wheels_stop_without_cmd.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        self.rewards.wheel_spin_in_air_penalty.weight = -0.05
+        self.rewards.wheel_spin_in_air_penalty.weight = 0.0
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
         # self.rewards.upward.weight = 1.0
