@@ -412,7 +412,7 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
     env.contact_ema = (1.0 - alpha) * env.contact_ema + alpha * contact  # [N, num_feet]
 
     # —— 占空比阈值：每脚是否达到“贴地占空比”要求 —— 
-    target_duty = 0.65  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
+    target_duty = 0.85  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
     slack = 0.05
     duty_ok = (env.contact_ema >= (target_duty - slack)).float()        # [N, num_feet]
     reward = duty_ok.mean(dim=1)                                        # [N], 0~1
