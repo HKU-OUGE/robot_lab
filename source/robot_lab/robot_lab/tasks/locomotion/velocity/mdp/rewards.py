@@ -441,7 +441,7 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
 
     # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
     cmd = env.command_manager.get_command(command_name)                 # [N, D]
-    v_ref = 0.8  # 参考最大期望线速度，按你的命令分布调整
+    v_ref = 1.0  # 参考最大期望线速度，按你的命令分布调整
     w = (cmd[:, 0:2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
     return reward * w
 
