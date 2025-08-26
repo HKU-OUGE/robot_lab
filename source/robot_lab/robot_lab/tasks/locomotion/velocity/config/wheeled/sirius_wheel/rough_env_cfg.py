@@ -59,7 +59,17 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot", joint_names=""),
         },
     )
-
+    joint_pos_penalty = RewTerm(
+        func=mdp.joint_pos_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stand_still_scale": 5.0,
+            "velocity_threshold": 0.5,
+            "command_threshold": 0.1,
+        },
+    )
 
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -77,16 +87,17 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     foot_link_name = ".*_FOOT"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
-    joint_names = [
+    leg_joint_names = [
         "LF_HAA", "LF_HFE", "LF_KFE",
         "LH_HAA", "LH_HFE", "LH_KFE",
         "RF_HAA", "RF_HFE", "RF_KFE",
         "RH_HAA", "RH_HFE", "RH_KFE",
+    ]
+    wheel_joint_names = [
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
     ]
+    joint_names = leg_joint_names + wheel_joint_names
     # fmt: on
-    non_wheel_joint_names = joint_names[:-4]
-    only_wheel_joint_names = joint_names[-4:]
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
@@ -115,6 +126,23 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.main_camera = CameraCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
+        #     update_period=1.0 / 30.0,          # 30 Hz
+        #     height=120,
+        #     width=120,
+        #     data_types=["depth"],
+        #     spawn=sim_utils.PinholeCameraCfg(
+        #         horizontal_aperture=20.955,    # mm
+        #         focal_length=11.0,             # mm →  FOV ≈ 2 * atan(0.5*A / f) ≈ 87°
+        #         clipping_range=(0.1, 10.0),    # m
+        #     ),
+        #     offset=CameraCfg.OffsetCfg(
+        #         pos=(0.45, 0.0, 0.0),
+        #         rot=(0.5, -0.5, 0.5, -0.5),
+        #         convention="ros"
+        #     ),
+        # )
         # self.scene.terrain.usd_path ="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_B/Flat_Mountain_B.usd"
         # self.scene.terrain = TerrainImporterCfg(
         #     prim_path="/World/ground",
@@ -167,18 +195,18 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # )
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.critic.joint_pos.func = mdp.joint_pos_rel
         self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.non_wheel_joint_names, preserve_order=True
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel_rel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.only_wheel_joint_names, preserve_order=True
+            "robot", joint_names=self.wheel_joint_names, preserve_order=True
         )
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
@@ -226,88 +254,86 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Rewards------------------------------
         # General
-        # UNUESD self.rewards.is_alive.weight = 0
         self.rewards.is_terminated.weight = 0
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -0.5
-        self.rewards.base_height_l2.weight = -1.0
-        self.rewards.base_height_l2.params["target_height"] = 0.64
+        self.rewards.flat_orientation_l2.weight = 0
+        self.rewards.base_height_l2.weight = 0
+        self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
 
-        # Joint penaltie
-        self.rewards.joint_torques_l2.weight = -2.5e-6
-        self.rewards.joint_torques_l2.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_torques_wheel_l2.weight = -2.5e-6
-        self.rewards.joint_torques_wheel_l2.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        # UNUESD self.rewards.joint_vel_l1.weight = 0.0
+        # Joint penalties
+        self.rewards.joint_torques_l2.weight = -2.5e-5
+        self.rewards.joint_torques_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_torques_wheel_l2.weight = 0
+        self.rewards.joint_torques_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_vel_l2.weight = 0
-        self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_vel_wheel_l2.weight = -2.5e-7
-        self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        self.rewards.joint_acc_l2.weight = -2.5e-8
-        self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
+        self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_vel_wheel_l2.weight = 0
+        self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_acc_l2.weight = -2.5e-7
+        self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_acc_wheel_l2.weight = -2.5e-9
-        self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_l1", 0, [""])
+        self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
+        # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_hip_l1", -0.2, [".*_hip_joint"])
         self.rewards.joint_pos_limits.weight = -5.0
-        self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
+        self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_limits.weight = 0
-        self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-
-        # Action penalties
-        self.rewards.action_rate_l2.weight = -0.005
-        # UNUESD self.rewards.action_l2.weight = 0.0
-
-        # Contact sensor
-        self.rewards.undesired_contacts.weight = -0.5
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
-        self.rewards.contact_forces.weight = 0
-        self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_continue_contact.weight = 0.5
+        self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_power.weight = -2e-5
+        self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.stand_still_without_cmd.weight = -2.0
+        self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_pos_penalty.weight = -1.0
+        self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.wheel_vel_penalty.weight = 0
+        self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.feet_continue_contact.weight = 0.0
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
+        # Velocity-tracking rewards
+        # Action penalties
+        self.rewards.action_rate_l2.weight = -0.01
+
+        # Contact sensor
+        self.rewards.undesired_contacts.weight = -1.0
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
+        self.rewards.contact_forces.weight = -1.5e-4
+        self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
+
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.0
         self.rewards.track_ang_vel_z_exp.weight = 1.5
 
         # Others
         self.rewards.feet_air_time.weight = 0
+        self.rewards.feet_air_time.params["threshold"] = 0.5
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact.weight = 0
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_stumble.weight = -1.0
+        self.rewards.feet_contact_without_cmd.weight = 0.1
+        self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_stumble.weight = 0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_slide.weight = 0.0
+        self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.joint_power.weight = -2e-5
-        self.rewards.joint_power.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.stand_still_without_cmd.weight = -0.05
-        self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_position_penalty.weight = -1.5
-        self.rewards.joint_position_penalty.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
-        self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.feet_height_exp.weight = 0
-        self.rewards.feet_height_exp.params["target_height"] = 0.1
-        self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_height_body_exp.weight = 0
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.4
-        self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [self.foot_link_name]
+        # self.rewards.feet_height.weight = 0
+        # self.rewards.feet_height.params["target_height"] = 0.1
+        # self.rewards.feet_height.params["asset_cfg"].body_names = [self.foot_link_name]
+        # self.rewards.feet_height_body.weight = 0
+        # self.rewards.feet_height_body.params["target_height"] = -0.2
+        # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0
-        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RH_FOOT"), ("RF_FOOT", "LH_FOOT"))
-        self.rewards.feet_contact_without_cmd.weight = 0.15
-        self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.wheels_stop_without_cmd.weight = 0.0
-        self.rewards.wheels_stop_without_cmd.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        self.rewards.wheel_spin_in_air_penalty.weight = 0.0
-        self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        self.rewards.joint_mirror.weight = 0.0
+        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("FL_foot", "RR_foot"), ("FR_foot", "RL_foot"))
+        self.rewards.upward.weight = 1.0
+        self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],

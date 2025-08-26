@@ -16,7 +16,29 @@ from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
-
+def joint_pos_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    stand_still_scale: float,
+    velocity_threshold: float,
+    command_threshold: float,
+) -> torch.Tensor:
+    """Penalize joint position error from default on the articulation."""
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd = torch.linalg.norm(env.command_manager.get_command(command_name), dim=1)
+    body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    running_reward = torch.linalg.norm(
+        (asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]), dim=1
+    )
+    reward = torch.where(
+        torch.logical_or(cmd > command_threshold, body_vel > velocity_threshold),
+        running_reward,
+        stand_still_scale * running_reward,
+    )
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -683,6 +705,4 @@ def base_height_l2(
         adjusted_target_height = target_height
     # Compute the L2 squared penalty
     return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
-
-
 
