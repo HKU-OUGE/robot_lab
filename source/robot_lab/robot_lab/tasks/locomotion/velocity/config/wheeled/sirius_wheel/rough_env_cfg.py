@@ -325,7 +325,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_in_air_penalty.weight = 0.0
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-        self.rewards.joint_mirror.weight = -0.1
+        self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
