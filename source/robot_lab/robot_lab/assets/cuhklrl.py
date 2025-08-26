@@ -159,9 +159,9 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
         ),
         "legs_wheel": DCMotorCfg(
             joint_names_expr=[".*_WHEEL"],  
-            effort_limit=80.0,
-            saturation_effort=80.0,
-            velocity_limit=20.0,
+            effort_limit=60.0,
+            saturation_effort=60.0,
+            velocity_limit=30.0,
             stiffness=0.0,
             damping=3.0,
             friction=0.0,
