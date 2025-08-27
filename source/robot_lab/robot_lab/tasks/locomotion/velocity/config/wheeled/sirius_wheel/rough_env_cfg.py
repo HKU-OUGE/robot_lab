@@ -102,7 +102,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.65)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.64)
         CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
             "LF_HAA": 0.00,
             "LH_HAA": 0.00,
@@ -247,8 +247,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.2)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.2)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
