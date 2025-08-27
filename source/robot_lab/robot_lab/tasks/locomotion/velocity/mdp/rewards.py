@@ -37,7 +37,15 @@ def joint_pos_penalty(
         running_reward,
         stand_still_scale * running_reward,
     )
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.8) / 0.8
+    # reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    # 计算竖直方向分量
+    uprightness = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], -1.0, 1.0)
+    # 15°阈值，对应 cos(15°)≈0.966
+    threshold = torch.cos(torch.deg2rad(torch.tensor(15.0, device=uprightness.device)))
+    # 当姿态比15°更正时，直接取满额；超过15°才进入衰减
+    scale = torch.clamp((uprightness - threshold) / (1 - threshold), 0.0, 1.0)
+
+    reward *= scale
     return reward
 def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
