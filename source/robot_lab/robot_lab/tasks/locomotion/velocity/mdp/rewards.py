@@ -37,7 +37,7 @@ def joint_pos_penalty(
         running_reward,
         stand_still_scale * running_reward,
     )
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.85) / 0.85
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     # # 计算竖直方向分量
     # uprightness = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], -1.0, 1.0)
     # # 15°阈值，对应 cos(15°)≈0.966
