@@ -1,10 +1,13 @@
+# ==============================================================================
 # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
-
+#
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers.
 # All rights reserved.
-#
 # SPDX-License-Identifier: BSD-3-Clause
+#
+# Modified by: Tianyang TANG
+# ==============================================================================
 
 """Script to play a checkpoint if an RL agent from RSL-RL."""
 
@@ -16,6 +19,7 @@ import sys
 
 from isaaclab.app import AppLauncher
 from isaaclab.utils.dict import print_dict
+
 # import json
 
 # local imports
@@ -69,7 +73,7 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
-
+from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
 import robot_lab.tasks  # noqa: F401
 
 
@@ -87,7 +91,7 @@ def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # make a smaller scene for play
-    env_cfg.scene.num_envs = 50
+    env_cfg.scene.num_envs = args_cli.num_envs
     # spawn the robot randomly in the grid (instead of their terrain levels)
     env_cfg.scene.terrain.max_init_terrain_level = None
     # reduce the number of terrains to save memory
@@ -101,19 +105,34 @@ def main():
     # remove random pushing
     env_cfg.events.randomize_apply_external_force_torque = None
     env_cfg.events.push_robot = None
+    env_cfg.curriculum.terrain_levels = None
+    env_cfg.curriculum.command_levels = None
 
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = False
-        controller = Se2Keyboard(
-            v_x_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_x[1],
-            v_y_sensitivity=env_cfg.commands.base_velocity.ranges.lin_vel_y[1],
-            omega_z_sensitivity=env_cfg.commands.base_velocity.ranges.ang_vel_z[1],
+
+        kb_cfg = Se2KeyboardCfg(
+            v_x_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
+            v_y_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_y[1]),
+            omega_z_sensitivity=float(env_cfg.commands.base_velocity.ranges.ang_vel_z[1]),
+            # sim_device 默认即可；需要的话可传 env_cfg.sim.device
         )
+        controller = Se2Keyboard(kb_cfg)  # ← 用配置类构造
+
+        # 返回形状 [1, 3] 的 (vx, vy, wz)
         env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: torch.tensor(controller.advance(), dtype=torch.float32).unsqueeze(0).to(env.device),
+            func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
         )
+
+
+        def reset_env_callback():
+            print("[INFO] 'R' key pressed: Resetting environment.")
+            nonlocal obs
+            obs, _ = env.reset()
+        controller.add_callback("R", reset_env_callback)
+
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -249,6 +268,19 @@ def main():
         time.sleep(0.1)  # avoid stdout loss
     # simulate environment
     while simulation_app.is_running():
+        # print action space vector
+        if args_cli.debug and args_cli.keyboard:
+            print("\n====== [Action Vector Mapping] ======", flush=True)
+            idx = 0
+            for group_name, term in env.unwrapped.action_manager._terms.items():
+                print(f"[ACTION GROUP] {group_name}", flush=True)
+                joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+                term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+                for i, val in enumerate(term_actions):
+                    joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                idx += term.action_dim
+            print("=====================================\n", flush=True)
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
@@ -259,11 +291,9 @@ def main():
             obs, _, _, _ = env.step(actions)
         if args_cli.video:
             timestep += 1
-            timestep += 1
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-
         if args_cli.keyboard:
             rsl_rl_utils.camera_follow(env)
 
