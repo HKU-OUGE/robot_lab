@@ -132,8 +132,8 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
     actuators={
         "legs_hip": DCMotorCfg(
             joint_names_expr=[".*_HAA"],
-            effort_limit=35.0,
-            saturation_effort=50.0,
+            effort_limit=40.0,
+            saturation_effort=40.0,
             velocity_limit=45.0,
             stiffness=40.0,
             damping=2.0,
@@ -141,8 +141,8 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
         ),
         "legs_thigh": DCMotorCfg(
             joint_names_expr=[".*_HFE"],
-            effort_limit=35.0,
-            saturation_effort=50.0,
+            effort_limit=40.0,
+            saturation_effort=40.0,
             velocity_limit=45.0,
             stiffness=40.0,
             damping=2.0,
@@ -151,7 +151,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
         "legs_calf": DCMotorCfg(
             joint_names_expr=[".*_KFE"],  
             effort_limit=80.0,
-            saturation_effort=100.0,
+            saturation_effort=80.0,
             velocity_limit=45.0,
             stiffness=40.0,
             damping=2.0,
@@ -159,8 +159,8 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
         ),
         "legs_wheel": DCMotorCfg(
             joint_names_expr=[".*_WHEEL"],  
-            effort_limit=80.0,
-            saturation_effort=80.0,
+            effort_limit=40.0,
+            saturation_effort=40.0,
             velocity_limit=20.0,
             stiffness=0.0,
             damping=3.0,
