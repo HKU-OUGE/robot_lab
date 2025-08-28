@@ -335,9 +335,11 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.3
         self.rewards.joint_mirror.weight = -0.1
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
-            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            ["LF_HAA", "RF_HAA"], ["LF_HFE", "RF_HFE"], ["LF_KFE", "RF_KFE"],  # 前腿配前腿
+            ["LH_HAA", "RH_HAA"], ["LH_HFE", "RH_HFE"], ["LH_KFE", "RH_KFE"],  # 后腿配后腿
         ]
+
+
         self.rewards.wheel_spin_in_air_penalty.weight = -0.05
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
