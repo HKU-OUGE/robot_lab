@@ -308,30 +308,6 @@ def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
-# def joint_mirror(env, asset_cfg: SceneEntityCfg, mirror_joints: list[list[str]]) -> torch.Tensor:
-#     asset: Articulation = env.scene[asset_cfg.name]
-
-#     # 缓存：每对正则 → 各自匹配到的关节索引列表（并排序以保证稳定对齐）
-#     if not hasattr(env, "joint_mirror_cache") or env.joint_mirror_cache is None:
-#         cache = []
-#         for left_pat, right_pat in mirror_joints:
-#             left_idxs  = sorted(asset.find_joints(left_pat))
-#             right_idxs = sorted(asset.find_joints(right_pat))
-#             # 防御：长度不等时，取两者交集长度，避免越界
-#             n = min(len(left_idxs), len(right_idxs))
-#             cache.append((left_idxs[:n], right_idxs[:n]))
-#         env.joint_mirror_cache = cache
-
-#     err = torch.zeros(env.num_envs, device=env.device)
-#     for left_idxs, right_idxs in env.joint_mirror_cache:
-#         if len(left_idxs) == 0:
-#             continue
-#         diff = asset.data.joint_pos[:, left_idxs] - asset.data.joint_pos[:, right_idxs]
-#         err += torch.sum(diff * diff, dim=1) / len(left_idxs)
-
-#     # 可选：按姿态加权（直立时更重）
-#     err *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
-#     return err
 
 def action_mirror(
     env: ManagerBasedRLEnv,
