@@ -154,12 +154,34 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=1.0,                           # 完全生成此地形
-            ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            proportion=0.4,                           # 完全生成此地形
+            ring_width_range=(3.0, 3.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
             ring_height_range=(0.1, 0.35),             # 环的离地高度范围
             ring_thickness=0.1,                       # 环厚度（z 方向）
             platform_width=5.0,                       # 地形中心的方形平台大小
             size=(10.0, 10.0),                        # 每块地形大小
+        ),
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.10, 0.35),
+            step_width=1.5,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.10, 0.35),
+            step_width=1.5,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
         )
     }
 )

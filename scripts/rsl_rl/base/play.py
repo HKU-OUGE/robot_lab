@@ -266,6 +266,14 @@ def main():
 
         debug_print = True
         time.sleep(0.1)  # avoid stdout loss
+    # 导出后切 JIT
+    jit_path = os.path.join(export_model_dir, "policy.pt")
+    del ppo_runner           # 不再需要含 critic 的 runner
+    torch.cuda.empty_cache() # 回收显存
+
+    policy_jit = torch.jit.load(jit_path, map_location=env.unwrapped.device)
+    policy_jit.eval()
+
     # simulate environment
     while simulation_app.is_running():
         # print action space vector
@@ -285,7 +293,7 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            actions = policy_jit(obs)
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, _, _ = env.step(actions)
