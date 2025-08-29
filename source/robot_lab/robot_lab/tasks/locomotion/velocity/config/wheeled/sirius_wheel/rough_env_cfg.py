@@ -70,6 +70,14 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_threshold": 0.1,
         },
     )
+    wheel_mirror = RewTerm(
+        func=mdp.wheel_mirror,
+        weight=-0.005,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
+        },
+    )
 
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -282,7 +290,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_hip_l1", -0.2, [".*_hip_joint"])
         self.rewards.joint_pos_limits.weight = -5.0
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_vel_limits.weight = -2.5
+        self.rewards.joint_vel_limits.weight = 0.0
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_power.weight = -2e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
