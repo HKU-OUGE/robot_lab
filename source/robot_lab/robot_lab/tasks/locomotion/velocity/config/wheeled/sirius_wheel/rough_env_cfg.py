@@ -72,7 +72,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=-0.005,
+        weight=-0.001,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -210,9 +210,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
-        self.observations.policy.base_ang_vel.scale = 0.25
+        self.observations.policy.base_ang_vel.scale = 2.0
         self.observations.policy.joint_pos.scale = 1.0
-        self.observations.policy.joint_vel.func = mdp.joint_vel_rel
+        self.observations.policy.joint_vel.func = mdp.joint_vel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.wheel_joint_names, preserve_order=True
         )
@@ -227,9 +227,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 1.5
-        self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
-        self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
+        self.actions.joint_vel.scale = 12
+        self.actions.joint_pos.clip = {".*": (-50.0, 50.0)}
+        self.actions.joint_vel.clip = {".*": (-15.0, 15.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
