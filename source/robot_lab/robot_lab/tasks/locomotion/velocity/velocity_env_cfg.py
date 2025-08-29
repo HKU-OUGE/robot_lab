@@ -264,6 +264,7 @@ class EventCfg:
             "dynamic_friction_range": (0.3, 0.8),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
+            "make_consistent": True,
         },
     )
 
