@@ -72,7 +72,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.0,
+        weight=-0.001,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -210,7 +210,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
-        self.observations.policy.base_ang_vel.scale = 2.0
+        self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
@@ -227,9 +227,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 12
+        self.actions.joint_vel.scale = 5
         self.actions.joint_pos.clip = {".*": (-50.0, 50.0)}
-        self.actions.joint_vel.clip = {".*": (-15.0, 15.0)}
+        self.actions.joint_vel.clip = {".*": (-36.0, 36.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
@@ -255,8 +255,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.6, 1.2)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.6, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -340,14 +340,14 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("FL_foot", "RR_foot"), ("FR_foot", "RL_foot"))
         self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.joint_mirror.weight = -0.5
         # self.rewards.joint_mirror.params["mirror_joints"] = [
         #     ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
         #     ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         # ]
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["LF_HAA", "RF_HAA"], ["LF_HFE", "RF_HFE"], ["LF_KFE", "RF_KFE"],  # 前腿配前腿
-            ["LH_HAA", "RH_HAA"], ["LH_HFE", "RH_HFE"], ["LH_KFE", "RH_KFE"],  # 后腿配后腿
+            ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
+            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
