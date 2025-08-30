@@ -226,10 +226,10 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 5
-        self.actions.joint_pos.clip = {".*": (-50.0, 50.0)}
-        self.actions.joint_vel.clip = {".*": (-36.0, 36.0)}
+        self.actions.joint_pos.scale = 1.0
+        self.actions.joint_vel.scale = 1.0
+        self.actions.joint_pos.clip = {".*": (-15.0, 15.0)}
+        self.actions.joint_vel.clip = {".*": (-15.0, 15.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
@@ -340,15 +340,15 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("FL_foot", "RR_foot"), ("FR_foot", "RL_foot"))
         self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = -0.5
-        # self.rewards.joint_mirror.params["mirror_joints"] = [
-        #     ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
-        #     ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
-        # ]
+        self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
-            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
+            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
+        # self.rewards.joint_mirror.params["mirror_joints"] = [
+        #     ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
+        #     ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+        # ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRoughEnvCfg":
