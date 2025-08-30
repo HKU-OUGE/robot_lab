@@ -102,8 +102,8 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.10, 0.35),
+            proportion=0.2,
+            step_height_range=(0.10, 1.0),
             step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
@@ -111,18 +111,21 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
             proportion=0.3,
-            step_height_range=(0.10, 0.35),
+            step_height_range=(0.10, 1.0),
             step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
         ),
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.15, noise_range=(0.01, 0.05), noise_step=0.005, border_width=0.25
+        )
     },
 )
 
