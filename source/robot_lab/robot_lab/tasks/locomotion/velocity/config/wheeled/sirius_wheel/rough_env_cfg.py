@@ -226,9 +226,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 1.0
-        self.actions.joint_vel.scale = 1.0
-        self.actions.joint_pos.clip = {".*": (-15.0, 15.0)}
+        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_vel.scale = 10.0
+        self.actions.joint_pos.clip = {".*": (-1.2, 1.2)}
         self.actions.joint_vel.clip = {".*": (-15.0, 15.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
