@@ -33,16 +33,16 @@ class CUHKLRLSiriusWActionsCfg(ActionsCfg):
 @configclass
 class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     """Action specifications for the MDP."""
-    # 新增基于地形的目标位姿命令
-    goal_pose = TerrainBasedPose2dCommandCfg(
-        asset_name="robot",
-        resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
-        debug_vis=True,                      # 可视化目标箭头
-        simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
-        ranges=TerrainBasedPose2dCommandCfg.Ranges(
-            heading=(0.0, 3.14), # useless if simple_heading=True
-        ),
-    )
+    # # 新增基于地形的目标位姿命令
+    # goal_pose = TerrainBasedPose2dCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
+    #     debug_vis=True,                      # 可视化目标箭头
+    #     simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
+    #     ranges=TerrainBasedPose2dCommandCfg.Ranges(
+    #         heading=(0.0, 3.14), # useless if simple_heading=True
+    #     ),
+    # )
 
 
 

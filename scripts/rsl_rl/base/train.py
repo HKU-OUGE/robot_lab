@@ -56,6 +56,18 @@ if args_cli.video:
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
+# ---- torchrun read distributed----
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", "0"))
+WORLD_SIZE = int(os.environ.get("WORLD_SIZE", "1"))
+IS_DISTRIBUTED = (WORLD_SIZE > 1) or bool(args_cli.distributed)
+IS_MASTER = (LOCAL_RANK == 0)
+
+# enable camera only on master
+args_cli.enable_cameras = bool(args_cli.video and IS_MASTER)
+
+# disable W&B in slaves
+if IS_DISTRIBUTED and not IS_MASTER:
+    os.environ["WANDB_MODE"] = "disabled"  # 等价于 wandb.init(mode="disabled")
 
 # launch omniverse app
 app_launcher = AppLauncher(args_cli)
@@ -223,6 +235,12 @@ def make_serializable(info: dict):
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     """Train with RSL-RL agent."""
+    if IS_DISTRIBUTED:
+        env_cfg.sim.device = f"cuda:{LOCAL_RANK}"
+        agent_cfg.device = f"cuda:{LOCAL_RANK}"
+        seed = (agent_cfg.seed or 0) + LOCAL_RANK
+        env_cfg.seed = seed
+        agent_cfg.seed = seed
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
@@ -297,7 +315,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     # wrap for video recording
-    if args_cli.video:
+    if args_cli.video and IS_MASTER:
         video_kwargs = {
             "video_folder": os.path.join(log_dir, "videos", "train"),
             "step_trigger": lambda step: step % args_cli.video_interval == 0,
