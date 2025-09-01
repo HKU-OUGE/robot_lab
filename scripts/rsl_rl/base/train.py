@@ -102,6 +102,107 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
+# --- CustomRecordVideo: PyAV + W&B---
+from typing import Callable
+try:
+    import wandb
+except Exception:
+    wandb = None
+try:
+    import av  # optional
+except Exception:
+    av = None
+
+from gymnasium.wrappers.rendering import RecordVideo
+from gymnasium import logger
+
+class CustomRecordVideo(RecordVideo):
+    def __init__(
+        self,
+        env: gym.Env,
+        video_folder: str,
+        episode_trigger: Callable[[int], bool] | None = None,
+        step_trigger: Callable[[int], bool] | None = None,
+        video_length: int = 0,
+        name_prefix: str = "rl-video",
+        fps: int | None = None,
+        disable_logger: bool = True,
+        enable_wandb: bool = True,
+        wandb_key: str = "train/video",
+        video_resolution: tuple[int, int] = (1280, 720),
+        video_crf: int = 30,
+    ):
+        # robustness
+        super().__init__(
+            env=env,
+            video_folder=video_folder,
+            episode_trigger=episode_trigger,
+            step_trigger=step_trigger,
+            video_length=video_length,
+            name_prefix=name_prefix,
+            disable_logger=disable_logger,
+        )
+        # Gymnasium  RecordVideoV0 will set self.frames_per_sec（if fps=None， env.metadata.render_fps & 30）
+        if fps is not None:
+            self.frames_per_sec = fps  
+
+        self.enable_wandb = bool(enable_wandb and (wandb is not None))
+        self.wandb_key = wandb_key
+        self.video_resolution = tuple(video_resolution)
+        self.video_crf = int(video_crf)
+
+    def _write_with_pyav(self, frames, path):
+        # PyAV->h264 + yuv420p（for web use）
+        if av is None:
+            raise RuntimeError("PyAV not available")
+        container = av.open(path, "w")
+        stream = container.add_stream("libx264", rate=round(self.frames_per_sec))
+        stream.width, stream.height = self.video_resolution
+        stream.pix_fmt = "yuv420p"
+        # CRF defines video quality
+        stream.options = {"crf": str(self.video_crf), "preset": "veryslow"}
+        for fr in frames:
+            vf = av.VideoFrame.from_ndarray(fr, format="rgb24")
+            vf = vf.reformat(width=self.video_resolution[0], height=self.video_resolution[1])
+            packet = stream.encode(vf)
+            if packet:
+                container.mux(packet)
+        # flush
+        packet = stream.encode(None)
+        if packet:
+            container.mux(packet)
+        container.close()
+
+    def stop_recording(self):
+        """write to disk then upload to W&B。"""
+        assert self.recording, "stop_recording was called, but no recording was started"
+
+        path = os.path.join(self.video_folder, f"{self._video_name}.mp4")
+
+        if len(self.recorded_frames) == 0:
+            logger.warn("Ignored saving a video as there were zero frames to save.")
+        else:
+            try:
+                # PyAV 
+                self._write_with_pyav(self.recorded_frames, path)
+            except Exception:
+                # Roll back to moviepy
+                super().stop_recording()
+            else:
+                # Reset
+                self.recorded_frames = []
+                self.recording = False
+                self._video_name = None
+
+            # Try Upload
+            if self.enable_wandb and os.path.exists(path) and (wandb is not None):
+                try:
+                    # key for bounding
+                    wandb.log({self.wandb_key: wandb.Video(path)}, commit=True)
+                    print(f"[W&B] Logged video: {path}")
+                except Exception as e:
+                    print(f"[WARN] wandb video log failed: {e}")
+
 def make_serializable(info: dict):
     """Convert tensor and object fields into serializable types for YAML."""
     def tensor_to_list(val):
@@ -202,12 +303,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "step_trigger": lambda step: step % args_cli.video_interval == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
+            "enable_wandb": (agent_cfg.logger == "wandb"),
+            "wandb_key": "train/video",
+            "video_resolution": (1280, 720),
+            "video_crf": 30,
         }
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
-
-    # wrap around environment for rsl-rl
+        env = CustomRecordVideo(env, **video_kwargs)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
@@ -311,7 +414,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-
+    # Optional: Force commit
+    try:
+        import wandb
+        if wandb and wandb.run is not None:
+            wandb.log({}, commit=True)
+            wandb.finish()
+    except Exception:
+        pass
     # close the simulator
     env.close()
 

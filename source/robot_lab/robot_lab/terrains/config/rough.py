@@ -11,7 +11,7 @@
 import isaaclab.terrains as terrain_gen
 
 from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
-
+from isaaclab.terrains import FlatPatchSamplingCfg, TerrainImporter, TerrainImporterCfg
 ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(8.0, 8.0),
     border_width=20.0,
@@ -108,23 +108,57 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
             platform_width=3.0,
             border_width=1.0,
             holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
         ),
-        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.10, 1.0),
-            step_width=1.5,
-            platform_width=3.0,
-            border_width=1.0,
-            holes=False,
+        "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
+            proportion=0.3,                     
+            pit_depth_range=(0.1, 1.0),            
+            platform_width=3.0,                
+            double_pit=False,                       
+            size=(10.0, 10.0),                    
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,   
+                    max_height_diff=0.05
+                )
+            },
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,   
+                    patch_radius=0.15,   
+                    max_height_diff=0.05
+                )
+            },
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25
+            proportion=0.10, slope_range=(0.0, 0.5), platform_width=2.0, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,    
+                    patch_radius=0.15,    
+                    max_height_diff=0.05 
+                )
+            },
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.15, noise_range=(0.01, 0.05), noise_step=0.005, border_width=0.25
+            proportion=0.15, noise_range=(0.01, 0.05), noise_step=0.005, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,      
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
         )
     },
 )
@@ -224,7 +258,7 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
             proportion=1.0,                     
             pit_depth_range=(0.1, 0.35),              # 坑的深度范围
             platform_width=3.0,                      # 中心平台宽度
-            double_pit=True,                         # 启用双层坑（更难）
+            double_pit=False,                         # 启用双层坑（更难）
             size=(10.0, 10.0),                       # 每块子地形的大小
         ),
         # "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(

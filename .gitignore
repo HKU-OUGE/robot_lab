@@ -21,3 +21,4 @@ _out_sdrec/*.png
 /build
 /install
 /log
+/wandb
