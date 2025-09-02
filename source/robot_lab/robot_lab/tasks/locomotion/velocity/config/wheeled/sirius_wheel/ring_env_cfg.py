@@ -319,7 +319,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 1.0
+        self.rewards.track_lin_vel_xy_exp.weight = 3.5
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
@@ -364,3 +364,5 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
+
+        self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
