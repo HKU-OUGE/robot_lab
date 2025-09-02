@@ -191,12 +191,27 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.4,                           # 完全生成此地形
+            proportion=0.3,                           # 完全生成此地形
             ring_width_range=(2.0, 2.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
             ring_height_range=(0.1, 0.5),             # 环的离地高度范围
             ring_thickness=0.01,                       # 环厚度（z 方向）
             platform_width=3.0,                       # 地形中心的方形平台大小
             size=(5.0, 5.0),                        # 每块地形大小
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
+        ),
+        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.10, 1.0),
+            step_width=1.5,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,     

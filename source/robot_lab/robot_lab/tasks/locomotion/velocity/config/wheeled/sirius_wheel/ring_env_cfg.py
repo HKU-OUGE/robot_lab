@@ -346,8 +346,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LF_(HAA|HFE|KFE).*"],
-            ["RH_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
+            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
+            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
@@ -360,9 +360,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
-
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
