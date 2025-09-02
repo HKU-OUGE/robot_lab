@@ -210,7 +210,7 @@ class CustomRecordVideo(RecordVideo):
             if self.enable_wandb and os.path.exists(path) and (wandb is not None):
                 try:
                     # key for bounding
-                    wandb.log({self.wandb_key: wandb.Video(path)}, commit=True)
+                    wandb.log({self.wandb_key: wandb.Video(path, format="mp4")}, commit=True)
                     print(f"[W&B] Logged video: {path}")
                 except Exception as e:
                     print(f"[WARN] wandb video log failed: {e}")
