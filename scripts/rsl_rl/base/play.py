@@ -208,6 +208,41 @@ def main():
 
     # reset environment
     obs, _ = env.get_observations()
+    # # --- 构建观测切片索引：名字 -> slice(start, end) ---
+    # def build_group_index_map(obs_mgr, group_name="policy"):
+    #     names = obs_mgr._group_obs_term_names[group_name]
+    #     shapes = obs_mgr._group_obs_term_dim[group_name]  # e.g. (171,), (3,), ...
+    #     idx_map, start = {}, 0
+    #     for name, shape in zip(names, shapes):
+    #         # shape 可能是 int 或 tuple，做个通用乘积
+    #         if isinstance(shape, (list, tuple)):
+    #             n = 1
+    #             for s in shape:
+    #                 n *= int(s)
+    #         else:
+    #             n = int(shape)
+    #         idx_map[name] = slice(start, start + n)
+    #         start += n
+    #     return idx_map
+
+    # # 在获取到第一帧 obs 之后构建一次映射
+    # obs_mgr = env.unwrapped.observation_manager
+    # idx_map = build_group_index_map(obs_mgr, group_name="policy")
+
+    # # 取出并打印某个 env 的 height_scan（这里以 env_id = 0 为例）
+    # env_id = 0
+    # hs = obs[env_id, idx_map["height_scan"]].detach().cpu().numpy()
+    # print(f"[height_scan] env#{env_id} len={hs.size}:")
+    # print(hs)
+
+    # # 如果你想按网格显示（171=9*19 很常见），可 reshape 看看
+    # try:
+    #     hs_grid = hs.reshape(9, 19)   # 若你的配置不是 9x19，把 9,19 换成你的行列
+    #     print("[height_scan as grid 9x19]:")
+    #     print(hs_grid)
+    # except Exception:
+    #     pass
+
     timestep = 0
     debug_print = False
     if args_cli.debug and not debug_print:
@@ -273,7 +308,6 @@ def main():
 
     policy_jit = torch.jit.load(jit_path, map_location=env.unwrapped.device)
     policy_jit.eval()
-
     # simulate environment
     while simulation_app.is_running():
         # print action space vector
@@ -289,6 +323,24 @@ def main():
                     print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
                 idx += term.action_dim
             print("=====================================\n", flush=True)
+            # # 取出并打印某个 env 的 height_scan（这里以 env_id = 0 为例）
+            # env_id = 0
+            # hs = obs[env_id, idx_map["height_scan"]].detach().cpu().numpy()
+            # def print_height_scan_col_major(grid, precision=6, sep=" "):
+            #     """
+            #     按列打印：先 [0][0] [1][0] ... [8][0]，换行；
+            #     然后 [0][1] [1][1] ... [8][1]，以此类推。
+            #     """
+            #     rows, cols = grid.shape
+            #     fmt = f"{{:+.{precision}f}}"
+            #     for c in range(cols):
+            #         line = sep.join(fmt.format(float(grid[r, cols-1-c])) for r in range(rows))
+            #         print(line, flush=True)
+
+            # # 已有的 hs -> (9, 19)
+            # hs_grid = hs.reshape(9, 19)
+            # print_height_scan_col_major(hs_grid, precision=3)
+
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():

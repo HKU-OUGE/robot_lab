@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
-
+from isaaclab.envs.mdp import *  # noqa: F401, F403
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *  # noqa: F401, F403
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 
@@ -32,3 +33,15 @@ def phase(env: ManagerBasedRLEnv, cycle_time: float) -> torch.Tensor:
     phase = env.episode_length_buf[:, None] * env.step_dt / cycle_time
     phase_tensor = torch.cat([torch.sin(2 * torch.pi * phase), torch.cos(2 * torch.pi * phase)], dim=-1)
     return phase_tensor
+
+def height_scan_disc(
+    env: ManagerBasedEnv,
+    obs_cache: dict | None = None,          # 设默认值让其成为可选参数
+    sensor_cfg: SceneEntityCfg | None = None,
+    offset: float = 0.5,
+) -> torch.Tensor:
+    # 调用原始高度扫描:contentReference[oaicite:0]{index=0}
+    heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
+    depth = (-heights).clamp(min=0.0)
+    bins = torch.ceil(depth * 10.0) / 10.0
+    return bins.clamp(max=1.0)
