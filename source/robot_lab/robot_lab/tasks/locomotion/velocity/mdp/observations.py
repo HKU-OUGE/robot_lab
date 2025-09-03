@@ -43,5 +43,5 @@ def height_scan_disc(
     # 调用原始高度扫描:contentReference[oaicite:0]{index=0}
     heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
     depth = (-heights).clamp(min=0.0)
-    bins = torch.ceil(depth * 10.0) / 10.0
+    bins = torch.floor(depth * 10.0) / 10.0
     return bins.clamp(max=1.0)

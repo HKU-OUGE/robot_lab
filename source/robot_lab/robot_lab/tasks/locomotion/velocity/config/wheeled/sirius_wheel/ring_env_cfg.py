@@ -95,6 +95,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT"
+    calf_link_name = ".*_calf"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
     leg_joint_names = [
@@ -136,7 +137,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(1.0, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
             debug_vis=True,
@@ -330,7 +331,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
+        ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
