@@ -325,35 +325,49 @@ def wheel_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
     beta = 2.0 * small_scale / (tau + eps)  # 保证在 d=tau 处函数值与一阶导连续
     # -----------------------------------
 
+    # ... 前面保持不变（含 tau/d_max/scale 等） ...
     reward = torch.zeros(env.num_envs, device=env.device)
 
-    # Iterate over all joint pairs
+    per_pair_terms = []  # 收集每一对镜像轮的惩罚（负值）
+
     for joint_pair in env.wheel_mirror_joints_cache:
-        # 与原实现一致：直接用 joint_pair[0][0] / joint_pair[1][0] 做索引
-        left = asset.data.joint_vel[:, joint_pair[0][0]]   # 可能是 [N] 或 [N,K]
-        right = asset.data.joint_vel[:, joint_pair[1][0]]  # 可能是 [N] 或 [N,K]
+        left  = asset.data.joint_vel[:, joint_pair[0][0]]
+        right = asset.data.joint_vel[:, joint_pair[1][0]]
 
-        # 差值幅度
-        d = torch.abs(left - right)   # [N] or [N,K]
+        d = torch.abs(left - right)        # [N] or [N,K]
+        d_norm = d / 30.0                  # 30 = 最大速度差
+        scale = 50.0                       # d=3 → -0.5（单对）
+        diff = -(scale * (d_norm ** 2))    # 负值=惩罚
 
-        # ---- 改进：用归一化二次函数 ----
-        # 归一化到 [0,1]，d_max = 30
-        d_norm = d / 30.0
-
-        # 惩罚曲线：-scale * (d_norm^2)
-        # 在 d=3 时 (3/30)^2=0.01 → -scale*0.01 ≈ -0.5 → scale=50
-        scale = 50.0
-        diff = -scale * (d_norm ** 2)
-
-        # 关键：规约到一维 [N]，避免广播冲突
         if diff.ndim > 1:
-            diff = diff.sum(dim=-1)
+            diff = diff.sum(dim=-1)        # [N]
+        per_pair_terms.append(diff)        # 记录每一对
 
-        reward += diff
+    if len(per_pair_terms) > 0:
+        terms = torch.stack(per_pair_terms, dim=-1)  # [N, P]
 
-    reward *= 1 / len(mirror_joints) if len(mirror_joints) > 0 else 0
+        # ===== 选择一种聚合方式（任选其一）=====
+
+        # 1) 求和（不平均）：多个异常叠加更痛
+        # reward = terms.sum(dim=-1)
+
+        # 2) 取“最差一对”（最负的那一列）：任意一对异常就很痛
+        reward, _ = terms.min(dim=-1)
+
+        # 3) Top-k 平均（例如最差的2对）
+        # k = min(2, terms.shape[-1])
+        # reward = terms.topk(k, dim=-1, largest=False).values.mean(dim=-1)
+
+        # 4) 平滑最小（smooth-min），兼顾可导与“抓最差”
+        # tau_aggr = 0.5
+        # reward = -tau_aggr * torch.logsumexp(-terms / tau_aggr, dim=-1)
+    else:
+        reward = torch.zeros(env.num_envs, device=env.device)
+
+    # 姿态缩放保持不变
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
 
 
 
