@@ -267,6 +267,10 @@ class EventCfg:
             "make_consistent": True,
         },
     )
+    clear_near_edge_flag = EventTerm(
+        func=mdp.clear_near_edge_flag,
+        mode="reset",
+    )
 
     randomize_rigid_body_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,

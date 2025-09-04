@@ -839,3 +839,50 @@ def left_tile_bonus(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tenso
     注意：奖励符号要与你的训练目标一致（若不想鼓励离开，应给负值或不加此项）。
     """
     return left_own_tile(env, margin=margin).float()
+
+def left_tile_prebonus(env: ManagerBasedRLEnv, margin: float = 0.05, pre: float = 0.03) -> torch.Tensor:
+    """
+    在‘将要出界’前一帧给一次性奖励：边界内侧 pre 米触发（上升沿）。
+    """
+    device = env.device
+    terrain = env.scene.terrain
+    gen = getattr(terrain.cfg, "terrain_generator", None)
+    if gen is None:
+        return torch.zeros(env.num_envs, device=device)
+
+    # --- 1) 读取 tile 尺寸 ---
+    tile_x, tile_y = float(gen.size[0]), float(gen.size[1])
+
+    # --- 2) 读取 env_origins（显式 None 判断，避免 Tensor 触发布尔求值） ---
+    origins = getattr(terrain, "env_origins", None)
+    if origins is None:
+        origins = getattr(env.scene, "env_origins", None)
+    if origins is None:
+        # 找不到中心就保守返回 0
+        return torch.zeros(env.num_envs, device=device)
+
+    if isinstance(origins, torch.Tensor):
+        centers_xy = origins[..., :2].to(device=device, dtype=torch.float32)
+    else:
+        centers_xy = torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2]
+
+    # --- 3) 当前位置与相对偏移 ---
+    root_xy = env.scene["robot"].data.root_link_pos_w[:, :2]  # [N,2]
+    d = (root_xy - centers_xy).abs()
+
+    # --- 4) 终止阈值（outside）与预警阈值（near） ---
+    half = torch.tensor([tile_x * 0.5 - margin, tile_y * 0.5 - margin], device=device)
+    outside = (d > half).any(dim=1)
+
+    inner = torch.tensor([tile_x * 0.5 - margin - pre, tile_y * 0.5 - margin - pre], device=device)
+    inner = inner.clamp_min(0.0)  # 防止过大 pre 导致负阈值
+    near = (d > inner).any(dim=1) & (~outside)
+
+    # --- 5) 上升沿（只奖励一次），并做好健壮初始化 ---
+    if (not hasattr(env, "_near_edge_prev")) or (env._near_edge_prev is None) \
+       or (env._near_edge_prev.shape[0] != env.num_envs):
+        env._near_edge_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+
+    bonus = (near & (~env._near_edge_prev)).float()
+    env._near_edge_prev = near
+    return bonus

@@ -94,8 +94,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         },
     )
     left_tile_bonus = RewTerm(
-        func=mdp.left_tile_bonus,
-        weight=0.05,              # “小奖励”示例；按你的训练目标调整
+        func=mdp.left_tile_prebonus,
+        weight=5.0,              # “小奖励”示例；按你的训练目标调整
         params={"margin": 0.05},
     )
 @configclass

@@ -243,3 +243,14 @@ def set_joint_positions_simple(env: ManagerBasedRLEnv, env_ids, joint_pos: dict)
 
     # 写回仿真
     robot.write_joint_state_to_sim(q, dq)
+
+
+def clear_near_edge_flag(env, env_ids):
+    # env_ids: 1D tensor/list
+    device = env.device
+    if not hasattr(env, "_near_edge_prev"):
+        # 初始化一次（首次 reset 时）
+        env._near_edge_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+    else:
+        env_ids = torch.as_tensor(env_ids, device=device, dtype=torch.long)
+        env._near_edge_prev[env_ids] = False
