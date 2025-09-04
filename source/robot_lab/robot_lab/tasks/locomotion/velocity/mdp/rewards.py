@@ -833,16 +833,13 @@ def left_own_tile(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tensor:
     return outside
 
 
-def left_tile_bonus(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tensor:
+def left_tile_bigbonus(env: ManagerBasedRLEnv, margin: float = 0.05, band: float = 0.20) -> torch.Tensor:
     """
-    小奖励：仅在“离开本子地形”的那一步给到。返回: [N] float tensor
-    注意：奖励符号要与你的训练目标一致（若不想鼓励离开，应给负值或不加此项）。
-    """
-    return left_own_tile(env, margin=margin).float()
-
-def left_tile_prebonus(env: ManagerBasedRLEnv, margin: float = 0.05, pre: float = 0.03) -> torch.Tensor:
-    """
-    在‘将要出界’前一帧给一次性奖励：边界内侧 pre 米触发（上升沿）。
+    到达地形边界前 band(默认 0.20 m) 的内侧带时，触发一次性大奖励：
+    - 采用 AABB 按轴判定（贴任意一侧边界都算）
+    - 只在进入奖励带的“上升沿”触发
+    - 每个 env 每回合最多触发一次
+    返回：[N] float(0/1)
     """
     device = env.device
     terrain = env.scene.terrain
@@ -850,39 +847,78 @@ def left_tile_prebonus(env: ManagerBasedRLEnv, margin: float = 0.05, pre: float 
     if gen is None:
         return torch.zeros(env.num_envs, device=device)
 
-    # --- 1) 读取 tile 尺寸 ---
+    # --- tile 半边长（减去 margin） ---
     tile_x, tile_y = float(gen.size[0]), float(gen.size[1])
+    hx = tile_x * 0.5 - margin
+    hy = tile_y * 0.5 - margin
+    if hx <= 0.0 or hy <= 0.0:
+        return torch.zeros(env.num_envs, device=device)
 
-    # --- 2) 读取 env_origins（显式 None 判断，避免 Tensor 触发布尔求值） ---
+    # --- 出生中心 ---
     origins = getattr(terrain, "env_origins", None)
     if origins is None:
         origins = getattr(env.scene, "env_origins", None)
     if origins is None:
-        # 找不到中心就保守返回 0
         return torch.zeros(env.num_envs, device=device)
 
-    if isinstance(origins, torch.Tensor):
-        centers_xy = origins[..., :2].to(device=device, dtype=torch.float32)
-    else:
-        centers_xy = torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2]
+    centers_xy = (origins[..., :2].to(device=device, dtype=torch.float32)
+                  if isinstance(origins, torch.Tensor)
+                  else torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2])
 
-    # --- 3) 当前位置与相对偏移 ---
+    # --- 当前位置偏移 ---
     root_xy = env.scene["robot"].data.root_link_pos_w[:, :2]  # [N,2]
-    d = (root_xy - centers_xy).abs()
+    d = (root_xy - centers_xy).abs()  # [N,2] -> |dx|, |dy|
 
-    # --- 4) 终止阈值（outside）与预警阈值（near） ---
-    half = torch.tensor([tile_x * 0.5 - margin, tile_y * 0.5 - margin], device=device)
-    outside = (d > half).any(dim=1)
+    # --- 是否越界（真正的终止区） ---
+    half_vec = torch.tensor([hx, hy], device=device)
+    outside = (d > half_vec).any(dim=1)  # [N] bool
 
-    inner = torch.tensor([tile_x * 0.5 - margin - pre, tile_y * 0.5 - margin - pre], device=device)
-    inner = inner.clamp_min(0.0)  # 防止过大 pre 导致负阈值
-    near = (d > inner).any(dim=1) & (~outside)
+    # --- 奖励带：距离任一边界 20cm 以内但未越界 ---
+    # 按轴各自计算有效 band（防止 band 超过半边长）
+    band_x = min(band, hx)
+    band_y = min(band, hy)
+    lower_x = hx - band_x
+    lower_y = hy - band_y
 
-    # --- 5) 上升沿（只奖励一次），并做好健壮初始化 ---
-    if (not hasattr(env, "_near_edge_prev")) or (env._near_edge_prev is None) \
-       or (env._near_edge_prev.shape[0] != env.num_envs):
-        env._near_edge_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+    near_x = (d[:, 0] > lower_x) & (d[:, 0] <= hx)
+    near_y = (d[:, 1] > lower_y) & (d[:, 1] <= hy)
+    near = (near_x | near_y) & (~outside)  # [N] bool
 
-    bonus = (near & (~env._near_edge_prev)).float()
-    env._near_edge_prev = near
+    # --- 上升沿 + 每回合仅一次 ---
+    if (not hasattr(env, "_edge_band_prev")) or (env._edge_band_prev is None) \
+       or (env._edge_band_prev.shape[0] != env.num_envs):
+        env._edge_band_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+    if (not hasattr(env, "_edge_bonus_given")) or (env._edge_bonus_given is None) \
+       or (env._edge_bonus_given.shape[0] != env.num_envs):
+        env._edge_bonus_given = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+
+    rising = near & (~env._edge_band_prev)            # 进入奖励带的第一帧
+    fire   = rising & (~env._edge_bonus_given)        # 本回合尚未发过奖
+
+    bonus = fire.float()
+    # 更新状态
+    env._edge_band_prev = near
+    env._edge_bonus_given = env._edge_bonus_given | fire
+    env.extras["debug/edge_band_rate"] = float(near.float().mean().item())
     return bonus
+
+
+def clear_edge_bonus_flags(env: ManagerBasedRLEnv, env_ids):
+    """
+    reset 钩子：清理每回合一次性的奖励状态
+    """
+    dev = env.device
+    ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+
+    if (not hasattr(env, "_edge_band_prev")) or (env._edge_band_prev is None) \
+       or (env._edge_band_prev.shape[0] != env.num_envs):
+        env._edge_band_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
+    else:
+        env._edge_band_prev[ids] = False
+
+    if (not hasattr(env, "_edge_bonus_given")) or (env._edge_bonus_given is None) \
+       or (env._edge_bonus_given.shape[0] != env.num_envs):
+        env._edge_bonus_given = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
+    else:
+        env._edge_bonus_given[ids] = False
+

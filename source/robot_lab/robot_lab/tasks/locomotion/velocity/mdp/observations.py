@@ -129,3 +129,53 @@ def terrain_level_obs(
     else:
         out = levels_f
     return out.unsqueeze(-1)  # [N, 1]
+
+def his_height_scan_disc(
+    env: ManagerBasedEnv,
+    obs_cache: dict | None = None,          # 可选，不依赖
+    sensor_cfg: SceneEntityCfg | None = None,
+    offset: float = 0.5,
+    bin_size: float = 0.1,                  # 离散步长（0.1 → 10 档）
+    max_val: float = 1.0,                   # 上限夹紧到 1.0
+    use_depth: bool = True,                 # 与你原实现一致：默认把“负高度”当坑深
+) -> torch.Tensor:
+    """
+    返回每个 env 在“本回合截至目前扫描到过的最高离散高度/深度”的标量（[N,1]，范围 0~1）。
+    - 累计方式：running max（按回合），非逐帧覆盖
+    - 离散方式：floor 到 bin_size 的整数档，再 clamp 到 1.0
+    """
+    device = env.device
+
+    # 1) 本帧扫描（形状通常是 [N, K]）
+    heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # 与你原调用一致
+    vals = (-heights).clamp(min=0.0) if use_depth else heights.clamp(min=0.0)  # 深度/高度二选一
+
+    # 2) 离散到 [0,1] 档位（0.0, 0.1, ..., 1.0）
+    if bin_size <= 0:
+        raise ValueError("bin_size must be > 0")
+    bins = torch.floor(vals / bin_size) * bin_size
+    bins = bins.clamp(max=max_val)
+
+    # 3) 取本帧“网格最大值”（每个 env 一个数）
+    #   兼容任意后续维度：统一展平成 [N, -1] 再 amax
+    bins_max_now = bins.reshape(env.num_envs, -1).amax(dim=1)  # [N]
+
+    # 4) 按回合累计历史最大（状态保存在 env 上）
+    if (not hasattr(env, "_height_scan_disc_max")) or (env._height_scan_disc_max is None) \
+       or (env._height_scan_disc_max.shape[0] != env.num_envs):
+        env._height_scan_disc_max = torch.zeros(env.num_envs, dtype=torch.float32, device=device)
+
+    env._height_scan_disc_max = torch.maximum(env._height_scan_disc_max, bins_max_now)
+
+    # 5) 返回 [N,1]（给策略/critic当标量观测）
+    out = env._height_scan_disc_max.clamp(0.0, max_val).unsqueeze(-1)  # [N,1]
+    return out
+
+    def clear_height_scan_disc(env: ManagerBasedEnv, env_ids):
+    dev = env.device
+    ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
+    if (not hasattr(env, "_height_scan_disc_max")) or (env._height_scan_disc_max is None) \
+       or (env._height_scan_disc_max.shape[0] != env.num_envs):
+        env._height_scan_disc_max = torch.zeros(env.num_envs, dtype=torch.float32, device=dev)
+    else:
+        env._height_scan_disc_max[ids] = 0.0

@@ -6,7 +6,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg, TerminationsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
@@ -46,9 +46,9 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # )
 @configclass
 class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
-    left_own_tile = DoneTerm(
-        func=mdp.left_own_tile,
-        params={"margin": 0.05},   # 5 cm 容差
+    clear_height_scan_disc = EventTerm(
+        func=mdp.clear_height_scan_disc,
+        mode="reset",
     )
 
 @configclass
@@ -93,21 +93,19 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
     )
-    left_tile_bonus = RewTerm(
-        func=mdp.left_tile_prebonus,
-        weight=5.0,              # “小奖励”示例；按你的训练目标调整
-        params={"margin": 0.05},
-    )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         # ... 你已有的观测项
-        terrain_level = ObsTerm(
-            func=mdp.terrain_level_obs,
-            # 标量归一化：[N,1]
-            params={"normalize": True, "one_hot": False},
-        )
+        his_height = ObsTerm(
+                    func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
+                    params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+                    # 根据需要保留噪声，或设为 0
+                    noise=Unoise(n_min=0.0, n_max=0.0),
+                    clip=(0.0, 1.0),
+                    scale=1.0,
+                )
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
 
 
