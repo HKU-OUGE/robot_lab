@@ -171,11 +171,11 @@ def his_height_scan_disc(
     out = env._height_scan_disc_max.clamp(0.0, max_val).unsqueeze(-1)  # [N,1]
     return out
 
-    def clear_height_scan_disc(env: ManagerBasedEnv, env_ids):
+def clear_height_scan_disc(env: ManagerBasedEnv, env_ids):
     dev = env.device
     ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
     if (not hasattr(env, "_height_scan_disc_max")) or (env._height_scan_disc_max is None) \
-       or (env._height_scan_disc_max.shape[0] != env.num_envs):
+        or (env._height_scan_disc_max.shape[0] != env.num_envs):
         env._height_scan_disc_max = torch.zeros(env.num_envs, dtype=torch.float32, device=dev)
     else:
         env._height_scan_disc_max[ids] = 0.0

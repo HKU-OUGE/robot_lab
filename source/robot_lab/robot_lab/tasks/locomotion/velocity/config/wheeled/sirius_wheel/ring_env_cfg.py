@@ -6,13 +6,14 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg, TerminationsCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
 from isaaclab.managers import CommandTermCfg as CmdTerm
 from isaaclab.envs.mdp.commands.commands_cfg import TerrainBasedPose2dCommandCfg, UniformPose2dCommandCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 ##
 # Pre-defined configs
 ##
@@ -46,10 +47,8 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # )
 @configclass
 class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
-    clear_height_scan_disc = EventTerm(
-        func=mdp.clear_height_scan_disc,
-        mode="reset",
-    )
+    terminate = None
+
 
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
@@ -96,9 +95,10 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
+    @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         # ... 你已有的观测项
-        his_height = ObsTerm(
+        obs_scan = ObsTerm(
                     func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
                     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
                     # 根据需要保留噪声，或设为 0
@@ -106,6 +106,7 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
                     clip=(0.0, 1.0),
                     scale=1.0,
                 )
+
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
 
 
@@ -167,7 +168,16 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
+        self.scene.ray_caster = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=2.0, size=[3.0, 3.0]),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.ray_caster.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
@@ -207,17 +217,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.curriculum.terrain_levels = None
 
         # self.scene.height_scanner = None
-        # self.scene.ray_caster = RayCasterCfg(
-        #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
-        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
-        #     mesh_prim_paths=["/World/ground"],
-        #     ray_alignment="yaw",
-        #     pattern_cfg=patterns.LidarPatternCfg(
-        #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
-        #     ),
-        #     # debug_vis=not args_cli.headless,
-        #     debug_vis=True,
-        # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
         #     func=mdp.height_scan,
@@ -256,8 +255,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = ObsTerm(
-            func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            func=mdp.his_height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
             # 根据需要保留噪声，或设为 0
             noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(0.0, 1.0),
@@ -406,5 +405,5 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.heading = (3.14,3.14)
+        self.commands.base_velocity.ranges.heading = (3.14, 3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)

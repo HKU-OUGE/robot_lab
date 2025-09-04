@@ -329,7 +329,10 @@ class EventCfg:
             "distribution": "log_uniform",
         },
     )
-
+    clear_height_scan_disc = EventTerm(
+        func=mdp.clear_height_scan_disc,
+        mode="reset",
+    )
     # randomize_joint_limits = EventTerm(
     #     func=mdp.randomize_joint_parameters,
     #     mode="reset",
