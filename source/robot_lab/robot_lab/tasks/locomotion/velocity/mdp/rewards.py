@@ -800,3 +800,42 @@ def base_height_l2(
     # Compute the L2 squared penalty
     return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
 
+
+def left_own_tile(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tensor:
+    """
+    若某 env 的机器人走出它出生所在 tile（含 margin 缓冲），返回 True（触发 termination）。
+    返回: [N] bool tensor
+    """
+    device = env.device
+    terrain = env.scene.terrain
+    gen = getattr(terrain.cfg, "terrain_generator", None)
+    if gen is None:
+        # 非 generator 地形时无法定义“tile”，默认不终止
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+
+    tile_x, tile_y = gen.size  # 单个子地形 tile 的 XY 尺寸（米）
+
+    # 出生所在 tile 的中心（每个 env 一个）。通常由 TerrainImporter 维护：
+    # Isaac Lab 中常见为 terrain.env_origins.shape=[N,3]
+    origins = getattr(terrain, "env_origins", None)
+    if origins is None:
+        raise RuntimeError("terrain.env_origins 未找到；请把 env 出生中心暴露/保存到 terrain.env_origins。")
+    centers_xy = torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2]  # [N,2]
+
+    # 机器人根在世界系下的 XY
+    root_xy = env.scene["robot"].data.root_link_pos_w[:, :2]  # [N,2]
+
+    # 相对偏移与半宽（给一点 margin，避免数值抖动误判）
+    d = (root_xy - centers_xy).abs()  # [N,2]
+    half_extents = torch.tensor([tile_x * 0.5 - margin, tile_y * 0.5 - margin], device=device)
+
+    outside = (d > half_extents).any(dim=1)  # [N] bool
+    return outside
+
+
+def left_tile_bonus(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tensor:
+    """
+    小奖励：仅在“离开本子地形”的那一步给到。返回: [N] float tensor
+    注意：奖励符号要与你的训练目标一致（若不想鼓励离开，应给负值或不加此项）。
+    """
+    return left_own_tile(env, margin=margin).float()

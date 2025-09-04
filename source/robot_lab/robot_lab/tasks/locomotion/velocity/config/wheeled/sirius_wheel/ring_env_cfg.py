@@ -6,12 +6,13 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg, TerminationsCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
 from isaaclab.managers import CommandTermCfg as CmdTerm
 from isaaclab.envs.mdp.commands.commands_cfg import TerrainBasedPose2dCommandCfg, UniformPose2dCommandCfg
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 ##
 # Pre-defined configs
 ##
@@ -43,8 +44,12 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     #         heading=(0.0, 3.14), # useless if simple_heading=True
     #     ),
     # )
-
-
+@configclass
+class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
+    left_own_tile = DoneTerm(
+        func=mdp.left_own_tile,
+        params={"margin": 0.05},   # 5 cm 容差
+    )
 
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
@@ -88,6 +93,11 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
     )
+    left_tile_bonus = RewTerm(
+        func=mdp.left_tile_bonus,
+        weight=0.05,              # “小奖励”示例；按你的训练目标调整
+        params={"margin": 0.05},
+    )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
@@ -108,6 +118,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
+    terminations: CUHKLRLSiriusWTerminationsCfg = CUHKLRLSiriusWTerminationsCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT"
     calf_link_name = ".*_calf"
