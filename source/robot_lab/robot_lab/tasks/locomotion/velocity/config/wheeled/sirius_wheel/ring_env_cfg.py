@@ -91,6 +91,14 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
+    class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
+        # ... 你已有的观测项
+        terrain_level = ObsTerm(
+            func=mdp.terrain_level_obs,
+            # 标量归一化：[N,1]
+            params={"normalize": True, "one_hot": False},
+        )
+    policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
 
 
 
@@ -239,7 +247,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             # 根据需要保留噪声，或设为 0
             noise=Unoise(n_min=0.0, n_max=0.0),
