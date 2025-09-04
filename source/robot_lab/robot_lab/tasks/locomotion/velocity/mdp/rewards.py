@@ -316,18 +316,45 @@ def wheel_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
         env.wheel_mirror_joints_cache = [
             [asset.find_joints(joint_name) for joint_name in joint_pair] for joint_pair in mirror_joints
         ]
+
+    # ---- 新增：本地超参（不改函数签名）----
+    tau = 0.3           # 小差距阈值（rad/s）
+    small_scale = 0.25  # 小差距区惩罚缩放
+    exp_cap = 60.0      # 指数上限防爆
+    eps = 1e-12
+    beta = 2.0 * small_scale / (tau + eps)  # 保证在 d=tau 处函数值与一阶导连续
+    # -----------------------------------
+
     reward = torch.zeros(env.num_envs, device=env.device)
+
     # Iterate over all joint pairs
     for joint_pair in env.wheel_mirror_joints_cache:
-        # Calculate the difference for each pair and add to the total reward
-        diff = torch.sum(
-            torch.square(asset.data.joint_vel[:, joint_pair[0][0]] - asset.data.joint_vel[:, joint_pair[1][0]]),
-            dim=-1,
-        )
+        # 与原实现一致：直接用 joint_pair[0][0] / joint_pair[1][0] 做索引
+        left = asset.data.joint_vel[:, joint_pair[0][0]]   # 可能是 [N] 或 [N,K]
+        right = asset.data.joint_vel[:, joint_pair[1][0]]  # 可能是 [N] 或 [N,K]
+
+        # 差值幅度
+        d = torch.abs(left - right)   # [N] or [N,K]
+
+        # ---- 改进：用归一化二次函数 ----
+        # 归一化到 [0,1]，d_max = 30
+        d_norm = d / 30.0
+
+        # 惩罚曲线：-scale * (d_norm^2)
+        # 在 d=3 时 (3/30)^2=0.01 → -scale*0.01 ≈ -0.5 → scale=50
+        scale = 50.0
+        diff = -scale * (d_norm ** 2)
+
+        # 关键：规约到一维 [N]，避免广播冲突
+        if diff.ndim > 1:
+            diff = diff.sum(dim=-1)
+
         reward += diff
+
     reward *= 1 / len(mirror_joints) if len(mirror_joints) > 0 else 0
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
 
 
 
