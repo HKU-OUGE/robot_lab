@@ -280,8 +280,8 @@ FLOATING_CAR_TERRAINS_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
             proportion=1.0,                           # 完全生成此地形
-            ring_width_range=(0.5, 1.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.10, 0.30),             # 环的离地高度范围
+            ring_width_range=(1.5, 1.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.40, 0.40),             # 环的离地高度范围
             ring_thickness=0.1,                       # 环厚度（z 方向）
             platform_width=5.0,                       # 地形中心的方形平台大小
             size=(10.0, 10.0),                        # 每块地形大小
