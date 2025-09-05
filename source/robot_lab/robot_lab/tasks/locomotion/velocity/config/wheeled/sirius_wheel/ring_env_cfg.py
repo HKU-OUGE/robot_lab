@@ -170,9 +170,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         )
         self.scene.ray_caster = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(3.0, 0.0, 20.0)),
             ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=2.0, size=[3.0, 3.0]),
+            pattern_cfg=patterns.GridPatternCfg(resolution=1.0, size=[4.0, 2.5]),
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
