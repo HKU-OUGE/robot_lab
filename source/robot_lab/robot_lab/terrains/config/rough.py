@@ -181,7 +181,7 @@ PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
 
 
 FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(15.0, 15.0),       # 整个 terrain tile 尺寸
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
     border_width=20.0,        # 地形边界，防止掉落
     num_rows=20,
     num_cols=20,
@@ -193,11 +193,11 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
             proportion=0.3,                           # 完全生成此地形
-            ring_width_range=(3.0, 3.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_width_range=(2.0, 2.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
             ring_height_range=(0.0, 0.5),             # 环的离地高度范围
             ring_thickness=0.1,                       # 环厚度（z 方向）
-            platform_width=3.0,                       # 地形中心的方形平台大小
-            size=(15.0, 15.0),                        # 每块地形大小
+            platform_width=4.0,                       # 地形中心的方形平台大小
+            size=(10.0, 10.0),                        # 每块地形大小
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,     
@@ -209,9 +209,9 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
             proportion=1.0,                     
             pit_depth_range=(0.1, 0.6),              # 坑的深度范围
-            platform_width=5.0,                      # 中心平台宽度
+            platform_width=4.0,                      # 中心平台宽度
             double_pit=False,                         # 启用双层坑（更难）
-            size=(15.0, 15.0),                       # 每块子地形的大小
+            size=(10.0, 10.0),                       # 每块子地形的大小
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,     
@@ -223,8 +223,8 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         "box": terrain_gen.trimesh.mesh_terrains_cfg.MeshBoxTerrainCfg(
             proportion=0.2,
             box_height_range=(0.10, 0.6),
-            platform_width=5.0,
-            size=(15.0, 15.0),  
+            platform_width=4.0,
+            size=(10.0, 10.0),  
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,     
@@ -234,7 +234,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=5.0, border_width=0.25,size=(15.0, 15.0), 
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.5, border_width=2.0,size=(10.0, 10.0), 
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,   
@@ -244,7 +244,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=5.0, border_width=0.25,size=(15.0, 15.0), 
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.5, border_width=2.0,size=(10.0, 10.0), 
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,    
@@ -254,7 +254,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.05, noise_range=(0.01, 0.03), noise_step=0.005, border_width=0.25,size=(15.0, 15.0), 
+            proportion=0.05, noise_range=(0.01, 0.03), noise_step=0.005, border_width=2.0,size=(10.0, 10.0), 
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,      
