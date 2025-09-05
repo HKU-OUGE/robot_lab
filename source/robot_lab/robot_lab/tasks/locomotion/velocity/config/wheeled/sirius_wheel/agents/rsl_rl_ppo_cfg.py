@@ -118,7 +118,7 @@ class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
+    num_steps_per_env = 32
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_ring"
@@ -135,7 +135,7 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.01,
         num_learning_epochs=5,
-        num_mini_batches=4,
+        num_mini_batches=24,
         learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
