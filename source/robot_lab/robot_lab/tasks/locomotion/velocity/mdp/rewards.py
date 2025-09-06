@@ -495,29 +495,27 @@ def feet_contact(
 
 def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
     s = env.scene.sensors[sensor_cfg.name]
-    forces = s.data.net_forces_w                       # [N, nb, 3]
+    forces = s.data.net_forces_w  # [N, num_bodies, 3]
+    # 每脚是否接触（法向力阈值可按需要调）
     contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8).float()  # [N, num_feet]
 
-    # EMA 占空比
+    # —— 惰性初始化 & 指数滑动平均占空比（强调“持续贴地”）——
     if not hasattr(env, "contact_ema"):
         env.contact_ema = torch.zeros_like(contact)
-    alpha = 0.1
-    env.contact_ema = (1 - alpha) * env.contact_ema + alpha * contact
+    alpha = 0.1  # 越小越强调“持续”；0.05~0.2 常用
+    env.contact_ema = (1.0 - alpha) * env.contact_ema + alpha * contact  # [N, num_feet]
 
-    target_duty, slack = 0.85, 0.05
-    duty_ok = (env.contact_ema >= (target_duty - slack)).float()       # [N, num_feet]
-    quality = (env.contact_ema * duty_ok).mean(dim=1)                  # [N] 持续+阈值的质量分
+    # —— 占空比阈值：每脚是否达到“贴地占空比”要求 —— 
+    target_duty = 0.85  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
+    slack = 0.05
+    duty_ok = (env.contact_ema >= (target_duty - slack)).float()        # [N, num_feet]
+    reward = duty_ok.mean(dim=1)                                        # [N], 0~1
 
-    # —— 关键：至少 K 脚即可满分 —— 
-    num_ok = duty_ok.sum(dim=1)                                        # [N]
-    k = int(expect_contact_num)
-    count_factor = (num_ok / max(k, 1)).clamp(max=1.0)                 # ≥k 时=1，<k 线性下降
-
-    # 速度权重（可留可去）
-    cmd = env.command_manager.get_command(command_name)
-    v_ref = 1.0
-    w = (cmd[:, :2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)
-    return quality * count_factor * w
+    # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
+    cmd = env.command_manager.get_command(command_name)                 # [N, D]
+    v_ref = 1.0  # 参考最大期望线速度，按你的命令分布调整
+    w = (cmd[:, 0:2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
+    return reward * w
 
 
 

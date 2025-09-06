@@ -47,8 +47,15 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # )
 @configclass
 class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
-    terminate = None
-
+    danger_position = DoneTerm(
+        func=mdp.joint_pos_out_of_limit,
+    )
+    danger_speed = DoneTerm(
+        func=mdp.joint_vel_out_of_limit,
+    )
+    danger_effort = DoneTerm(
+        func=mdp.joint_effort_out_of_limit,
+    )
 
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
@@ -79,8 +86,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stand_still_scale": 10.0,
-            "velocity_threshold": 0.4,
+            "stand_still_scale": 5.0,
+            "velocity_threshold": 0.5,
             "command_threshold": 0.1,
         },
     )
@@ -262,7 +269,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             # 根据需要保留噪声，或设为 0
             noise=Unoise(n_min=0.0, n_max=0.0),
-            clip=(0.0, 1.0),
+            clip=(-1.0, 1.0),
             scale=1.0,
         )
         # self.observations.policy.base_lin_vel = None
@@ -404,8 +411,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
