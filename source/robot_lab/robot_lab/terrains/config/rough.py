@@ -183,8 +183,8 @@ PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
 FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(10.0, 10.0),       # 整个 terrain tile 尺寸
     border_width=20.0,        # 地形边界，防止掉落
-    num_rows=10,
-    num_cols=20,
+    num_rows=20,
+    num_cols=40,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
@@ -193,7 +193,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
             proportion=0.3,                           # 完全生成此地形
             ring_width_range=(2.0, 2.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.0, 0.5),             # 环的离地高度范围
+            ring_height_range=(0.0, 0.9),             # 环的离地高度范围
             ring_thickness=0.1,                       # 环厚度（z 方向）
             platform_width=3.0,                       # 地形中心的方形平台大小
             size=(5.0, 5.0),                        # 每块地形大小
@@ -207,7 +207,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.1,
-            step_height_range=(0.10, 0.6),
+            step_height_range=(0.10, 1.0),
             step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
@@ -222,7 +222,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.2,
-            step_height_range=(0.10, 0.6),
+            step_height_range=(0.10, 1.0),
             step_width=1.5,
             platform_width=3.0,
             border_width=1.0,
@@ -236,7 +236,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25,
+            proportion=0.10, slope_range=(0.0, 0.45), platform_width=2.0, border_width=0.25,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,   
@@ -246,7 +246,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25,
+            proportion=0.10, slope_range=(0.0, 0.45), platform_width=2.0, border_width=0.25,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,    

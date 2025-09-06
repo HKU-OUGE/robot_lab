@@ -79,8 +79,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stand_still_scale": 5.0,
-            "velocity_threshold": 0.5,
+            "stand_still_scale": 10.0,
+            "velocity_threshold": 0.4,
             "command_threshold": 0.1,
         },
     )
@@ -163,7 +163,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
             debug_vis=True,
