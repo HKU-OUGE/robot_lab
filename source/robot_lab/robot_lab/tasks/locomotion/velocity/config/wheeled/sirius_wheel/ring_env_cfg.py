@@ -97,15 +97,16 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
-        # ... 你已有的观测项
-        obs_scan = ObsTerm(
-                    func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
-                    params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-                    # 根据需要保留噪声，或设为 0
-                    noise=Unoise(n_min=0.0, n_max=0.0),
-                    clip=(0.0, 1.0),
-                    scale=1.0,
-                )
+        # # ... 你已有的观测项
+        # obs_scan = ObsTerm(
+        #             func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
+        #             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #             # 根据需要保留噪声，或设为 0
+        #             noise=Unoise(n_min=0.0, n_max=0.0),
+        #             clip=(0.0, 1.0),
+        #             scale=1.0,
+        #         )
+        obs_scan = None
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
 
@@ -138,7 +139,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        self.episode_length_s = 7
         CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.65)
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
@@ -163,22 +163,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
-        self.scene.ray_caster = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(3.0, 0.0, 20.0)),
-            ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=1.0, size=[4.0, 2.5]),
-            debug_vis=True,
-            mesh_prim_paths=["/World/ground"],
-        )
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.ray_caster.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
@@ -218,6 +209,17 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.curriculum.terrain_levels = None
 
         # self.scene.height_scanner = None
+        # self.scene.ray_caster = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
+        #     mesh_prim_paths=["/World/ground"],
+        #     ray_alignment="yaw",
+        #     pattern_cfg=patterns.LidarPatternCfg(
+        #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
+        #     ),
+        #     # debug_vis=not args_cli.headless,
+        #     debug_vis=True,
+        # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
         #     func=mdp.height_scan,
@@ -256,8 +258,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = ObsTerm(
-            func=mdp.his_height_scan_disc,                      # 调用离散化后的扫描函数
-            params={"sensor_cfg": SceneEntityCfg("ray_caster")},
+            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             # 根据需要保留噪声，或设为 0
             noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(0.0, 1.0),
@@ -273,8 +275,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_vel.scale = 1.5
-        # self.actions.joint_pos.clip = {".*": (-8.0, 8.0)}
-        # self.actions.joint_vel.clip = {".*": (-20.0, 20.0)}
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -353,13 +353,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.005
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
-        # self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-        #     f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
-        # ]
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
+        ]
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name})).*"
         ]
@@ -403,8 +403,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
