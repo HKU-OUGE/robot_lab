@@ -50,13 +50,50 @@ class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
     danger_position = DoneTerm(
         func=mdp.joint_pos_out_of_limit,
     )
-    danger_speed = DoneTerm(
-        func=mdp.joint_vel_out_of_limit,
-    )
-    danger_effort = DoneTerm(
-        func=mdp.joint_effort_out_of_limit,
+    W_danger_speed = DoneTerm(
+        func=mdp.joint_vel_out_of_manual_limit,
+        params={
+            "max_velocity": 20.0,
+            "asset_cfg": SceneEntityCfg(
+                name="robot",
+                joint_names=r".*_WHEEL$",   # 仅 *_WHEEL
+            ),
+        },
     )
 
+    # 髋向/俯仰：≤ 13 rad/s（HAA/HFE）
+    H_danger_speed = DoneTerm(
+        func=mdp.joint_vel_out_of_manual_limit,
+        params={
+            "max_velocity": 15.0,
+            "asset_cfg": SceneEntityCfg(
+                name="robot",
+                joint_names=r".*_(HAA|HFE)$",  # 只匹配 HAA 或 HFE
+            ),
+        },
+    )
+
+    # 膝关节：≤ 9 rad/s（KFE）
+    K_danger_speed = DoneTerm(
+        func=mdp.joint_vel_out_of_manual_limit,
+        params={
+            "max_velocity": 12.0,
+            "asset_cfg": SceneEntityCfg(
+                name="robot",
+                joint_names=r".*_KFE$",  # 只匹配 KFE
+            ),
+        },
+    )
+    # danger_effort = DoneTerm(
+    #     func=mdp.joint_effort_out_of_limit,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg(
+    #             name="robot",
+    #             joint_names=[".*_WHEEL"]  # 用你的命名规则/正则
+    #         )
+    #     },
+    # )
+    termiantion = None
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     """Reward terms for the MDP."""
@@ -316,7 +353,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Rewards------------------------------
         # General
-        self.rewards.is_terminated.weight = 0
+        self.rewards.is_terminated.weight = -200
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
@@ -412,8 +449,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Terminations------------------------------
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        # self.terminations.illegal_contact = None
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
