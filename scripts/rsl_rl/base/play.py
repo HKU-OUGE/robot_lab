@@ -63,7 +63,7 @@ import time
 import torch
 
 import rsl_rl_utils
-from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 from isaaclab.devices import Se2Keyboard
 from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
@@ -71,7 +71,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
+from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
 import robot_lab.tasks  # noqa: F401
@@ -88,7 +88,7 @@ def main():
     #     print_dict(env_cfg.to_dict(), nesting=4)
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
-    agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    agent_cfg: RslRlBaseRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
     # make a smaller scene for play
     env_cfg.scene.num_envs = args_cli.num_envs
@@ -174,40 +174,43 @@ def main():
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    ppo_runner.load(resume_path)
+    if agent_cfg.class_name == "OnPolicyRunner":
+        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    elif agent_cfg.class_name == "DistillationRunner":
+        runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    else:
+        raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+    runner.load(resume_path)
 
     # obtain the trained policy for inference
-    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
+    policy = runner.get_inference_policy(device=env.unwrapped.device)
 
     # extract the neural network module
     # we do this in a try-except to maintain backwards compatibility.
     try:
         # version 2.3 onwards
-        policy_nn = ppo_runner.alg.policy
+        policy_nn = runner.alg.policy
     except AttributeError:
         # version 2.2 and below
-        policy_nn = ppo_runner.alg.actor_critic
+        policy_nn = runner.alg.actor_critic
+
+    # extract the normalizer
+    if hasattr(policy_nn, "actor_obs_normalizer"):
+        normalizer = policy_nn.actor_obs_normalizer
+    elif hasattr(policy_nn, "student_obs_normalizer"):
+        normalizer = policy_nn.student_obs_normalizer
+    else:
+        normalizer = None
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_onnx(
-        policy=policy_nn,
-        normalizer=ppo_runner.obs_normalizer,
-        path=export_model_dir,
-        filename="policy.onnx",
-    )
-    export_policy_as_jit(
-        policy=policy_nn,
-        normalizer=ppo_runner.obs_normalizer,
-        path=export_model_dir,
-        filename="policy.pt",
-    )
+    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
-    obs, _ = env.get_observations()
+    obs = env.get_observations()
     # # --- 构建观测切片索引：名字 -> slice(start, end) ---
     # def build_group_index_map(obs_mgr, group_name="policy"):
     #     names = obs_mgr._group_obs_term_names[group_name]
@@ -301,13 +304,13 @@ def main():
 
         debug_print = True
         time.sleep(0.1)  # avoid stdout loss
-    # 导出后切 JIT
-    jit_path = os.path.join(export_model_dir, "policy.pt")
-    del ppo_runner           # 不再需要含 critic 的 runner
-    torch.cuda.empty_cache() # 回收显存
+    # # 导出后切 JIT
+    # jit_path = os.path.join(export_model_dir, "policy.pt")
+    # del runner           # 不再需要含 critic 的 runner
+    # torch.cuda.empty_cache() # 回收显存
 
-    policy_jit = torch.jit.load(jit_path, map_location=env.unwrapped.device)
-    policy_jit.eval()
+    # policy_jit = torch.jit.load(jit_path, map_location=env.unwrapped.device)
+    # policy_jit.eval()
     # simulate environment
     while simulation_app.is_running():
         # print action space vector
@@ -345,7 +348,7 @@ def main():
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy_jit(obs)
+            actions = policy(obs)
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, _, _ = env.step(actions)
