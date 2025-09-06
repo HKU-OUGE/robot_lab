@@ -11,7 +11,6 @@ class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_rough"
-    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
@@ -38,7 +37,6 @@ class CUHKLRLSiriusWStandPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 5000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_stand"
-    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
@@ -66,7 +64,6 @@ class CUHKLRLSiriusWBackFlipPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 3000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_backflip"
-    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
@@ -94,7 +91,6 @@ class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 3000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_pit"
-    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
@@ -124,8 +120,6 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "cuhkrl_siriusw_ring"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
