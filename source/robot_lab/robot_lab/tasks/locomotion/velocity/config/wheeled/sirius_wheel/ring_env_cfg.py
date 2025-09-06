@@ -53,7 +53,7 @@ class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
     W_danger_speed = DoneTerm(
         func=mdp.joint_vel_out_of_manual_limit,
         params={
-            "max_velocity": 20.0,
+            "max_velocity": 30.0,
             "asset_cfg": SceneEntityCfg(
                 name="robot",
                 joint_names=r".*_WHEEL$",   # 仅 *_WHEEL
