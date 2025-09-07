@@ -58,10 +58,11 @@ class MySceneCfg(InteractiveSceneCfg):
         max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
-            friction_combine_mode="multiply",
+            friction_combine_mode="average",
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
+            restitution=0.0,
         ),
         visual_material=sim_utils.MdlFileCfg(
             mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",

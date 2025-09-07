@@ -47,43 +47,43 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # )
 @configclass
 class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
-    danger_position = DoneTerm(
-        func=mdp.joint_pos_out_of_limit,
-    )
-    W_danger_speed = DoneTerm(
-        func=mdp.joint_vel_out_of_manual_limit,
-        params={
-            "max_velocity": 30.0,
-            "asset_cfg": SceneEntityCfg(
-                name="robot",
-                joint_names=r".*_WHEEL$",   # 仅 *_WHEEL
-            ),
-        },
-    )
+    # danger_position = DoneTerm(
+    #     func=mdp.joint_pos_out_of_limit,
+    # )
+    # W_danger_speed = DoneTerm(
+    #     func=mdp.joint_vel_out_of_manual_limit,
+    #     params={
+    #         "max_velocity": 30.0,
+    #         "asset_cfg": SceneEntityCfg(
+    #             name="robot",
+    #             joint_names=r".*_WHEEL$",   # 仅 *_WHEEL
+    #         ),
+    #     },
+    # )
 
-    # 髋向/俯仰：≤ 13 rad/s（HAA/HFE）
-    H_danger_speed = DoneTerm(
-        func=mdp.joint_vel_out_of_manual_limit,
-        params={
-            "max_velocity": 15.0,
-            "asset_cfg": SceneEntityCfg(
-                name="robot",
-                joint_names=r".*_(HAA|HFE)$",  # 只匹配 HAA 或 HFE
-            ),
-        },
-    )
+    # # 髋向/俯仰：≤ 13 rad/s（HAA/HFE）
+    # H_danger_speed = DoneTerm(
+    #     func=mdp.joint_vel_out_of_manual_limit,
+    #     params={
+    #         "max_velocity": 15.0,
+    #         "asset_cfg": SceneEntityCfg(
+    #             name="robot",
+    #             joint_names=r".*_(HAA|HFE)$",  # 只匹配 HAA 或 HFE
+    #         ),
+    #     },
+    # )
 
-    # 膝关节：≤ 9 rad/s（KFE）
-    K_danger_speed = DoneTerm(
-        func=mdp.joint_vel_out_of_manual_limit,
-        params={
-            "max_velocity": 12.0,
-            "asset_cfg": SceneEntityCfg(
-                name="robot",
-                joint_names=r".*_KFE$",  # 只匹配 KFE
-            ),
-        },
-    )
+    # # 膝关节：≤ 9 rad/s（KFE）
+    # K_danger_speed = DoneTerm(
+    #     func=mdp.joint_vel_out_of_manual_limit,
+    #     params={
+    #         "max_velocity": 12.0,
+    #         "asset_cfg": SceneEntityCfg(
+    #             name="robot",
+    #             joint_names=r".*_KFE$",  # 只匹配 KFE
+    #         ),
+    #     },
+    # )
     # danger_effort = DoneTerm(
     #     func=mdp.joint_effort_out_of_limit,
     #     params={
@@ -151,9 +151,25 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
         #             scale=1.0,
         #         )
         obs_scan = None
+        def __post_init__(self):
+            self.history_length = 5
+    @configclass
+    class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
+        # # ... 你已有的观测项
+        # obs_scan = ObsTerm(
+        #             func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
+        #             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #             # 根据需要保留噪声，或设为 0
+        #             noise=Unoise(n_min=0.0, n_max=0.0),
+        #             clip=(0.0, 1.0),
+        #             scale=1.0,
+        #         )
+        critic_scan = None
+        def __post_init__(self):
+            self.history_length = 5
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
-
+    critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
 
 
 @configclass
@@ -232,37 +248,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         rot=(0.5, -0.5, 0.5, -0.5),
         #         convention="ros"
         #     ),
-        # )
-        # self.scene.terrain.usd_path ="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_B/Flat_Mountain_B.usd"
-        # self.scene.terrain = TerrainImporterCfg(
-        #     prim_path="/World/ground",
-        #     terrain_type="usd",  # 使用 .usd 文件作为地形
-        #     usd_path="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_A/Flat_Mountain_A.usd",  # 指定 .usd 文件路径
-        #     collision_group=-1,
-        #     visual_material=None,  # 可选：设置视觉材质
-        #     max_init_terrain_level=5,
-        #     debug_vis=False,
-        # )
-        # self.scene.terrain.terrain_type = "plane"
-        # self.scene.terrain.terrain_generator = None
-        # # no height scan
-        # self.scene.height_scanner = None
-        # self.observations.policy.height_scan = None
-        # self.observations.critic.height_scan = None
-        # # no terrain curriculum
-        # self.curriculum.terrain_levels = None
-
-        # self.scene.height_scanner = None
-        # self.scene.ray_caster = RayCasterCfg(
-        #     prim_path="{ENV_REGEX_NS}/Robot/trunk",
-        #     offset=RayCasterCfg.OffsetCfg(pos=(0, 0, -0.2)),
-        #     mesh_prim_paths=["/World/ground"],
-        #     ray_alignment="yaw",
-        #     pattern_cfg=patterns.LidarPatternCfg(
-        #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
-        #     ),
-        #     # debug_vis=not args_cli.headless,
-        #     debug_vis=True,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
@@ -353,7 +338,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Rewards------------------------------
         # General
-        self.rewards.is_terminated.weight = -200
+        self.rewards.is_terminated.weight = 0
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
@@ -401,9 +386,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
-        ]
+        # self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+        #     f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
+        # ]
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name})).*"
         ]
@@ -441,7 +426,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
-        self.rewards.wheel_mirror.weight = 0.1
+        self.rewards.wheel_mirror.weight = 0.0
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRingEnvCfg":
