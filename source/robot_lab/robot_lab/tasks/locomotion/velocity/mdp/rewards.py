@@ -349,10 +349,10 @@ def wheel_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
         # ===== 选择一种聚合方式（任选其一）=====
 
         # 1) 求和（不平均）：多个异常叠加更痛
-        # reward = terms.sum(dim=-1)
+        reward = terms.sum(dim=-1)
 
         # 2) 取“最差一对”（最负的那一列）：任意一对异常就很痛
-        reward, _ = terms.min(dim=-1)
+        # reward, _ = terms.min(dim=-1)
 
         # 3) Top-k 平均（例如最差的2对）
         # k = min(2, terms.shape[-1])
@@ -497,7 +497,7 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
     s = env.scene.sensors[sensor_cfg.name]
     forces = s.data.net_forces_w  # [N, num_bodies, 3]
     # 每脚是否接触（法向力阈值可按需要调）
-    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8).float()  # [N, num_feet]
+    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 25.0).float()  # [N, num_feet]
 
     # —— 惰性初始化 & 指数滑动平均占空比（强调“持续贴地”）——
     if not hasattr(env, "contact_ema"):
@@ -513,7 +513,7 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
 
     # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
     cmd = env.command_manager.get_command(command_name)                 # [N, D]
-    v_ref = 1.0  # 参考最大期望线速度，按你的命令分布调整
+    v_ref = 0.6  # 参考最大期望线速度，按你的命令分布调整
     w = (cmd[:, 0:2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
     return reward * w
 
