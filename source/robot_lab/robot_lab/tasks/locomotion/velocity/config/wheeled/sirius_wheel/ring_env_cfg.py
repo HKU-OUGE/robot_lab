@@ -151,7 +151,7 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
         #             scale=1.0,
         #         )
         obs_scan = None
-        def __post_init__(self):
+        # def __post_init__(self):
             # self.history_length = 5
     @configclass
     class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
@@ -165,7 +165,7 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
         #             scale=1.0,
         #         )
         critic_scan = None
-        def __post_init__(self):
+        # def __post_init__(self):
             # self.history_length = 5
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
@@ -387,7 +387,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name}).*"
+            f"^(?!.*({self.foot_link_name})).*"
         ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
