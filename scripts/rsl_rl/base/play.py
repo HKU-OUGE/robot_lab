@@ -111,7 +111,7 @@ def main():
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
         env_cfg.terminations.time_out = None
-        env_cfg.commands.base_velocity.debug_vis = False
+        env_cfg.commands.base_velocity.debug_vis = True
 
         kb_cfg = Se2KeyboardCfg(
             v_x_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
