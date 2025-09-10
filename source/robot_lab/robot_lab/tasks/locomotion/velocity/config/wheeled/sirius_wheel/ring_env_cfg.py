@@ -39,7 +39,7 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # goal_pose = TerrainBasedPose2dCommandCfg(
     #     asset_name="robot",
     #     resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
-    #     debug_vis=True,                      # 可视化目标箭头
+    #     debug_vis=False,                      # 可视化目标箭头
     #     simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
     #     ranges=TerrainBasedPose2dCommandCfg.Ranges(
     #         heading=(0.0, 3.14), # useless if simple_heading=True
@@ -229,11 +229,12 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=True,
+            debug_vis=False,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.height_scanner_base = None
         self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
@@ -349,7 +350,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -1.0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -1.0
+        self.rewards.lin_vel_z_l2.weight = -0.2
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
         self.rewards.base_height_l2.weight = -0.3
@@ -385,7 +386,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.05
+        self.rewards.feet_continue_contact.weight = 0.1
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
@@ -432,9 +433,10 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
-            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            [r"RF_(HFE|KFE).*", r"LF_(HFE|KFE).*"],  # 右前 ↔ 左前
+            [r"RH_(HFE|KFE).*", r"LH_(HFE|KFE).*"],  # 右后 ↔ 左后
         ]
+
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRingEnvCfg":
