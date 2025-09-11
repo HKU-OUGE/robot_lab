@@ -130,7 +130,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.00,
+        weight=0.005,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -383,8 +383,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -0.5
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = 0
-        self.rewards.base_height_l2.params["target_height"] = 0.40
+        self.rewards.base_height_l2.weight = -1.0
+        self.rewards.base_height_l2.params["target_height"] = 0.55
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -416,7 +416,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.11
+        self.rewards.feet_continue_contact.weight = 0.12
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
@@ -438,8 +438,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.5
         self.rewards.track_ang_vel_z_exp.weight = 2.0
-        self.rewards.track_ang_vel_z_exp.params["std"] = 0.3
-        self.rewards.track_lin_vel_xy_exp.params["std"] = 0.6
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
+        self.rewards.track_lin_vel_xy_exp.params["std"] = 0.5
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["threshold"] = 0.5
@@ -464,8 +464,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
-            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            ["RF_(HAA|HFE|KFE).*", "LF_(HAA|HFE|KFE).*"],
+            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
