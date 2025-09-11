@@ -416,19 +416,19 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.15
+        self.rewards.feet_continue_contact.weight = 0.11
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.005
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -4.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
-        self.rewards.knee_undesired_contacts.weight = -0.5
+        self.rewards.knee_undesired_contacts.weight = -1.0
         self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = [
             rf"{self.calf_link_name}"
         ]
@@ -438,7 +438,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.5
         self.rewards.track_ang_vel_z_exp.weight = 2.0
-        self.rewards.track_ang_vel_z_exp.params["std"] = 0.1
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.3
         self.rewards.track_lin_vel_xy_exp.params["std"] = 0.6
         # Others
         self.rewards.feet_air_time.weight = 0
