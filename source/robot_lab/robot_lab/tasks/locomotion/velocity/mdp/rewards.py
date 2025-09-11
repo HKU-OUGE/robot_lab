@@ -514,7 +514,7 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
     s = env.scene.sensors[sensor_cfg.name]
     forces = s.data.net_forces_w  # [N, num_bodies, 3]
     # 每脚是否接触（法向力阈值可按需要调）
-    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 25.0).float()  # [N, num_feet]
+    contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8).float()  # [N, num_feet]
 
     # —— 惰性初始化 & 指数滑动平均占空比（强调“持续贴地”）——
     if not hasattr(env, "contact_ema"):
