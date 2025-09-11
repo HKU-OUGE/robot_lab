@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
+from isaaclab.envs import mdp
 from isaaclab.managers import ManagerTermBase
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
@@ -115,17 +116,17 @@ def joint_power(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityC
 
 
 def stand_still_without_cmd(
-    env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float = 0.06,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalize joint positions that deviate from the default one when no command."""
-    # extract the used quantities (to enable type-hinting)
-    asset: Articulation = env.scene[asset_cfg.name]
-    # compute out of limits constraints
-    diff_angle = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    command = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) < 0.1
-    return (
-        torch.sum(torch.abs(diff_angle), dim=1) * command  # * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 1)
-    )
+    """Penalize offsets from the default joint positions when the command is very small."""
+    # Penalize motion when command is nearly zero.
+    reward = mdp.joint_deviation_l1(env, asset_cfg)
+    reward *= torch.norm(env.command_manager.get_command(command_name), dim=1) < command_threshold
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 def wheels_stop_without_cmd(
     env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg
@@ -146,30 +147,30 @@ def wheels_stop_without_cmd(
     penalty = torch.sum(torch.abs(wheel_vel), dim=1)
 
     return penalty * command
-
-
 def joint_position_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     asset_cfg: SceneEntityCfg,
     stand_still_scale: float,
     velocity_threshold: float,
+    command_threshold: float,
 ) -> torch.Tensor:
     """Penalize joint position error from default on the articulation."""
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
     cmd = torch.linalg.norm(env.command_manager.get_command(command_name), dim=1)
-    body_vel = torch.linalg.norm(asset.data.root_com_lin_vel_b[:, :2], dim=1)
-    reward = torch.linalg.norm(
+    body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    running_reward = torch.linalg.norm(
         (asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]), dim=1
     )
-    return torch.where(
-        torch.logical_or(cmd > 0.1, body_vel > velocity_threshold), reward, stand_still_scale * reward
-    )  # * torch.clamp(-asset.data.projected_gravity_b[:, 2], 0, 1)
-    # reward = torch.square(
-    #     asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    # )
-    # return torch.sum(reward, dim=1)
+    reward = torch.where(
+        torch.logical_or(cmd > command_threshold, body_vel > velocity_threshold),
+        running_reward,
+        stand_still_scale * running_reward,
+    )
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
 
 def wheel_vel_penalty(
     env: ManagerBasedRLEnv,
@@ -211,8 +212,10 @@ class GaitReward(ManagerTermBase):
         """
         super().__init__(cfg, env)
         self.std: float = cfg.params["std"]
+        self.command_name: str = cfg.params["command_name"]
         self.max_err: float = cfg.params["max_err"]
         self.velocity_threshold: float = cfg.params["velocity_threshold"]
+        self.command_threshold: float = cfg.params["command_threshold"]
         self.contact_sensor: ContactSensor = env.scene.sensors[cfg.params["sensor_cfg"].name]
         self.asset: Articulation = env.scene[cfg.params["asset_cfg"].name]
         # match foot body names with corresponding foot body ids
@@ -231,8 +234,10 @@ class GaitReward(ManagerTermBase):
         self,
         env: ManagerBasedRLEnv,
         std: float,
+        command_name: str,
         max_err: float,
         velocity_threshold: float,
+        command_threshold: float,
         synced_feet_pair_names,
         asset_cfg: SceneEntityCfg,
         sensor_cfg: SceneEntityCfg,
@@ -258,11 +263,15 @@ class GaitReward(ManagerTermBase):
         async_reward_3 = self._async_reward_func(self.synced_feet_pairs[1][0], self.synced_feet_pairs[0][1])
         async_reward = async_reward_0 * async_reward_1 * async_reward_2 * async_reward_3
         # only enforce gait if cmd > 0
-        cmd = torch.norm(env.command_manager.get_command("base_velocity"), dim=1)
+        cmd = torch.linalg.norm(env.command_manager.get_command(self.command_name), dim=1)
         body_vel = torch.linalg.norm(self.asset.data.root_com_lin_vel_b[:, :2], dim=1)
-        return torch.where(
-            torch.logical_or(cmd > 0.1, body_vel > self.velocity_threshold), sync_reward * async_reward, 0.0
+        reward = torch.where(
+            torch.logical_or(cmd > self.command_threshold, body_vel > self.velocity_threshold),
+            sync_reward * async_reward,
+            0.0,
         )
+        reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+        return reward
 
     """
     Helper functions.
@@ -287,6 +296,7 @@ class GaitReward(ManagerTermBase):
         se_act_1 = torch.clip(torch.square(contact_time[:, foot_0] - air_time[:, foot_1]), max=self.max_err**2)
         return torch.exp(-(se_act_0 + se_act_1) / self.std)
 
+
 def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joints: list[list[str]]) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
@@ -301,6 +311,31 @@ def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
         # Calculate the difference for each pair and add to the total reward
         diff = torch.sum(
             torch.square(asset.data.joint_pos[:, joint_pair[0][0]] - asset.data.joint_pos[:, joint_pair[1][0]]),
+            dim=-1,
+        )
+        reward += diff
+    reward *= 1 / len(mirror_joints) if len(mirror_joints) > 0 else 0
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def action_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joints: list[list[str]]) -> torch.Tensor:
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    if not hasattr(env, "action_mirror_joints_cache") or env.action_mirror_joints_cache is None:
+        # Cache joint positions for all pairs
+        env.action_mirror_joints_cache = [
+            [asset.find_joints(joint_name) for joint_name in joint_pair] for joint_pair in mirror_joints
+        ]
+    reward = torch.zeros(env.num_envs, device=env.device)
+    # Iterate over all joint pairs
+    for joint_pair in env.action_mirror_joints_cache:
+        # Calculate the difference for each pair and add to the total reward
+        diff = torch.sum(
+            torch.square(
+                torch.abs(env.action_manager.action[:, joint_pair[0][0]])
+                - torch.abs(env.action_manager.action[:, joint_pair[1][0]])
+            ),
             dim=-1,
         )
         reward += diff
@@ -368,37 +403,6 @@ def wheel_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
-
-
-
-
-
-def action_mirror(
-    env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg,
-    mirror_joints: list[list[str]],
-) -> torch.Tensor:
-    asset: Articulation = env.scene[asset_cfg.name]
-    if not hasattr(env, "action_mirror_joints_cache") or env.action_mirror_joints_cache is None:
-        env.action_mirror_joints_cache = [
-            [asset.find_joints(joint_name) for joint_name in joint_pair]
-            for joint_pair in mirror_joints
-        ]
-
-    penalty = torch.zeros(env.num_envs, device=env.device)
-    for joint_pair in env.action_mirror_joints_cache:
-        diff = torch.abs(env.action_manager.action[:, joint_pair[0][0]]) - \
-               torch.abs(env.action_manager.action[:, joint_pair[1][0]])
-        penalty += torch.mean(torch.square(diff), dim=-1)
-
-    penalty = penalty / (len(mirror_joints) + 1e-6)
-    reward = torch.exp(-5.0 * penalty)
-
-    upright_weight = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7
-    reward *= upright_weight
-    return reward
-
-
 def action_sync(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, joint_groups: list[list[str]]) -> torch.Tensor:
     # extract the used quantities (to enable type-hinting)
     asset: Articulation = env.scene[asset_cfg.name]
@@ -451,7 +455,7 @@ def feet_air_time(
     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
     reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
     # no reward for zero command
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    reward *= torch.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
@@ -473,7 +477,21 @@ def feet_air_time_positive_biped(env, command_name: str, threshold: float, senso
     reward = torch.min(torch.where(single_stance.unsqueeze(-1), in_mode_time, 0.0), dim=1)[0]
     reward = torch.clamp(reward, max=threshold)
     # no reward for zero command
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    reward *= torch.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def feet_air_time_variance_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize variance in the amount of time each foot spends in the air/on the ground relative to each other"""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    # compute the reward
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    last_contact_time = contact_sensor.data.last_contact_time[:, sensor_cfg.body_ids]
+    reward = torch.var(torch.clip(last_air_time, max=0.5), dim=1) + torch.var(
+        torch.clip(last_contact_time, max=0.5), dim=1
+    )
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
@@ -489,10 +507,9 @@ def feet_contact(
     contact_num = torch.sum(contact, dim=1)
     reward = (contact_num != expect_contact_num).float()
     # no reward for zero command
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
-
-
 def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
     s = env.scene.sensors[sensor_cfg.name]
     forces = s.data.net_forces_w  # [N, num_bodies, 3]
@@ -517,33 +534,6 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
     w = (cmd[:, 0:2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
     return reward * w
 
-
-
-# def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
-#     s = env.scene.sensors[sensor_cfg.name]
-#     forces = s.data.net_forces_w  # [N, num_bodies, 3]
-#     # 每脚是否接触（法向力阈值可按需要调）
-#     contact = (forces[:, sensor_cfg.body_ids, 2].abs() > 9.8).float()  # [N, num_feet]
-
-#     # —— 惰性初始化 & 指数滑动平均占空比（强调“持续贴地”）——
-#     if not hasattr(env, "contact_ema"):
-#         env.contact_ema = torch.zeros_like(contact)
-#     alpha = 0.05  # 越小越强调“持续”；0.05~0.2 常用
-#     env.contact_ema = (1.0 - alpha) * env.contact_ema + alpha * contact  # [N, num_feet]
-
-#     # —— 占空比阈值：每脚是否达到“贴地占空比”要求 —— 
-#     target_duty = 0.65  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
-#     slack = 0.05
-#     duty_ok = (env.contact_ema >= (target_duty - slack)).float()        # [N, num_feet]
-#     reward = duty_ok.mean(dim=1)                                        # [N], 0~1
-
-#     # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
-#     cmd = env.command_manager.get_command(command_name)                 # [N, D]
-#     v_ref = 0.6  # 参考最大期望线速度，按你的命令分布调整
-#     w = (cmd[:, 0].abs() / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
-#     return reward * w
-
-
 def feet_contact_without_cmd(env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
     """Reward feet contact"""
     # extract the used quantities (to enable type-hinting)
@@ -559,10 +549,11 @@ def feet_stumble(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Te
     # extract the used quantities (to enable type-hinting)
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
-    forces_xy = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
-    contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    forces_xy = torch.linalg.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
     # Penalize feet hitting vertical surfaces
-    return torch.any(contact & (forces_xy > forces_z), dim=1)
+    reward = torch.any(forces_xy > 4 * forces_z, dim=1).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
 def feet_distance_y_exp(
@@ -628,7 +619,9 @@ def feet_distance_xy_exp(
 
     # Combine x and y differences and compute the exponential penalty
     stance_diff = stance_diff_x + stance_diff_y
-    return torch.exp(-torch.sum(stance_diff, dim=1) / std)
+    reward = torch.exp(-torch.sum(stance_diff, dim=1) / std**2)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
 def feet_height_exp(
@@ -636,17 +629,49 @@ def feet_height_exp(
     command_name: str,
     asset_cfg: SceneEntityCfg,
     target_height: float,
-    std: float,
     tanh_mult: float,
 ) -> torch.Tensor:
     """Reward the swinging feet for clearing a specified height off the ground"""
     asset: RigidObject = env.scene[asset_cfg.name]
     foot_z_target_error = torch.square(asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height)
-    foot_velocity_tanh = torch.tanh(tanh_mult * torch.norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2))
+    foot_velocity_tanh = torch.tanh(
+        tanh_mult * torch.linalg.norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2)
+    )
     reward = torch.sum(foot_z_target_error * foot_velocity_tanh, dim=1)
     # no reward for zero command
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
-    return torch.exp(-reward / std)
+    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def feet_height_body(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    target_height: float,
+    tanh_mult: float,
+) -> torch.Tensor:
+    """Reward the swinging feet for clearing a specified height off the ground"""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    cur_footpos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
+    footpos_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
+    cur_footvel_translated = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[
+        :, :
+    ].unsqueeze(1)
+    footvel_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
+    for i in range(len(asset_cfg.body_ids)):
+        footpos_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
+            asset.data.root_quat_w, cur_footpos_translated[:, i, :]
+        )
+        footvel_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
+            asset.data.root_quat_w, cur_footvel_translated[:, i, :]
+        )
+    foot_z_target_error = torch.square(footpos_in_body_frame[:, :, 2] - target_height).view(env.num_envs, -1)
+    foot_velocity_tanh = torch.tanh(tanh_mult * torch.norm(footvel_in_body_frame[:, :, :2], dim=2))
+    reward = torch.sum(foot_z_target_error * foot_velocity_tanh, dim=1)
+    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
 def feet_slide(
@@ -695,7 +720,6 @@ def feet_slide(
 #     diff = diff * (env.action_manager.prev_prev_action[:, :] != 0)  # ignore second step
 #     return torch.sum(diff, dim=1)
 
-
 def wheel_spin_in_air_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
@@ -707,69 +731,11 @@ def wheel_spin_in_air_penalty(
     in_air = contact_sensor.compute_first_air(env.step_dt)[:, sensor_cfg.body_ids]
     reward = torch.sum(in_air * joint_vel, dim=1)
     return reward
-
-
 def upward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize z-axis base linear velocity using L2 squared kernel."""
     # extract the used quantities (to enable type-hinting)
     asset: RigidObject = env.scene[asset_cfg.name]
     reward = torch.square(1 - asset.data.projected_gravity_b[:, 2])
-    return reward
-
-
-def track_lin_vel_world_xy_exp(
-    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
-    lin_vel_error = torch.sum(
-        torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_com_lin_vel_w[:, :2]),
-        dim=1,
-    )
-    return torch.exp(-lin_vel_error / std**2)
-
-
-def track_ang_vel_world_z_exp(
-    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
-    ang_vel_error = torch.square(
-        env.command_manager.get_command(command_name)[:, 2] - asset.data.root_com_ang_vel_w[:, 2]
-    )
-    return torch.exp(-ang_vel_error / std**2)
-
-
-def feet_height_body_exp(
-    env: ManagerBasedRLEnv,
-    command_name: str,
-    asset_cfg: SceneEntityCfg,
-    target_height: float,
-    tanh_mult: float,
-) -> torch.Tensor:
-    """Reward the swinging feet for clearing a specified height off the ground"""
-    asset: RigidObject = env.scene[asset_cfg.name]
-    cur_footpos_translated = asset.data.body_pos_w[:, asset_cfg.body_ids, :] - asset.data.root_pos_w[:, :].unsqueeze(1)
-    footpos_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
-    cur_footvel_translated = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :] - asset.data.root_lin_vel_w[
-        :, :
-    ].unsqueeze(1)
-    footvel_in_body_frame = torch.zeros(env.num_envs, len(asset_cfg.body_ids), 3, device=env.device)
-    for i in range(len(asset_cfg.body_ids)):
-        footpos_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
-            asset.data.root_quat_w, cur_footpos_translated[:, i, :]
-        )
-        footvel_in_body_frame[:, i, :] = math_utils.quat_apply_inverse(
-            asset.data.root_quat_w, cur_footvel_translated[:, i, :]
-        )
-    foot_z_target_error = torch.square(footpos_in_body_frame[:, :, 2] - target_height).view(env.num_envs, -1)
-    foot_velocity_tanh = torch.tanh(tanh_mult * torch.norm(footvel_in_body_frame[:, :, :2], dim=2))
-    reward = torch.sum(foot_z_target_error * foot_velocity_tanh, dim=1)
-    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
 
@@ -799,127 +765,49 @@ def base_height_l2(
         # Use the provided target height directly for flat terrain
         adjusted_target_height = target_height
     # Compute the L2 squared penalty
-    return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+    reward = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
 
 
-def left_own_tile(env: ManagerBasedRLEnv, margin: float = 0.05) -> torch.Tensor:
+def lin_vel_z_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize z-axis base linear velocity using L2 squared kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    reward = torch.square(asset.data.root_lin_vel_b[:, 2])
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def ang_vel_xy_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize xy-axis base angular velocity using L2 squared kernel."""
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    reward = torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize undesired contacts as the number of violations that are above a threshold."""
+    # extract the used quantities (to enable type-hinting)
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    # check if contact force is above threshold
+    net_contact_forces = contact_sensor.data.net_forces_w_history
+    is_contact = torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
+    # sum over contacts for each environment
+    reward = torch.sum(is_contact, dim=1).float()
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward
+
+
+def flat_orientation_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize non-flat base orientation using L2 squared kernel.
+
+    This is computed by penalizing the xy-components of the projected gravity vector.
     """
-    若某 env 的机器人走出它出生所在 tile（含 margin 缓冲），返回 True（触发 termination）。
-    返回: [N] bool tensor
-    """
-    device = env.device
-    terrain = env.scene.terrain
-    gen = getattr(terrain.cfg, "terrain_generator", None)
-    if gen is None:
-        # 非 generator 地形时无法定义“tile”，默认不终止
-        return torch.zeros(env.num_envs, dtype=torch.bool, device=device)
-
-    tile_x, tile_y = gen.size  # 单个子地形 tile 的 XY 尺寸（米）
-
-    # 出生所在 tile 的中心（每个 env 一个）。通常由 TerrainImporter 维护：
-    # Isaac Lab 中常见为 terrain.env_origins.shape=[N,3]
-    origins = getattr(terrain, "env_origins", None)
-    if origins is None:
-        raise RuntimeError("terrain.env_origins 未找到；请把 env 出生中心暴露/保存到 terrain.env_origins。")
-    centers_xy = torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2]  # [N,2]
-
-    # 机器人根在世界系下的 XY
-    root_xy = env.scene["robot"].data.root_link_pos_w[:, :2]  # [N,2]
-
-    # 相对偏移与半宽（给一点 margin，避免数值抖动误判）
-    d = (root_xy - centers_xy).abs()  # [N,2]
-    half_extents = torch.tensor([tile_x * 0.5 - margin, tile_y * 0.5 - margin], device=device)
-
-    outside = (d > half_extents).any(dim=1)  # [N] bool
-    return outside
-
-
-def left_tile_bigbonus(env: ManagerBasedRLEnv, margin: float = 0.05, band: float = 0.20) -> torch.Tensor:
-    """
-    到达地形边界前 band(默认 0.20 m) 的内侧带时，触发一次性大奖励：
-    - 采用 AABB 按轴判定（贴任意一侧边界都算）
-    - 只在进入奖励带的“上升沿”触发
-    - 每个 env 每回合最多触发一次
-    返回：[N] float(0/1)
-    """
-    device = env.device
-    terrain = env.scene.terrain
-    gen = getattr(terrain.cfg, "terrain_generator", None)
-    if gen is None:
-        return torch.zeros(env.num_envs, device=device)
-
-    # --- tile 半边长（减去 margin） ---
-    tile_x, tile_y = float(gen.size[0]), float(gen.size[1])
-    hx = tile_x * 0.5 - margin
-    hy = tile_y * 0.5 - margin
-    if hx <= 0.0 or hy <= 0.0:
-        return torch.zeros(env.num_envs, device=device)
-
-    # --- 出生中心 ---
-    origins = getattr(terrain, "env_origins", None)
-    if origins is None:
-        origins = getattr(env.scene, "env_origins", None)
-    if origins is None:
-        return torch.zeros(env.num_envs, device=device)
-
-    centers_xy = (origins[..., :2].to(device=device, dtype=torch.float32)
-                  if isinstance(origins, torch.Tensor)
-                  else torch.as_tensor(origins, device=device, dtype=torch.float32)[..., :2])
-
-    # --- 当前位置偏移 ---
-    root_xy = env.scene["robot"].data.root_link_pos_w[:, :2]  # [N,2]
-    d = (root_xy - centers_xy).abs()  # [N,2] -> |dx|, |dy|
-
-    # --- 是否越界（真正的终止区） ---
-    half_vec = torch.tensor([hx, hy], device=device)
-    outside = (d > half_vec).any(dim=1)  # [N] bool
-
-    # --- 奖励带：距离任一边界 20cm 以内但未越界 ---
-    # 按轴各自计算有效 band（防止 band 超过半边长）
-    band_x = min(band, hx)
-    band_y = min(band, hy)
-    lower_x = hx - band_x
-    lower_y = hy - band_y
-
-    near_x = (d[:, 0] > lower_x) & (d[:, 0] <= hx)
-    near_y = (d[:, 1] > lower_y) & (d[:, 1] <= hy)
-    near = (near_x | near_y) & (~outside)  # [N] bool
-
-    # --- 上升沿 + 每回合仅一次 ---
-    if (not hasattr(env, "_edge_band_prev")) or (env._edge_band_prev is None) \
-       or (env._edge_band_prev.shape[0] != env.num_envs):
-        env._edge_band_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
-    if (not hasattr(env, "_edge_bonus_given")) or (env._edge_bonus_given is None) \
-       or (env._edge_bonus_given.shape[0] != env.num_envs):
-        env._edge_bonus_given = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
-
-    rising = near & (~env._edge_band_prev)            # 进入奖励带的第一帧
-    fire   = rising & (~env._edge_bonus_given)        # 本回合尚未发过奖
-
-    bonus = fire.float()
-    # 更新状态
-    env._edge_band_prev = near
-    env._edge_bonus_given = env._edge_bonus_given | fire
-    env.extras["debug/edge_band_rate"] = float(near.float().mean().item())
-    return bonus
-
-
-def clear_edge_bonus_flags(env: ManagerBasedRLEnv, env_ids):
-    """
-    reset 钩子：清理每回合一次性的奖励状态
-    """
-    dev = env.device
-    ids = torch.as_tensor(env_ids, device=dev, dtype=torch.long)
-
-    if (not hasattr(env, "_edge_band_prev")) or (env._edge_band_prev is None) \
-       or (env._edge_band_prev.shape[0] != env.num_envs):
-        env._edge_band_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
-    else:
-        env._edge_band_prev[ids] = False
-
-    if (not hasattr(env, "_edge_bonus_given")) or (env._edge_bonus_given is None) \
-       or (env._edge_bonus_given.shape[0] != env.num_envs):
-        env._edge_bonus_given = torch.zeros(env.num_envs, dtype=torch.bool, device=dev)
-    else:
-        env._edge_bonus_given[ids] = False
-
+    # extract the used quantities (to enable type-hinting)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    reward = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
+    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return reward

@@ -166,9 +166,9 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]  
-        self.rewards.feet_height_body_exp.weight = 2.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.42
-        self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
+        self.rewards.feet_height_body.weight = 2.5
+        self.rewards.feet_height_body.params["target_height"] = -0.42
+        self.rewards.feet_height_body.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
         self.rewards.feet_gait.weight = 5.0

@@ -557,8 +557,8 @@ class RewardsCfg:
     #     },
     # )
 
-    feet_height_body_exp = RewTerm(
-        func=mdp.feet_height_body_exp,
+    feet_height_body = RewTerm(
+        func=mdp.feet_height_body,
         weight=0.0,
         params={
             "std": math.sqrt(0.25),

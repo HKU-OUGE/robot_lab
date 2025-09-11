@@ -359,7 +359,7 @@ def track_ang_vel_world_z_exp(
     return torch.exp(-ang_vel_error / std**2)
 
 
-def feet_height_body_exp(
+def feet_height_body(
     env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, target_height: float, std: float
 ) -> torch.Tensor:
     """Reward the swinging feet for clearing a specified height off the ground"""
