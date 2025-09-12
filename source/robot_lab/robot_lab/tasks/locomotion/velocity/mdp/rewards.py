@@ -129,24 +129,31 @@ def stand_still_without_cmd(
     return reward
 
 def wheels_stop_without_cmd(
-    env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg
+    env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg,
+    v_th: float = 0.05, w_th: float = 0.05,  # 速度/角速度阈值（m/s, rad/s）
+    w_deadzone: float = 0.3                  # 轮角速度死区（rad/s）
 ) -> torch.Tensor:
     """
-    当没有速度命令时，惩罚轮子转动（基于关节速度）。
+    当速度/角速度指令≈0时，抑制轮子空转。
+    返回为正，配置里给负权重。
     """
-    # 提取机器人 articulation
     asset: Articulation = env.scene[asset_cfg.name]
+    # [N, n_wheels]
+    w = asset.data.joint_vel[:, asset_cfg.joint_ids]
 
-    # 获取这些关节的速度
-    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]  # [num_envs, num_wheel_joints]
+    # 指令“静止”判定：同时看平移与偏航
+    cmd = env.command_manager.get_command(command_name)  # 约 [N, 3] -> [vx, vy, wz]
+    still = (torch.norm(cmd[:, :2], dim=1) < v_th) & (torch.abs(cmd[:, 2]) < w_th)
+    mask = still.float()
 
-    # 判断命令是否为 "静止" （这里只看 base 线速度/角速度是否接近 0）
-    command = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) < 0.1
+    # 更稳的惩罚：死区+平方，弱化微小噪声影响
+    # 参考 Isaac Gym/Legged 系列中经常用 L2/动作速率等正则项。 
+    w_pen = torch.relu(torch.abs(w) - w_deadzone)        # [N, n_wheels]
+    penalty = torch.sum(w_pen * w_pen, dim=1)            # [N]
 
-    # 计算惩罚：轮子速度越大，惩罚越大
-    penalty = torch.sum(torch.abs(wheel_vel), dim=1)
+    return penalty * mask
 
-    return penalty * command
+
 def joint_position_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
