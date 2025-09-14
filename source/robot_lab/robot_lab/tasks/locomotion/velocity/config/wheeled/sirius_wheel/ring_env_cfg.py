@@ -24,31 +24,31 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 @configclass
 class CUHKLRLSiriusWCurriculumCfg(CurriculumCfg):
 
-
-    command_object_velocity_xrange_adr = CurrTerm(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.base_velocity.ranges.lin_vel_x",   # note: `_manager.cfg` is omitted
-            "modify_fn": mdp.override_value,
-            "modify_params": {"value": (0.0, 0.6), "num_steps": 500}
-        }
-    )
-    command_object_velocity_headingrange_adr = CurrTerm(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.base_velocity.ranges.heading",   # note: `_manager.cfg` is omitted
-            "modify_fn": mdp.override_value,
-            "modify_params": {"value": (3.14, 3.14), "num_steps": 500}
-        }
-    )
-    command_object_velocity_yrange_adr = CurrTerm(
-        func=mdp.modify_term_cfg,
-        params={
-            "address": "commands.base_velocity.ranges.lin_vel_y",   # note: `_manager.cfg` is omitted
-            "modify_fn": mdp.override_value,
-            "modify_params": {"value": (0.0, 0.0), "num_steps": 500}
-        }
-    )
+    curriculum = None
+    # command_object_velocity_xrange_adr = CurrTerm(
+    #     func=mdp.modify_term_cfg,
+    #     params={
+    #         "address": "commands.base_velocity.ranges.lin_vel_x",   # note: `_manager.cfg` is omitted
+    #         "modify_fn": mdp.override_value,
+    #         "modify_params": {"value": (0.0, 0.6), "num_steps": 500}
+    #     }
+    # )
+    # command_object_velocity_headingrange_adr = CurrTerm(
+    #     func=mdp.modify_term_cfg,
+    #     params={
+    #         "address": "commands.base_velocity.ranges.heading",   # note: `_manager.cfg` is omitted
+    #         "modify_fn": mdp.override_value,
+    #         "modify_params": {"value": (3.14, 3.14), "num_steps": 500}
+    #     }
+    # )
+    # command_object_velocity_yrange_adr = CurrTerm(
+    #     func=mdp.modify_term_cfg,
+    #     params={
+    #         "address": "commands.base_velocity.ranges.lin_vel_y",   # note: `_manager.cfg` is omitted
+    #         "modify_fn": mdp.override_value,
+    #         "modify_params": {"value": (0.0, 0.0), "num_steps": 500}
+    #     }
+    # )
 
 @configclass
 class CUHKLRLSiriusWActionsCfg(ActionsCfg):
@@ -171,7 +171,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.0,
+        weight=0.00,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -447,7 +447,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -0.5
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = -0.5
+        self.rewards.base_height_l2.weight = 0.0
         self.rewards.base_height_l2.params["target_height"] = 0.65
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -483,7 +483,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             "RF_HFE", "RF_KFE",
             "RH_HFE", "RH_KFE",
         ]
-        self.rewards.abad_joint_pos_penalty.weight = -2.0
+        self.rewards.abad_joint_pos_penalty.weight = -1.0
         self.rewards.abad_joint_pos_penalty.params["asset_cfg"].joint_names = [
             "LF_HAA", 
             "LH_HAA", 
@@ -493,7 +493,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.10
+        self.rewards.feet_continue_contact.weight = 0.0
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 2
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
@@ -515,8 +515,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 2.0
         self.rewards.track_ang_vel_z_exp.weight = 2.0
-        self.rewards.track_ang_vel_z_exp.params["std"] = 0.4
-        self.rewards.track_lin_vel_xy_exp.params["std"] = 0.4
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
+        self.rewards.track_lin_vel_xy_exp.params["std"] = 0.5
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["threshold"] = 0.5
@@ -539,7 +539,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RF_FOOT"), ("LH_FOOT", "RH_FOOT"))
         self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = -0.01
+        self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LF_(HAA|HFE|KFE).*"],
             ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
@@ -555,7 +555,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.ranges.heading = (-3.14,3.14)
