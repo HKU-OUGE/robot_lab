@@ -116,7 +116,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
         #     ),
         #     # debug_vis=not args_cli.headless,
-        #     debug_vis=False,
+        #     debug_vis=True,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
@@ -267,9 +267,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height_exp.weight = 0
         self.rewards.feet_height_exp.params["target_height"] = 0.1
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_height_body.weight = 0
-        self.rewards.feet_height_body.params["target_height"] = -0.4
-        self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_height_body_exp.weight = 0
+        self.rewards.feet_height_body_exp.params["target_height"] = -0.4
+        self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RH_FOOT"), ("RF_FOOT", "LH_FOOT"))
         self.rewards.feet_contact_without_cmd.weight = 0.1

@@ -179,7 +179,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
         #     ),
         #     # debug_vis=not args_cli.headless,
-        #     debug_vis=False,
+        #     debug_vis=True,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(

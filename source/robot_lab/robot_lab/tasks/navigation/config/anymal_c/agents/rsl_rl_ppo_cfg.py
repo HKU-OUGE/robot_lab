@@ -14,6 +14,7 @@ class NavigationEnvPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 1500
     save_interval = 50
     experiment_name = "anymal_c_navigation"
+    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=0.5,
         actor_hidden_dims=[128, 128],
