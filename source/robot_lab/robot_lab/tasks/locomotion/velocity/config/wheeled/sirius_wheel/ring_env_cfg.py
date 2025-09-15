@@ -243,7 +243,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             # 根据需要保留噪声，或设为 0
             noise=Unoise(n_min=0.0, n_max=0.0),
-            clip=(0.0, 1.0),
+            clip=(-1.0, 1.0),
             scale=1.0,
         )
         # self.observations.policy.base_lin_vel = None
@@ -256,8 +256,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_vel.scale = 1.5
-        self.actions.joint_pos.clip = {".*": (-8.0, 8.0)}
-        self.actions.joint_vel.clip = {".*": (-20.0, 20.0)}
+        self.actions.joint_pos.clip = {".*": (-30.0, 30.0)}
+        self.actions.joint_vel.clip = {".*": (-30.0, 30.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
@@ -334,7 +334,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.005
+        self.rewards.action_rate_l2.weight = -0.01
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0

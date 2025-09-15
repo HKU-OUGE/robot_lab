@@ -34,14 +34,8 @@ def phase(env: ManagerBasedRLEnv, cycle_time: float) -> torch.Tensor:
     phase_tensor = torch.cat([torch.sin(2 * torch.pi * phase), torch.cos(2 * torch.pi * phase)], dim=-1)
     return phase_tensor
 
-def height_scan_disc(
-    env: ManagerBasedEnv,
-    obs_cache: dict | None = None,          # 设默认值让其成为可选参数
-    sensor_cfg: SceneEntityCfg | None = None,
-    offset: float = 0.5,
-) -> torch.Tensor:
-    # 调用原始高度扫描:contentReference[oaicite:0]{index=0}
+def height_scan_disc(env, obs_cache=None, sensor_cfg=None, offset=0.5) -> torch.Tensor:
     heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
-    depth = (-heights).clamp(min=0.0)
-    bins = torch.floor(depth * 10.0) / 10.0
-    return bins.clamp(max=1.0)
+    depth = (-heights).clamp(-1.0, 1.0)                 # 先夹到 [-1, 1]
+    bins  = torch.round(depth * 10.0) / 10.0            # 对称量化到 0.1 网格
+    return bins                                         # 已保证在 [-1, 1]
