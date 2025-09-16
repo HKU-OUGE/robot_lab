@@ -118,7 +118,7 @@ class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
+    num_steps_per_env = 64
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_ring"
