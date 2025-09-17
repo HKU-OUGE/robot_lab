@@ -76,6 +76,44 @@ from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
 import robot_lab.tasks  # noqa: F401
 
+# === NEW: debug helper to print root pose & target height ===
+def _print_root_and_target(env):
+    """
+    Print root_pos_w (x,y,z), configured target_height, and (if available)
+    ground_z from height scanner plus adjusted target = ground_z + target_height.
+    """
+    try:
+        asset = env.unwrapped.scene["robot"]
+        rp = asset.data.root_pos_w[0].detach().cpu().numpy()
+        msg = f"[ROOT_POS_W] x={rp[0]:+.3f}  y={rp[1]:+.3f}  z={rp[2]:+.3f}"
+    except Exception as e:
+        print(f"[WARN] Cannot read root_pos_w: {e}", flush=True)
+        return
+
+    # read target_height from env config if present
+    th = None
+    try:
+        th = float(env.unwrapped.cfg.rewards.base_height_l2.params["target_height"])
+        msg += f"  | target_height(cfg)={th:+.3f}"
+    except Exception:
+        pass
+
+    # try to read ground estimate from a RayCaster named "height_scanner_base"
+    try:
+        sensor = env.unwrapped.scene.sensors.get("height_scanner_base", None)
+        if sensor is not None:
+            z_hits = sensor.data.ray_hits_w[0, :, 2]
+            import torch
+            valid = torch.isfinite(z_hits)
+            if valid.any():
+                ground_z = z_hits[valid].mean().item()
+                msg += f"  | ground_z≈{ground_z:+.3f}"
+                if th is not None:
+                    msg += f"  | adjusted≈{ground_z + th:+.3f}"
+    except Exception as e:
+        msg += f"  | ground_z=N/A ({e})"
+
+    print(msg, flush=True)
 
 def main():
     """Play with RSL-RL agent."""
@@ -326,6 +364,8 @@ def main():
                     print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
                 idx += term.action_dim
             print("=====================================\n", flush=True)
+            # === NEW: also print root_pos_w & (optional) ground/adjusted target
+            _print_root_and_target(env)
             # # 取出并打印某个 env 的 height_scan（这里以 env_id = 0 为例）
             # env_id = 0
             # hs = obs[env_id, idx_map["height_scan"]].detach().cpu().numpy()
