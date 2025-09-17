@@ -207,7 +207,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.15,
-            step_height_range=(0.00, 0.6),
+            step_height_range=(0.00, 0.75),
             step_width=2.0,
             platform_width=2.0,
             border_width=2.0,
@@ -222,7 +222,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
             proportion=0.15,
-            step_height_range=(0.00, 0.6),
+            step_height_range=(0.00, 0.75),
             step_width=2.0,
             platform_width=2.0,
             border_width=2.0,
