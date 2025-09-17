@@ -88,11 +88,6 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
     )
-    knee_undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=0.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
-    )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
@@ -125,7 +120,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.65)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.51)
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
         #     "LH_HAA": 0.00,
@@ -261,8 +256,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_vel.scale = 1.5
-        self.actions.joint_pos.clip = {".*": (-30.0, 30.0)}
-        self.actions.joint_vel.clip = {".*": (-30.0, 30.0)}
+        self.actions.joint_pos.clip = {".*": (-8.0, 8.0)}
+        self.actions.joint_vel.clip = {".*": (-20.0, 20.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
@@ -290,6 +285,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.6, 1.2)
         self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.6, 1.2)
+        self.events.randomize_rigid_body_mass = None
+        self.events.randomize_rigid_body_inertia = None
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -301,8 +298,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = 0.0
-        self.rewards.base_height_l2.params["target_height"] = 0.65
+        self.rewards.base_height_l2.weight = 0
+        self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -331,7 +328,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.5
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.wheel_vel_penalty.weight = -0.005
+        self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.feet_continue_contact.weight = 0.1
@@ -339,16 +336,12 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.005
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -6.0
+        self.rewards.undesired_contacts.weight = -2.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
-        ]
-        self.rewards.knee_undesired_contacts.weight = -0.5
-        self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = [
-            rf"{self.calf_link_name}"
         ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -390,13 +383,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
