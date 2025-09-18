@@ -80,87 +80,139 @@ class SiriusWSymmetrySigns:
 # Public API
 # -------------------------
 
+# -------------------------
+# 全对称增强 左右/前后/对角
+# -------------------------
+# @torch.no_grad()
+# def compute_symmetric_states_siriusw(
+#     env,
+#     obs=None,                # 现在允许 TensorDict / Tensor / None
+#     actions: torch.Tensor | None = None,
+#     obs_type: str | None = None,     # 兼容你之前的签名，可不使用
+#     signs: SiriusWSymmetrySigns = SiriusWSymmetrySigns(),
+# ):
+#     # ----------------------------
+#     # 1) 处理 Observation (可为 TensorDict)
+#     # ----------------------------
+#     if isinstance(obs, TensorDictBase):
+#         # 逐键增强：通常包含 'policy' 与 'critic'
+#         keys = list(obs.keys())
+#         # 取 batch 大小
+#         n = obs.batch_size[0]
+#         out = {}
 
-@torch.no_grad()
-def compute_symmetric_states_siriusw(
-    env,
-    obs=None,                # 现在允许 TensorDict / Tensor / None
-    actions: torch.Tensor | None = None,
-    obs_type: str | None = None,     # 兼容你之前的签名，可不使用
-    signs: SiriusWSymmetrySigns = SiriusWSymmetrySigns(),
-):
-    # ----------------------------
-    # 1) 处理 Observation (可为 TensorDict)
-    # ----------------------------
-    if isinstance(obs, TensorDictBase):
-        # 逐键增强：通常包含 'policy' 与 'critic'
-        keys = list(obs.keys())
-        # 取 batch 大小
-        n = obs.batch_size[0]
-        out = {}
+#         for k in keys:
+#             val = obs[k]        # shape: [n, D]（观测向量）
+#             if val.ndim == 1:
+#                 val = val.unsqueeze(0)
+#             if val.ndim != 2:
+#                 # 非扁平观测（例如网格/图像），这里简单在 batch 维复制4次
+#                 out[k] = _tile_along_batch(val, 4)
+#                 continue
 
-        for k in keys:
-            val = obs[k]        # shape: [n, D]（观测向量）
-            if val.ndim == 1:
-                val = val.unsqueeze(0)
-            if val.ndim != 2:
-                # 非扁平观测（例如网格/图像），这里简单在 batch 维复制4次
-                out[k] = _tile_along_batch(val, 4)
-                continue
+#             D = val.shape[1]
+#             # 确定布局
+#             layout = _infer_layout_for_key(k, D)
+#             # 生成四种对称
+#             lr   = _obs_left_right_siriusw(env.unwrapped, val, k, layout, signs)
+#             fb   = _obs_front_back_siriusw(env.unwrapped, val, k, layout, signs)
+#             diag = _obs_front_back_siriusw(env.unwrapped, lr,  k, layout, signs)
+#             out[k] = torch.cat([val, lr, fb, diag], dim=0)
 
-            D = val.shape[1]
-            # 确定布局
-            layout = _infer_layout_for_key(k, D)
-            # 生成四种对称
-            lr   = _obs_left_right_siriusw(env.unwrapped, val, k, layout, signs)
-            fb   = _obs_front_back_siriusw(env.unwrapped, val, k, layout, signs)
-            diag = _obs_front_back_siriusw(env.unwrapped, lr,  k, layout, signs)
-            out[k] = torch.cat([val, lr, fb, diag], dim=0)
+#         obs_aug = TensorDict(out, batch_size=[n * 4])
 
-        obs_aug = TensorDict(out, batch_size=[n * 4])
+#     else:
+#         # 兼容：obs 是 Tensor（老管线/测试用）
+#         if obs is not None:
+#             x = obs
+#             if x.dim() == 1:
+#                 x = x.unsqueeze(0)
+#             n, D = x.shape
+#             # 若未明确 obs_type，则按长度猜
+#             if obs_type is None:
+#                 obs_type = "critic" if D >= 57 else "policy"
+#             layout = _infer_layout_for_key(obs_type, D)
+#             lr   = _obs_left_right_siriusw(env.unwrapped, x,  obs_type, layout, signs)
+#             fb   = _obs_front_back_siriusw(env.unwrapped, x,  obs_type, layout, signs)
+#             diag = _obs_front_back_siriusw(env.unwrapped, lr, obs_type, layout, signs)
+#             obs_aug = torch.cat([x, lr, fb, diag], dim=0)
+#         else:
+#             obs_aug = None
 
-    else:
-        # 兼容：obs 是 Tensor（老管线/测试用）
-        if obs is not None:
-            x = obs
-            if x.dim() == 1:
-                x = x.unsqueeze(0)
-            n, D = x.shape
-            # 若未明确 obs_type，则按长度猜
-            if obs_type is None:
-                obs_type = "critic" if D >= 57 else "policy"
-            layout = _infer_layout_for_key(obs_type, D)
-            lr   = _obs_left_right_siriusw(env.unwrapped, x,  obs_type, layout, signs)
-            fb   = _obs_front_back_siriusw(env.unwrapped, x,  obs_type, layout, signs)
-            diag = _obs_front_back_siriusw(env.unwrapped, lr, obs_type, layout, signs)
-            obs_aug = torch.cat([x, lr, fb, diag], dim=0)
-        else:
-            obs_aug = None
+#     # ----------------------------
+#     # 2) 处理 Action（仍为 Tensor）
+#     # ----------------------------
+#     if actions is not None:
+#         a = actions
+#         if a.dim() == 1:
+#             a = a.unsqueeze(0)
+#         n, A = a.shape
+#         if A != 16:
+#             raise AssertionError(f"SiriusW expects action_dim=16 (12腿+4轮)，当前 {A}")
+#         a_lr   = _actions_left_right_siriusw(a, signs)
+#         a_fb   = _actions_front_back_siriusw(a, signs)
+#         a_diag = _actions_front_back_siriusw(a_lr, signs)
+#         act_aug = torch.cat([a, a_lr, a_fb, a_diag], dim=0)
+#     else:
+#         act_aug = None
 
-    # ----------------------------
-    # 2) 处理 Action（仍为 Tensor）
-    # ----------------------------
-    if actions is not None:
-        a = actions
-        if a.dim() == 1:
-            a = a.unsqueeze(0)
-        n, A = a.shape
-        if A != 16:
-            raise AssertionError(f"SiriusW expects action_dim=16 (12腿+4轮)，当前 {A}")
-        a_lr   = _actions_left_right_siriusw(a, signs)
-        a_fb   = _actions_front_back_siriusw(a, signs)
-        a_diag = _actions_front_back_siriusw(a_lr, signs)
-        act_aug = torch.cat([a, a_lr, a_fb, a_diag], dim=0)
-    else:
-        act_aug = None
-
-    return obs_aug, act_aug
+#     return obs_aug, act_aug
 
 # 注意：_obs_left_right_auto / _obs_front_back_auto 内部使用
 # jv_len = layout.joint_vel.stop - layout.joint_vel.start
 # 当 jv_len==4 时只交换四个轮速；否则按 16 维（12腿+4轮）处理
+# -------------------------
+# 左右对称增强
+# -------------------------
+@torch.no_grad()
+def compute_symmetric_states_siriusw(
+    env,
+    obs=None,                      # TensorDict / Tensor / None
+    actions: torch.Tensor | None = None,
+    obs_type: str | None = None,
+    signs: SiriusWSymmetrySigns = SiriusWSymmetrySigns(),
+):
+    # ---------- OBS ----------
+    if isinstance(obs, TensorDictBase):
+        keys = list(obs.keys())
+        n = obs.batch_size[0]
+        out = {}
+        for k in keys:
+            val = obs[k]
+            if val.ndim == 1:
+                val = val.unsqueeze(0)
+            if val.ndim == 2:
+                D = val.shape[1]
+                layout = _infer_layout_for_key(k, D)
+                lr = _obs_left_right_siriusw(env.unwrapped, val, k, layout, signs)
+                out[k] = torch.cat([val, lr], dim=0)                 # ← 只拼接 原/LR
+            else:
+                # 非扁平观测（如高度网格）暂时直接复制，后续可在此处做“列翻转”
+                out[k] = torch.cat([val, val.clone()], dim=0)
+        obs_aug = TensorDict(out, batch_size=[n * 2])                 # ← n*2
+    else:
+        if obs is not None:
+            x = obs.unsqueeze(0) if obs.dim() == 1 else obs
+            n, D = x.shape
+            if obs_type is None:
+                obs_type = "critic" if D >= 57 else "policy"
+            layout = _infer_layout_for_key(obs_type, D)
+            lr = _obs_left_right_siriusw(env.unwrapped, x, obs_type, layout, signs)
+            obs_aug = torch.cat([x, lr], dim=0)                       # ← 只 原/LR
+        else:
+            obs_aug = None
 
+    # ---------- ACTIONS ----------
+    if actions is not None:
+        a = actions.unsqueeze(0) if actions.dim() == 1 else actions
+        n, A = a.shape
+        assert A == 16, f"SiriusW expects action_dim=16, got {A}"
+        a_lr = _actions_left_right_siriusw(a, signs)
+        act_aug = torch.cat([a, a_lr], dim=0)                         # ← 只 原/LR
+    else:
+        act_aug = None
 
+    return obs_aug, act_aug
 # -------------------------
 # Observation transforms
 # -------------------------

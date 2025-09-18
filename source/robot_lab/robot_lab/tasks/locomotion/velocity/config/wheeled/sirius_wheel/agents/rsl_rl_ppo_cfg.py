@@ -125,8 +125,8 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = "cuhkrl_siriusw_ring"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=0.8,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",

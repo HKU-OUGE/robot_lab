@@ -86,7 +86,7 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 0.6]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.65, 0.6]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
