@@ -362,7 +362,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "z": (0.0, 0.2),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
-                "yaw": (3.14, 3.14),
+                "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
                 "x": (-0.5, 0.5),
@@ -502,6 +502,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
