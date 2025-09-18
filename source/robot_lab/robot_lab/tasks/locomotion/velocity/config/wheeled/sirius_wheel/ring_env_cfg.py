@@ -82,7 +82,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.1,
+        weight=0.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -233,9 +233,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel_rel
-        self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
-        )
+        # self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=self.wheel_joint_names, preserve_order=True
+        # )
         self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.base_lin_vel = None
         self.observations.policy.height_scan = ObsTerm(
@@ -373,7 +373,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RF_FOOT"), ("LH_FOOT", "RH_FOOT"))
         self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],

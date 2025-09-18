@@ -43,7 +43,7 @@ parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy 
 parser.add_argument("--recovery_mode", action="store_true", default=False, help="Whether to use recovery mode.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes.")
-
+parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -232,7 +232,7 @@ def make_serializable(info: dict):
             serializable_info[key] = tensor_to_list(value)
     return serializable_info
 
-@hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
+@hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
     if IS_DISTRIBUTED:

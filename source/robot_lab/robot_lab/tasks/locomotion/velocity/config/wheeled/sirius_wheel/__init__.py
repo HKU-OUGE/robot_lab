@@ -66,5 +66,8 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ring_env_cfg:CUHKLRLSiriusWRingEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWRingPPORunnerCfg",
+        "rsl_rl_with_symmetry_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWRingPPORunnerWithSymmetryCfg"
+        ),
     },
 )
