@@ -118,6 +118,53 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
+    @configclass
+    class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
+        front_height_scan = ObsTerm(
+            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("front_height")},
+            # 根据需要保留噪声，或设为 0
+            noise=Unoise(n_min=0.0, n_max=0.0),
+            clip=(-2.0, 2.0),
+            scale=1.0,
+        )
+        back_height_scan = ObsTerm(
+            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("back_height")},
+            # 根据需要保留噪声，或设为 0
+            noise=Unoise(n_min=0.0, n_max=0.0),
+            clip=(-2.0, 2.0),
+            scale=1.0,
+        )
+        height_scan = None
+        obs_scan = None
+        # def __post_init__(self):
+            # self.history_length = 5
+    @configclass
+    class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
+        critic_scan = None
+        front_height_scan = ObsTerm(
+            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("front_height")},
+            # 根据需要保留噪声，或设为 0
+            noise=Unoise(n_min=0.0, n_max=0.0),
+            clip=(-2.0, 2.0),
+            scale=1.0,
+        )
+        back_height_scan = ObsTerm(
+            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+            params={"sensor_cfg": SceneEntityCfg("back_height")},
+            # 根据需要保留噪声，或设为 0
+            noise=Unoise(n_min=0.0, n_max=0.0),
+            clip=(-2.0, 2.0),
+            scale=1.0,
+        )
+        height_scan = None
+        # def __post_init__(self):
+            # self.history_length = 5
+
+    policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
+    critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
 
 
 
@@ -177,6 +224,24 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
+        self.scene.front_height = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
+        self.scene.back_height = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(-0.85, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
+        self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
@@ -256,7 +321,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
-        self.observations.critic.height_scan.params["sensor_cfg"] = SceneEntityCfg("height_scanner_base")
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
@@ -264,16 +328,16 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
         #     "robot", joint_names=self.wheel_joint_names, preserve_order=True
         # )
-        self.observations.policy.joint_vel.scale = 0.05
+        self.observations.policy.joint_vel.scale = 0.2
         self.observations.policy.base_lin_vel = None
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            # 根据需要保留噪声，或设为 0
-            noise=Unoise(n_min=0.0, n_max=0.0),
-            clip=(0.0, 1.0),
-            scale=1.0,
-        )
+        # self.observations.policy.height_scan = ObsTerm(
+        #     func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+        #     params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #     # 根据需要保留噪声，或设为 0
+        #     noise=Unoise(n_min=0.0, n_max=0.0),
+        #     clip=(0.0, 1.0),
+        #     scale=1.0,
+        # )
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
         # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
@@ -282,8 +346,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        # self.actions.joint_pos.scale = 0.25
-        self.actions.joint_pos.scale = {".*_HAA": 0.125, "^(?!.*_HAA).*": 0.25}
+        self.actions.joint_pos.scale = 0.25
+        # self.actions.joint_pos.scale = {".*_HAA": 0.125, "^(?!.*_HAA).*": 0.25}
         self.actions.joint_vel.scale = 1.5
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
@@ -324,10 +388,10 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -200
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -1.0
+        self.rewards.lin_vel_z_l2.weight = -0.5
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.base_height_l2.weight = -3.5
+        self.rewards.base_height_l2.weight = 0.0
         self.rewards.base_height_l2.params["target_height"] = 0.51
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -396,7 +460,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.5
         self.rewards.track_ang_vel_z_exp.weight = 2.0
-
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.2
+        self.rewards.track_lin_vel_xy_exp.params["std"] = 0.2
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["threshold"] = 0.5
@@ -435,7 +500,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
