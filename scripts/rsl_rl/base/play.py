@@ -43,11 +43,16 @@ parser.add_argument(
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
+parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
-args_cli = parser.parse_args()
+# args_cli = parser.parse_args()
+args_cli, hydra_args = parser.parse_known_args()
+if hydra_args:
+    print("[INFO] Ignoring Hydra-style overrides in play.py:", hydra_args)
+
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
