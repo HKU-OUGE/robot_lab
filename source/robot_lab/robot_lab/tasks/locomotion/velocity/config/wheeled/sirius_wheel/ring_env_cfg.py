@@ -246,7 +246,6 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
-        self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
         #     update_period=1.0 / 30.0,          # 30 Hz
@@ -362,8 +361,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
                 "z": (0.0, 0.2),
-                "roll": (-3.14, 3.14),
-                "pitch": (-3.14, 3.14),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
                 "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
@@ -502,8 +501,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.heading = (-3.14,3.14)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
+        self.commands.base_velocity.ranges.heading = (3.14,3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
