@@ -76,8 +76,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
             "stand_still_scale": 5.0,
-            "velocity_threshold": 0.5,
-            "command_threshold": 0.1,
+            "velocity_threshold": 0.6,
+            "command_threshold": 0.6,
         },
     )
     wheel_mirror = RewTerm(
@@ -88,6 +88,23 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
     )
+    joint_pos_penalty_height_gate = RewTerm(
+        func=mdp.joint_pos_penalty_height_gated_disc,
+        weight=0.0,   # 负权重=惩罚，按你的总reward量级微调
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names="", preserve_order=True),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),  # 你配置的 RayCaster 名称
+            "stand_still_scale": 5.0,
+            "velocity_threshold": 0.5,
+            "command_threshold": 0.1,
+            "h_free_min": 0.10,
+            "h_free_max": 0.40,
+            "offset": 0.5,
+        },
+    )
+
+
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
@@ -325,8 +342,10 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.5
-        self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_pos_penalty_height_gate.weight = -2.0
+        self.rewards.joint_pos_penalty_height_gate.params["asset_cfg"].joint_names = self.leg_joint_names
+        # self.rewards.joint_pos_penalty.weight = -0.5
+        # self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names

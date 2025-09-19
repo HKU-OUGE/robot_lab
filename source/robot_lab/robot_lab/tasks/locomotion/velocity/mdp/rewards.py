@@ -802,3 +802,56 @@ def base_height_l2(
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
+def joint_pos_penalty_height_gated_disc(
+    env,
+    command_name: str,
+    asset_cfg,                 # SceneEntityCfg("robot", joint_names=你的腿部关节)
+    sensor_cfg,                # SceneEntityCfg("front_height") 或你的高度传感器名
+    stand_still_scale: float = 5.0,     # 低台阶时的最强抑制倍数
+    velocity_threshold: float = 0.5,
+    command_threshold: float = 0.1,
+    h_free_min: float = 0.10,           # m，低于它强抑制
+    h_free_max: float = 0.45,           # m，高于它基本不抑制
+    offset: float = 0.5,                # 传给 height_scan_disc 的 offset
+):
+    """
+    用离散高度扫描做门控：小台阶/平地强抑制关节位置变化；台阶越高抑制越弱。
+    仅将“正台阶”（向上的障碍）视为放开信号；坑洞/负高度不放开。
+    """
+    import robot_lab.tasks.locomotion.velocity.mdp as mdp
+
+    # 1) 取基础量
+    asset = env.scene[asset_cfg.name]  # type: Articulation
+    cmd = torch.linalg.norm(env.command_manager.get_command(command_name), dim=1)
+    body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    pos_err = torch.linalg.norm(
+        asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids],
+        dim=1,
+    )
+
+    # 2) 取“前方高度”并做门控
+    # height_scan_disc: [-1, 1]，通常可视作“米”范围内被截断&量化；>0 代表“抬高/台阶”
+    bins = mdp.height_scan_disc(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, K] 或 [N, 1]
+    if bins.ndim == 2 and bins.shape[1] > 1:
+        # 如果你的栅格>1，用“最大正高度”表示前方最高台阶（也可改 mean/percentile）
+        bins = bins.max(dim=1).values
+    else:
+        bins = bins.squeeze(-1)  # [N]
+
+    # 只把“正高度（向上台阶）”当作放开信号；坑洞(负值)按0处理
+    h = torch.clamp(bins, min=0.0)  # [N], 单位近似米（已在[-1,1]截断）
+    # 线性门控：h<=h_free_min 强抑制；h>=h_free_max 几乎不抑制
+    gate = torch.clamp((h - h_free_min) / max(1e-6, (h_free_max - h_free_min)), 0.0, 1.0)  # [0,1]
+    # 抑制系数 s ∈ [stand_still_scale, 1]：台阶越高，s 越接近 1（越不抑制）
+    s = stand_still_scale - (stand_still_scale - 1.0) * gate
+
+    # 3) 只在“指令很小且自身速度很小”时套用抑制；否则按正常权重
+    use_standstill = torch.logical_and(cmd <= command_threshold, body_vel <= velocity_threshold)
+    scale = torch.where(use_standstill, s, torch.ones_like(s))
+
+    # 4) 姿态保护：离开直立时降权，避免翻倒时“乱动”也得分
+    upright = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+
+    # 返回“越大越罚”的量（外部配 weight 为负数）
+    return pos_err * scale * upright
+
