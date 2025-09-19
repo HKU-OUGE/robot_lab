@@ -13,7 +13,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
-
+import robot_lab.tasks.locomotion.velocity.mdp as mdp
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 def joint_pos_penalty(
@@ -818,7 +818,7 @@ def joint_pos_penalty_height_gated_disc(
     用离散高度扫描做门控：小台阶/平地强抑制关节位置变化；台阶越高抑制越弱。
     仅将“正台阶”（向上的障碍）视为放开信号；坑洞/负高度不放开。
     """
-    import robot_lab.tasks.locomotion.velocity.mdp as mdp
+
 
     # 1) 取基础量
     asset = env.scene[asset_cfg.name]  # type: Articulation
@@ -854,4 +854,55 @@ def joint_pos_penalty_height_gated_disc(
 
     # 返回“越大越罚”的量（外部配 weight 为负数）
     return pos_err * scale * upright
+
+# 安全的高度门控版平姿态损失：近处低障强烈压制倾斜；高障主动鼓励倾斜
+def flat_orientation_height_gated(
+    env,
+    sensor_cfg=None,             # SceneEntityCfg("height_scanner")
+    h_low: float = 0.10,         # 低于此高度→强烈抑制倾斜
+    h_high: float = 0.25,        # 高于此高度→开始鼓励倾斜（线性过渡）
+    encourage_scale: float = 0.5,# 鼓励倾斜强度(系数)
+    use_disc: bool = True,       # 复用你提供的 height_scan_disc
+    offset: float = 0.5,         # 与你的扫描一致
+):
+    # 1) 基础“平姿态”误差：proj_g_b 应该接近 [0,0,-1]，所以用 x/y 两分量的平方和
+    proj_g = env.scene["robot"].data.projected_gravity_b  # [N,3]
+    upright_err = (proj_g[:, 0] ** 2 + proj_g[:, 1] ** 2)  # [N]
+
+    # 2) 读取前向高度，做鲁棒的“实体存在性”检查（不要直接 `name in env.scene`）
+    front_h = None
+    sensor_name = getattr(sensor_cfg, "name", None) if (sensor_cfg is not None) else None
+    if isinstance(sensor_name, str) and sensor_name:
+        try:
+            _ = env.scene[sensor_name]  # 若不存在会抛 KeyError
+            if use_disc:
+                # 你给的离散化接口：返回 [-1,1] 的 bin。这里把它转成一个“高障指标” in [0,1]
+                bins = mdp.height_scan_disc(env, sensor_cfg=sensor_cfg, offset=offset).squeeze(-1)  # [N]
+                # 经验约定：bins 越小（更负）意味着前方越高/越近的台阶或障碍
+                high_obs_score = (-bins).clamp(0.0, 1.0)  # [0,1]：0=平地/低障，1=高障
+                # 用一个“等效高度”表达门控（不必是物理米值，只要单调即可）
+                front_h = high_obs_score
+            else:
+                # 若你使用未离散化的真实高度（米），就直接 squeeze
+                heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset).squeeze(-1)  # [N]
+                # 这里假设 heights 越大代表障碍越高；如含义相反，请对号入座取负
+                front_h = heights
+        except KeyError:
+            pass
+
+    # 3) 计算门控系数 gate ∈ [0,1]：低障→0（强抑制倾斜），高障→1（鼓励倾斜）
+    if front_h is None:
+        gate = torch.zeros_like(upright_err)  # 没有传感器就当低障/平地处理
+    else:
+        # 如果用 disc：front_h 已在 [0,1]，可以直接把 h_low/h_high 视作阈值分位
+        # 如果用真实米值：h_low/h_high 请用米。两者只要保证单调映射即可。
+        gate = (front_h - h_low) / max(1e-6, (h_high - h_low))
+        gate = torch.clamp(gate, 0.0, 1.0)
+
+    # 4) 组合：低障时 (1-gate)*upright_err 强力压制倾斜；高障时 -encourage_scale*gate*tilt_reward 鼓励倾斜
+    # 这里以“前后俯仰倾斜”为例，鼓励 |gx|（有需要你也可以加 |gy|）
+    tilt_magnitude = torch.abs(proj_g[:, 0])  # 主要鼓励 pitch 方向的倾斜
+    reward = (1.0 - gate) * upright_err - encourage_scale * gate * tilt_magnitude
+    return reward
+
 

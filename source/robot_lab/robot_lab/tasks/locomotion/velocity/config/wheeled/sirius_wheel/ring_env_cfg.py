@@ -96,8 +96,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot", joint_names="", preserve_order=True),
             "sensor_cfg": SceneEntityCfg("height_scanner"),  # 你配置的 RayCaster 名称
             "stand_still_scale": 5.0,
-            "velocity_threshold": 0.5,
-            "command_threshold": 0.1,
+            "velocity_threshold": 0.6,
+            "command_threshold": 0.3,
             "h_free_min": 0.10,
             "h_free_max": 0.40,
             "offset": 0.5,
@@ -313,7 +313,17 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = 0
+        # self.rewards.flat_orientation_l2.weight = 0
+        self.rewards.flat_orientation_l2.func = mdp.flat_orientation_height_gated
+        self.rewards.flat_orientation_l2.weight = -1.0  # 作为“损失”使用（负权）
+        self.rewards.flat_orientation_l2.params.update({
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "h_low": 0.10,            # ≤10cm 视作低障，强烈抑制倾斜
+            "h_high": 0.25,           # ≥25cm 视作高障，开始鼓励倾斜（线性过渡）
+            "encourage_scale": 0.5,   # 鼓励倾斜的强度
+            "use_disc": True,         # 直接用你提供的 height_scan_disc
+            "offset": 0.5,            # 与你的扫描一致
+        })
         self.rewards.base_height_l2.weight = 0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -342,7 +352,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty_height_gate.weight = -2.0
+        self.rewards.joint_pos_penalty_height_gate.weight = -1.0
         self.rewards.joint_pos_penalty_height_gate.params["asset_cfg"].joint_names = self.leg_joint_names
         # self.rewards.joint_pos_penalty.weight = -0.5
         # self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
@@ -389,8 +399,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RF_FOOT"), ("LH_FOOT", "RH_FOOT"))
-        self.rewards.upward.weight = 1.0
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.upward.weight = 3.0
+        self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
