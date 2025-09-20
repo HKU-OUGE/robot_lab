@@ -348,7 +348,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_limits.weight = 0
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_power.weight = -2e-5
+        self.rewards.joint_power.weight = -1e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
@@ -359,15 +359,15 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.1
-        self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
-        self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
+        # self.rewards.feet_continue_contact.weight = 0.1
+        # self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
+        # self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
         self.rewards.action_rate_l2.weight = -0.005
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -2.0
+        self.rewards.undesired_contacts.weight = -5.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
@@ -377,13 +377,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp.weight = 3.5
         self.rewards.track_ang_vel_z_exp.weight = 2.0
-
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["threshold"] = 0.5
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_contact.weight = 0
+        self.rewards.feet_contact.weight = 0.2
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_contact.params["expect_contact_num"] = 4
         self.rewards.feet_contact_without_cmd.weight = 0.1
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_stumble.weight = 0
@@ -405,6 +405,18 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
+        # ------------------------------ Rewards: Handstand pack (height-gated) ------------------------------
+        # 1) base_height_l2（门控版）
+        # 覆盖函数并“清空参数”，避免残留键
+        self.rewards.base_height_l2.func = mdp.base_height_l2_gated
+        self.rewards.base_height_l2.params = {  # 注意：用覆盖而不是 update
+            "target_height": 1.5,
+            "asset_cfg": SceneEntityCfg("robot", body_names=[self.base_link_name]),
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+            "h_low": 0.10, "h_full": 0.50, "use_disc": True, "offset": 0.5,
+        }
+        self.rewards.base_height_l2.weight = -3.5
+
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRingEnvCfg":
@@ -421,3 +433,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity.ranges.ang_vel_z = (-0.3, 0.3)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
+        # self.scene.terrain.terrain_type = "plane"
+        # self.scene.terrain.terrain_generator = None
+        # # no height scan
+        # # no terrain curriculum
+        # self.curriculum.terrain_levels = None

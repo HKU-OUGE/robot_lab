@@ -36,6 +36,9 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.stand_env_cfg:CUHKLRLSiriusWStandEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWStandPPORunnerCfg",
+        "rsl_rl_with_symmetry_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWStandPPORunnerWithSymmetryCfg"
+        ),
     },
 )
 
