@@ -1,92 +1,138 @@
-# --- Handstand & Height-gated reward utilities ---
+# Copyright (c) 2025
+# SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+from typing import TYPE_CHECKING, Literal
+
 import torch
-from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv
+
+from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.assets import Articulation
-from isaaclab.envs.mdp import rewards as base_rew  # 复用内置 base_height_l2 等函数
-import robot_lab.tasks.locomotion.velocity.mdp as mdp
-def _reduce_ignore_nan(x: torch.Tensor, dim: int, reduce: str) -> torch.Tensor:
-    """在给定 dim 上做忽略 NaN 的归约，兼容无 torch.nanmax 的 PyTorch。"""
-    mask = torch.isfinite(x)
-    if reduce == "max":
-        fill = torch.finfo(x.dtype).min
-        x2 = torch.where(mask, x, torch.tensor(fill, device=x.device, dtype=x.dtype))
-        vals = torch.max(x2, dim=dim).values
-        all_invalid = mask.sum(dim=dim) == 0
-        return torch.where(all_invalid, torch.zeros_like(vals), vals)
-    elif reduce == "min":
-        fill = torch.finfo(x.dtype).max
-        x2 = torch.where(mask, x, torch.tensor(fill, device=x.device, dtype=x.dtype))
-        vals = torch.min(x2, dim=dim).values
-        all_invalid = mask.sum(dim=dim) == 0
-        return torch.where(all_invalid, torch.zeros_like(vals), vals)
-    elif reduce == "mean":
-        x2 = torch.where(mask, x, torch.zeros_like(x))
-        cnt = mask.sum(dim=dim).clamp_min(1)
-        return x2.sum(dim=dim) / cnt
-    else:
-        # 默认用 max
-        return _reduce_ignore_nan(x, dim, "max")
+from isaaclab.sensors import ContactSensor
 
-def _height_gate_scalar(
-    env,
-    sensor_cfg: SceneEntityCfg,          # SceneEntityCfg("height_scanner")
-    h_low: float = 0.10,                 # ≤10cm 强抑制（但 gate 仍为 0）
-    h_start: float = 0.25,               # ≥25cm 开始启用
-    h_full: float = 0.50,                # ≥50cm 全开
-    use_disc: bool = True,
-    reduce: str = "max",
+# 兼容你项目里常用的 mdp 导入方式
+try:
+    import robot_lab.tasks.locomotion.velocity.mdp as mdp
+except Exception:
+    from isaaclab.envs import mdp  # 提供 height_scan 等mdp函数
+
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnv
+# ---------------------------
+# 高度门控：把 height_scanner 的相对高度 -> [0,1] gate 系数
+# ---------------------------
+def _height_obstacle_gate(
+    env: ManagerBasedRLEnv,
+    height_sensor_cfg: SceneEntityCfg,
+    *,
+    t_low: float = 0.10,     # 低障阈值（≤10cm 强烈抑制）
+    t_start: float = 0.25,   # 开始使用奖励的阈值（≥25cm）
+    t_full: float = 0.50,    # 完全打开奖励（≥50cm）
+    low_scale: float = 0.05, # “强烈抑制”时的残余比例（>0 保持可导）
     offset: float = 0.5,
-):
+    aggregate: Literal["max", "mean", "p95"] = "max",
+) -> torch.Tensor:
     """
-    计算门控系数 g∈[0,1]：h<h_start→0；h_start≤h<h_full 线性上升；h≥h_full→1。
-    建议 reduce 用 'max'：见到最高的可攀平台即可触发。height_scan 会先减去 offset。 
+    返回形状 [num_envs] 的 gate 系数 ∈ [low_scale, 1]。
+    使用 mdp.height_scan 读取相对高度矩阵 [N, R]，对射线聚合得到“前方最高/平均/分位高度”再分段平滑映射。
     """
-    try:
-        # 首选：直接用 mdp.height_scan（官方：返回值已减 offset）
-        heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, B] 或 [N]
-        if heights.ndim == 2:
-            if reduce == "max":
-                h = _reduce_ignore_nan(heights, dim=1, reduce="max")
-            elif reduce == "min":
-                h = _reduce_ignore_nan(heights, dim=1, reduce="min")
-            else:
-                h = _reduce_ignore_nan(heights, dim=1, reduce="mean")
-        else:
-            h = heights  # [N]
-    except Exception:
-        # 兜底：直接从 RayCaster 取世界系命中点 ray_hits_w[...,2] 做相对高度（同样减 offset）
-        sensor = env.scene.sensors[sensor_cfg.name]
-        z_sensor = sensor.data.pos_w[:, 2]            # [N]
-        z_hits = sensor.data.ray_hits_w[..., 2]       # [N, B]
-        valid = torch.isfinite(z_hits)
-        # 无效命中放到传感器下方远处，避免干扰 max
-        z_hits = torch.where(valid, z_hits, z_sensor.unsqueeze(1) - 1000.0)
-        heights = z_sensor.unsqueeze(1) - z_hits - offset  # [N, B]
-        h = _reduce_ignore_nan(heights, dim=1, reduce=reduce)
+    heights = mdp.height_scan(env, sensor_cfg=height_sensor_cfg, offset=offset)  # [N, R]
+    heights = torch.nan_to_num(heights, nan=-1e6)  # 避免未命中导致 NaN
 
-    # 将高度 h→门控 g：严格按 25/50 cm 起用与全开；≤h_low 也保持 0
-    g = torch.zeros_like(h)
-    g = torch.where(h >= h_full, torch.ones_like(g), g)
-    mid = (h - h_start) / max(1e-6, (h_full - h_start))
-    mid = torch.clamp(mid, 0.0, 1.0)
-    g = torch.where((h >= h_start) & (h < h_full), mid, g)
-    return torch.clamp(g, 0.0, 1.0)
+    if aggregate == "max":
+        h = torch.max(heights, dim=1).values
+    elif aggregate == "mean":
+        h = torch.mean(heights, dim=1)
+    else:  # p95
+        h, _ = torch.sort(heights, dim=1)
+        idx = torch.clamp((0.95 * (h.shape[1] - 1)).long(), min=0)
+        h = h.gather(1, idx.unsqueeze(1)).squeeze(1)
 
-def base_height_l2_gated(
-    env,
-    target_height: float,
+    # 分段（t_low -> t_start -> t_full）两段 smoothstep（C^1 连续）
+    def smoothstep(x, a, b):
+        x = torch.clamp((x - a) / (b - a + 1e-8), 0.0, 1.0)
+        return x * x * (3.0 - 2.0 * x)
+
+    # 第一段：从 low_scale 过渡到 0.5
+    s1 = smoothstep(h, t_low, t_start)
+    gate1 = low_scale + (0.5 - low_scale) * s1
+    # 第二段：从 0.5 过渡到 1.0
+    s2 = smoothstep(h, t_start, t_full)
+    gate2 = 0.5 + 0.5 * s2
+
+    # 组合（当 h < t_start 用 gate1，>= t_start 用 gate2）
+    gate = torch.where(h < t_start, gate1, gate2)
+    # h < t_low 强制为 low_scale；h >= t_full 强制为 1
+    gate = torch.where(h <= t_low, torch.full_like(gate, low_scale), gate)
+    gate = torch.where(h >= t_full, torch.ones_like(gate), gate)
+    return gate
+
+
+# ---------------------------
+# 门控版奖励：原奖励 * gate
+# ---------------------------
+def gated_handstand_orientation_l2(
+    env: ManagerBasedRLEnv,
+    target_gravity: list[float],
+    height_sensor_cfg: SceneEntityCfg,
+    *,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    height_sensor_cfg: SceneEntityCfg | None = None,
-    h_low: float = 0.10, h_start: float = 0.25, h_full: float = 0.50,
-    use_disc: bool = True, offset: float = 0.5,
-):
-    # 原始损失（L2）——注意这是“惩罚项”，权重应为负
-    base_loss = mdp.base_height_l2(env, target_height=target_height, asset_cfg=asset_cfg)
-    if height_sensor_cfg is None:
-        return base_loss
-    g = _height_gate_scalar(
-        env, height_sensor_cfg, h_low=h_low, h_start=h_start, h_full=h_full,
-        use_disc=use_disc, reduce="max", offset=offset
+    t_low: float = 0.10, t_start: float = 0.25, t_full: float = 0.50, low_scale: float = 0.05,
+    offset: float = 0.5, aggregate: str = "max",
+) -> torch.Tensor:
+    base = mdp.handstand_orientation_l2(env, target_gravity=target_gravity, asset_cfg=asset_cfg)
+    gate = _height_obstacle_gate(
+        env, height_sensor_cfg, t_low=t_low, t_start=t_start, t_full=t_full,
+        low_scale=low_scale, offset=offset, aggregate=aggregate,
     )
-    return base_loss * g
+    return base * gate
+
+
+def gated_handstand_feet_height_exp(
+    env: ManagerBasedRLEnv,
+    std: float,
+    target_height: float,
+    height_sensor_cfg: SceneEntityCfg,
+    *,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    t_low: float = 0.10, t_start: float = 0.25, t_full: float = 0.50, low_scale: float = 0.05,
+    offset: float = 0.5, aggregate: str = "max",
+) -> torch.Tensor:
+    base = mdp.handstand_feet_height_exp(env, std=std, target_height=target_height, asset_cfg=asset_cfg)
+    gate = _height_obstacle_gate(
+        env, height_sensor_cfg, t_low=t_low, t_start=t_start, t_full=t_full,
+        low_scale=low_scale, offset=offset, aggregate=aggregate,
+    )
+    return base * gate
+
+
+def gated_handstand_feet_on_air(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    height_sensor_cfg: SceneEntityCfg,
+    *,
+    t_low: float = 0.10, t_start: float = 0.25, t_full: float = 0.50, low_scale: float = 0.05,
+    offset: float = 0.5, aggregate: str = "max",
+) -> torch.Tensor:
+    base = mdp.handstand_feet_on_air(env, sensor_cfg=sensor_cfg)
+    gate = _height_obstacle_gate(
+        env, height_sensor_cfg, t_low=t_low, t_start=t_start, t_full=t_full,
+        low_scale=low_scale, offset=offset, aggregate=aggregate,
+    )
+    return base * gate
+
+
+def gated_handstand_feet_air_time(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    height_sensor_cfg: SceneEntityCfg,
+    *,
+    threshold: float = 0.15,
+    t_low: float = 0.10, t_start: float = 0.25, t_full: float = 0.50, low_scale: float = 0.05,
+    offset: float = 0.5, aggregate: str = "max",
+) -> torch.Tensor:
+    base = mdp.handstand_feet_air_time(env, sensor_cfg=sensor_cfg, threshold=threshold)
+    gate = _height_obstacle_gate(
+        env, height_sensor_cfg, t_low=t_low, t_start=t_start, t_full=t_full,
+        low_scale=low_scale, offset=offset, aggregate=aggregate,
+    )
+    return base * gate

@@ -323,12 +323,12 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             air_foot_name = "L.*_FOOT"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, -1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.6
         elif handstand_type == "right":
             air_foot_name = "R.*_FOOT"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 0.6
         self.rewards.handstand_feet_height_exp.weight = 10
         self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
         self.rewards.handstand_feet_on_air.weight = 5.0

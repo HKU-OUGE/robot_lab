@@ -402,8 +402,8 @@ def main():
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-        # if args_cli.keyboard:
-        #     rsl_rl_utils.camera_follow(env)
+        if args_cli.keyboard:
+            rsl_rl_utils.camera_follow(env)
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)

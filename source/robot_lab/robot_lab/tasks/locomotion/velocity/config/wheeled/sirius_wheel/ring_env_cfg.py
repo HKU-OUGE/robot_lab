@@ -49,7 +49,6 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     """Reward terms for the MDP."""
-
     joint_vel_wheel_l2 = RewTerm(
         func=mdp.joint_vel_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
     )
@@ -97,13 +96,72 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "sensor_cfg": SceneEntityCfg("height_scanner"),  # 你配置的 RayCaster 名称
             "stand_still_scale": 5.0,
             "velocity_threshold": 0.6,
-            "command_threshold": 0.3,
+            "command_threshold": 0.6,
             "h_free_min": 0.10,
-            "h_free_max": 0.40,
+            "h_free_max": 0.50,
             "offset": 0.5,
         },
     )
+# 1) 倒立姿态误差（带高度门控）——负权重 = 惩罚
+    handstand_orientation_l2 = RewTerm(
+        func=mdp.gated_handstand_orientation_l2,
+        weight=-5.0,
+        params={
+            "target_gravity": [-1.0, 0.0, 0.0],
+            "asset_cfg": SceneEntityCfg("robot"),                 # 机体
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),# 你的 RayCaster 名
+            # 门控阈值（米）
+            "t_low": 0.10, "t_start": 0.25, "t_full": 0.50,
+            "low_scale": 0.05,
+            "offset": 0.5,
+            "aggregate": "max",
+        },
+    )
 
+    # 2) 抬脚高度指数奖励（带高度门控）
+    handstand_feet_height_exp = RewTerm(
+        func=mdp.gated_handstand_feet_height_exp,
+        weight=10.0,
+        params={
+            "std": 0.30,                                # 可按策略表现微调
+            "target_height": 1.8,
+            "asset_cfg": SceneEntityCfg("robot", body_names=""),
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+            "t_low": 0.10, "t_start": 0.25, "t_full": 0.50,
+            "low_scale": 0.05,
+            "offset": 0.5,
+            "aggregate": "max",
+        },
+    )
+
+    # 3) 前足腾空布尔奖励（带高度门控）
+    handstand_feet_on_air = RewTerm(
+        func=mdp.gated_handstand_feet_on_air,
+        weight=5.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+            "t_low": 0.10, "t_start": 0.25, "t_full": 0.50,
+            "low_scale": 0.05,
+            "offset": 0.5,
+            "aggregate": "max",
+        },
+    )
+
+    # 4) 腾空时长奖励（带高度门控）
+    handstand_feet_air_time = RewTerm(
+        func=mdp.gated_handstand_feet_air_time,
+        weight=5.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "threshold": 0.15,  # 仅当上一次离地时长超过该阈值，且本帧刚接触，才奖励
+            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
+            "t_low": 0.10, "t_start": 0.25, "t_full": 0.50,
+            "low_scale": 0.05,
+            "offset": 0.5,
+            "aggregate": "max",
+        },
+    )
 
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -315,13 +373,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.05
         # self.rewards.flat_orientation_l2.weight = 0
         self.rewards.flat_orientation_l2.func = mdp.flat_orientation_height_gated
-        self.rewards.flat_orientation_l2.weight = -1.0  # 作为“损失”使用（负权）
+        self.rewards.flat_orientation_l2.weight = -5.0  # 作为“损失”使用（负权）
         self.rewards.flat_orientation_l2.params.update({
             "sensor_cfg": SceneEntityCfg("height_scanner"),
             "h_low": 0.10,            # ≤10cm 视作低障，强烈抑制倾斜
             "h_high": 0.25,           # ≥25cm 视作高障，开始鼓励倾斜（线性过渡）
             "encourage_scale": 0.5,   # 鼓励倾斜的强度
-            "use_disc": True,         # 直接用你提供的 height_scan_disc
+            "use_disc": False,         # 直接用你提供的 height_scan_disc
             "offset": 0.5,            # 与你的扫描一致
         })
         self.rewards.base_height_l2.weight = 0
@@ -371,6 +429,9 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+            f"^(?!.*({self.foot_link_name})).*"
+        ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
@@ -399,23 +460,16 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RF_FOOT"), ("LH_FOOT", "RH_FOOT"))
-        self.rewards.upward.weight = 3.0
+        self.rewards.upward.weight = 0.0
         self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
             ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
-        # ------------------------------ Rewards: Handstand pack (height-gated) ------------------------------
-        # 1) base_height_l2（门控版）
-        # 覆盖函数并“清空参数”，避免残留键
-        self.rewards.base_height_l2.func = mdp.base_height_l2_gated
-        self.rewards.base_height_l2.params = {  # 注意：用覆盖而不是 update
-            "target_height": 1.5,
-            "asset_cfg": SceneEntityCfg("robot", body_names=[self.base_link_name]),
-            "height_sensor_cfg": SceneEntityCfg("height_scanner"),
-            "h_low": 0.10, "h_full": 0.50, "use_disc": True, "offset": 0.5,
-        }
-        self.rewards.base_height_l2.weight = -3.5
+        air_foot_name = ".*F_FOOT"   # 局部变量，不挂在 self.rewards 上
+        self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
+        self.rewards.handstand_feet_on_air.params["sensor_cfg"].body_names   = [air_foot_name]
+        self.rewards.handstand_feet_air_time.params["sensor_cfg"].body_names = [air_foot_name]
 
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
