@@ -340,8 +340,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Events------------------------------
         self.events.randomize_reset_base.params = {
             "pose_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
+                "x": (0.0, 0.0),
+                "y": (0.0, 0.0),
                 "z": (0.0, 0.2),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
@@ -372,16 +372,16 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         # self.rewards.flat_orientation_l2.weight = 0
-        self.rewards.flat_orientation_l2.func = mdp.flat_orientation_height_gated
-        self.rewards.flat_orientation_l2.weight = -5.0  # 作为“损失”使用（负权）
-        self.rewards.flat_orientation_l2.params.update({
-            "sensor_cfg": SceneEntityCfg("height_scanner"),
-            "h_low": 0.10,            # ≤10cm 视作低障，强烈抑制倾斜
-            "h_high": 0.25,           # ≥25cm 视作高障，开始鼓励倾斜（线性过渡）
-            "encourage_scale": 0.5,   # 鼓励倾斜的强度
-            "use_disc": False,         # 直接用你提供的 height_scan_disc
-            "offset": 0.5,            # 与你的扫描一致
-        })
+        # self.rewards.flat_orientation_l2.func = mdp.flat_orientation_height_gated
+        # self.rewards.flat_orientation_l2.weight = -5.0  # 作为“损失”使用（负权）
+        # self.rewards.flat_orientation_l2.params.update({
+        #     "sensor_cfg": SceneEntityCfg("height_scanner"),
+        #     "h_low": 0.10,            # ≤10cm 视作低障，强烈抑制倾斜
+        #     "h_high": 0.25,           # ≥25cm 视作高障，开始鼓励倾斜（线性过渡）
+        #     "encourage_scale": 0.5,   # 鼓励倾斜的强度
+        #     "use_disc": False,         # 直接用你提供的 height_scan_disc
+        #     "offset": 0.5,            # 与你的扫描一致
+        # })
         self.rewards.base_height_l2.weight = 0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -422,7 +422,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.005
+        self.rewards.action_rate_l2.weight = -0.01
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -5.0
@@ -436,8 +436,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.5
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.weight = 3.0
+        self.rewards.track_ang_vel_z_exp.weight = 3.0
         # Others
         self.rewards.feet_air_time.weight = 0
         self.rewards.feet_air_time.params["threshold"] = 0.5
