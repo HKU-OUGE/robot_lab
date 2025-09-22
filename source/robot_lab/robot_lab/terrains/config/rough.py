@@ -209,7 +209,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             proportion=0.15,
             step_height_range=(0.10, 0.7),
             step_width=2.0,
-            platform_width=3.0,
+            platform_width=5.0,
             border_width=2.0,
             holes=False,
             flat_patch_sampling={
@@ -224,7 +224,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             proportion=0.15,
             step_height_range=(0.10, 0.7),
             step_width=2.0,
-            platform_width=3.0,
+            platform_width=5.0,
             border_width=2.0,
             holes=False,
             flat_patch_sampling={
@@ -236,7 +236,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.2), platform_width=2.0, border_width=2.0,
+            proportion=0.10, slope_range=(0.0, 0.2), platform_width=5.0, border_width=2.0,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,   
@@ -246,7 +246,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.2), platform_width=2.0, border_width=2.0,
+            proportion=0.10, slope_range=(0.0, 0.2), platform_width=5.0, border_width=2.0,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,    
