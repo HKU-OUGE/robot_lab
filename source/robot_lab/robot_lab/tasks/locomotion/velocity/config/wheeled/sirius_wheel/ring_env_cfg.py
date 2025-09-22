@@ -120,25 +120,25 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.51)
-        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
-        #     "LF_HAA": 0.00,
-        #     "LH_HAA": 0.00,
-        #     "RF_HAA": -0.00,
-        #     "RH_HAA": -0.00,
-        #     "LF_HFE": 0.2,
-        #     "LH_HFE": -0.2,
-        #     "RF_HFE": 0.2,
-        #     "RH_HFE": -0.2,
-        #     "LF_KFE": -1.2,
-        #     "LH_KFE": 1.2,
-        #     "RF_KFE": -1.2,
-        #     "RH_KFE": 1.2,
-        #     "LF_WHEEL": 0.00,
-        #     "LH_WHEEL": 0.00,
-        #     "RF_WHEEL": 0.00,
-        #     "RH_WHEEL": 0.00,
-        # }
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.52)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
+            "LF_HAA": 0.00,
+            "LH_HAA": 0.00,
+            "RF_HAA": -0.00,
+            "RH_HAA": -0.00,
+            "LF_HFE": 0.6,
+            "LH_HFE": -0.6,
+            "RF_HFE": 0.6,
+            "RH_HFE": -0.6,
+            "LF_KFE": -1.6,
+            "LH_KFE": 1.6,
+            "RF_KFE": -1.6,
+            "RH_KFE": 1.6,
+            "LF_WHEEL": 0.00,
+            "LH_WHEEL": 0.00,
+            "RF_WHEEL": 0.00,
+            "RH_WHEEL": 0.00,
+        }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -146,7 +146,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             prim_path="{ENV_REGEX_NS}/Robot/base",
             offset=RayCasterCfg.OffsetCfg(pos=(0.70, 0.0, 20.0)),
             ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.15, 0.15]),
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.35, 0.35]),
             debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
@@ -339,14 +339,14 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
+            f"^(?!.*({self.foot_link_name})).*"
         ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.5
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.weight = 2.5
+        self.rewards.track_ang_vel_z_exp.weight = 1.5
 
         # Others
         self.rewards.feet_air_time.weight = 0
