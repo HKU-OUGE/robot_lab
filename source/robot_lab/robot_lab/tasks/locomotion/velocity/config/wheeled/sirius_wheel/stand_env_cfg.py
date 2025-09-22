@@ -221,8 +221,20 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Rewards------------------------------
         # General
         # UNUESD self.rewards.is_alive.weight = 0
-        self.rewards.is_terminated.weight = 0
-
+        self.rewards.is_terminated.weight = -200
+        self.commands.base_velocity = mdp.UniformThresholdVelocityCommandCfg(
+            asset_name="robot",
+            resampling_time_range=(20.0, 20.0),
+            rel_standing_envs=0.02,
+            rel_heading_envs=0.0,
+            heading_command=False,
+            heading_control_stiffness=0.5,
+            debug_vis=True,
+            ranges=mdp.UniformThresholdVelocityCommandCfg.Ranges(
+                lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+                # lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)
+            ),
+        )
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = 0.0
         self.rewards.ang_vel_xy_l2.weight = 0.0
@@ -264,14 +276,14 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 0.01
-        self.rewards.track_ang_vel_z_exp.weight = 0.01
-        self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_xy_yaw_frame_exp
+        self.rewards.track_lin_vel_xy_exp.weight = 3.0
+        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_x_world_exp
         self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_world_exp
-        self.rewards.track_ang_vel_z_exp.params["std"] = 0.1
-        self.rewards.track_ang_vel_z_exp.params["std"] = 0.3
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
+        self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
         # Others
-        self.rewards.feet_contact.weight = -1.0
+        self.rewards.feet_contact.weight = 0.0
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_stumble.weight = 0.0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -308,7 +320,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_continue_contact.params["expect_contact_num"] = 2
         # self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # HandStand
-        handstand_type = "left"  # which leg on air, can be "front", "back", "left", "right"
+        handstand_type = "front"  # which leg on air, can be "front", "back", "left", "right"
         if handstand_type == "front":
             air_foot_name = ".*F_FOOT"
             self.rewards.handstand_orientation_l2.weight = -5.0
@@ -340,10 +352,11 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [f"^(?!.*{self.foot_link_name}).*"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.5)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
 
@@ -356,5 +369,6 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.height_scan = None
         # no terrain curriculum
         self.curriculum.terrain_levels = None
+        self.curriculum.command_levels = None
 
 

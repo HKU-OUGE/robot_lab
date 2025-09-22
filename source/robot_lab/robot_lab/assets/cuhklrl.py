@@ -91,7 +91,7 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
 
 CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v2.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -117,10 +117,10 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             "LH_HFE": -0.95,
             "RF_HFE": 0.95,
             "RH_HFE": -0.95,
-            "LF_KFE": -1.6,
-            "LH_KFE": 1.6,
-            "RF_KFE": -1.6,
-            "RH_KFE": 1.6,
+            "LF_KNEE": -1.6,
+            "LH_KNEE": 1.6,
+            "RF_KNEE": -1.6,
+            "RH_KNEE": 1.6,
             "LF_WHEEL": 0.00,
             "LH_WHEEL": 0.00,
             "RF_WHEEL": 0.00,
@@ -149,9 +149,9 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             friction=0.0,
         ),
         "legs_calf": DCMotorCfg(
-            joint_names_expr=[".*_KFE"],  
-            effort_limit=80.0,
-            saturation_effort=80.0,
+            joint_names_expr=[".*_KNEE"],  
+            effort_limit=100.0,
+            saturation_effort=100.0,
             velocity_limit=8.0,
             stiffness=40.0,
             damping=2.0,

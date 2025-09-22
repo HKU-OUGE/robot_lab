@@ -90,6 +90,23 @@ def track_lin_vel_xy_yaw_frame_exp(
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
+def track_lin_vel_x_world_exp(
+    env, command_name: str, std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """世界系 x 方向线速度跟踪（指数核）"""
+    asset = env.scene[asset_cfg.name]
+    cmd_b = env.command_manager.get_command("base_velocity")[:, :2]          # [N,2]  (vx^b, vy^b)
+    quat_w = asset.data.root_link_quat_w                                     # [N,4], wxyz
+    cmd_b3 = torch.cat([cmd_b, torch.zeros_like(cmd_b[:, :1])], dim=1)       # [N,3]
+    cmd_w3 = math_utils.quat_apply_yaw(quat_w, cmd_b3)                 # 旋到世界
+    v_cmd_x_world = cmd_w3[:, 0]
+    v_x_w   = asset.data.root_com_lin_vel_w[:, 0]                               # 实际 vx（世界系）
+    err = (v_cmd_x_world - v_x_w).pow(2)
+    rew = torch.exp(-err / (std**2))
+    # 可选：只有机器人“站直/直立”时才给这项奖励（用重力在机体系 z 轴上的投影做 gating）
+    rew *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7  # projected_gravity_b 定义见文档
+    return rew
 
 def track_ang_vel_z_world_exp(
     env, command_name: str, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")

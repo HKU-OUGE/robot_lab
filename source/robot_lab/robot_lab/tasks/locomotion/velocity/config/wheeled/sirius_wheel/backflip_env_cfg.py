@@ -171,6 +171,7 @@ class CUHKLRLSiriusWBackFlipEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.observations.critic.height_scan = None
         # no terrain curriculum
         self.curriculum.terrain_levels = None
+        self.curriculum.command_levels = None
         # ------------------------------Observations------------------------------
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
         self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
@@ -254,8 +255,8 @@ class CUHKLRLSiriusWBackFlipEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 0.0
-        self.rewards.track_ang_vel_z_exp.weight = 0.0
+        self.rewards.track_lin_vel_xy_exp.weight = 0.01
+        self.rewards.track_ang_vel_z_exp.weight = 0.01
 
         # Others
         self.rewards.feet_air_time.weight = 0
@@ -287,7 +288,8 @@ class CUHKLRLSiriusWBackFlipEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_spin_in_air_penalty.weight = 0
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
-
+        self.curriculum.terrain_levels = None
+        self.curriculum.command_levels = None
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWBackFlipEnvCfg":
             self.disable_zero_weight_rewards()
@@ -308,4 +310,4 @@ class CUHKLRLSiriusWBackFlipEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.height_scan = None
         self.observations.critic.height_scan = None
         # no terrain curriculum
-        self.curriculum.terrain_levels = None
+

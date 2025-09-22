@@ -101,15 +101,15 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
-    foot_link_name = ".*_FOOT"
-    calf_link_name = ".*_calf"
+    foot_link_name = ".*_FOOT_link"
+    calf_link_name = ".*_shank_link"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
     leg_joint_names = [
-        "LF_HAA", "LF_HFE", "LF_KFE",
-        "LH_HAA", "LH_HFE", "LH_KFE",
-        "RF_HAA", "RF_HFE", "RF_KFE",
-        "RH_HAA", "RH_HFE", "RH_KFE",
+        "LF_HAA", "LF_HFE", "LF_KNEE",
+        "LH_HAA", "LH_HFE", "LH_KNEE",
+        "RF_HAA", "RF_HFE", "RF_KNEE",
+        "RH_HAA", "RH_HFE", "RH_KNEE",
     ]
     wheel_joint_names = [
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
@@ -120,25 +120,25 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.53)
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
-            "LF_HAA": 0.00,
-            "LH_HAA": 0.00,
-            "RF_HAA": -0.00,
-            "RH_HAA": -0.00,
-            "LF_HFE": 0.6,
-            "LH_HFE": -0.6,
-            "RF_HFE": 0.6,
-            "RH_HFE": -0.6,
-            "LF_KFE": -1.6,
-            "LH_KFE": 1.6,
-            "RF_KFE": -1.6,
-            "RH_KFE": 1.6,
-            "LF_WHEEL": 0.00,
-            "LH_WHEEL": 0.00,
-            "RF_WHEEL": 0.00,
-            "RH_WHEEL": 0.00,
-        }
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
+        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
+        #     "LF_HAA": 0.00,
+        #     "LH_HAA": 0.00,
+        #     "RF_HAA": -0.00,
+        #     "RH_HAA": -0.00,
+        #     "LF_HFE": 0.6,
+        #     "LH_HFE": -0.6,
+        #     "RF_HFE": 0.6,
+        #     "RH_HFE": -0.6,
+        #     "LF_KNEE": -1.6,
+        #     "LH_KNEE": 1.6,
+        #     "RF_KNEE": -1.6,
+        #     "RH_KNEE": 1.6,
+        #     "LF_WHEEL": 0.00,
+        #     "LH_WHEEL": 0.00,
+        #     "RF_WHEEL": 0.00,
+        #     "RH_WHEEL": 0.00,
+        # }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -368,12 +368,12 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body.params["target_height"] = -0.2
         # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
-        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RF_FOOT"), ("LH_FOOT", "RH_FOOT"))
+        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
-            ["LF_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
+            ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
