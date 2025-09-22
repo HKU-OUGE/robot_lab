@@ -36,6 +36,6 @@ def phase(env: ManagerBasedRLEnv, cycle_time: float) -> torch.Tensor:
 
 def height_scan_disc(env, obs_cache=None, sensor_cfg=None, offset=0.5) -> torch.Tensor:
     heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
-    depth = (-heights).clamp(-1.0, 1.0)                 # 先夹到 [-1, 1]
+    depth = (-heights).clamp(-2.0, 2.0)                 # 先夹到 [-2, 2]
     bins  = torch.round(depth * 10.0) / 10.0            # 对称量化到 0.1 网格
     return bins                                         # 已保证在 [-1, 1]

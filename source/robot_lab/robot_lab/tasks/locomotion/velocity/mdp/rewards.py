@@ -802,58 +802,64 @@ def base_height_l2(
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
-def joint_pos_penalty_height_gated_disc(
+def joint_pos_penalty_height_gated(
     env,
     command_name: str,
-    asset_cfg,                 # SceneEntityCfg("robot", joint_names=你的腿部关节)
-    sensor_cfg,                # SceneEntityCfg("front_height") 或你的高度传感器名
-    stand_still_scale: float = 5.0,     # 低台阶时的最强抑制倍数
+    asset_cfg,                  # SceneEntityCfg("robot", joint_names=腿部关节)
+    sensor_cfg,                 # SceneEntityCfg("front_height") 或你的高度传感器名
+    stand_still_scale: float = 5.0,   # 平地/小起伏时的最强制动倍数
     velocity_threshold: float = 0.5,
     command_threshold: float = 0.1,
-    h_free_min: float = 0.10,           # m，低于它强抑制
-    h_free_max: float = 0.45,           # m，高于它基本不抑制
-    offset: float = 0.5,                # 传给 height_scan_disc 的 offset
+    h_free_min: float = 0.10,          # m：低于它强制动
+    h_free_max: float = 0.45,          # m：高于它几乎不制动
+    offset: float = 0.5,               # 传给 mdp.height_scan 的 offset
+    alpha: float = 0.2,                # EMA 平滑系数，0.1~0.3
 ):
     """
-    用离散高度扫描做门控：小台阶/平地强抑制关节位置变化；台阶越高抑制越弱。
-    仅将“正台阶”（向上的障碍）视为放开信号；坑洞/负高度不放开。
+    连续高度扫描做门控：|前方高度变化| 越大，越“放开”；|变化|小则强制动。
+    正、负高度（上台阶/坑）都会放开。
     """
+    import torch
+    from isaaclab.envs.mdp import observations as mdp_obs  # 若你的导入是 mdp.height_scan，就沿用原写法
 
-
-    # 1) 取基础量
-    asset = env.scene[asset_cfg.name]  # type: Articulation
-    cmd = torch.linalg.norm(env.command_manager.get_command(command_name), dim=1)
+    # 1) 基础量
+    asset = env.scene[asset_cfg.name]
+    cmd = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
     body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
     pos_err = torch.linalg.norm(
-        asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids],
-        dim=1,
+        asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids], dim=1
     )
 
-    # 2) 取“前方高度”并做门控
-    # height_scan_disc: [-1, 1]，通常可视作“米”范围内被截断&量化；>0 代表“抬高/台阶”
-    bins = mdp.height_scan_disc(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, K] 或 [N, 1]
-    if bins.ndim == 2 and bins.shape[1] > 1:
-        # 如果你的栅格>1，用“最大正高度”表示前方最高台阶（也可改 mean/percentile）
-        bins = bins.max(dim=1).values
+    # 2) 连续高度扫描（不离散）
+    H = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, K] 或 [N, 1]
+    # Isaac Lab 的 height_scan 是“传感器高度 - 命中点z - offset”，
+    # 通常：前方“上台阶”→返回值偏负；“坑”→返回值偏正（见官方API与教程说明）。为了统一为“高度变化量”，用 -H。
+    terrain_delta = -H
+
+    # 3) 取“最需要动作”的幅值（你也可改成前方扇区的percentile/mean）
+    if terrain_delta.ndim == 2 and terrain_delta.shape[1] > 1:
+        mag = terrain_delta.abs().max(dim=1).values  # |上台阶| 或 |坑| 的最大幅值
     else:
-        bins = bins.squeeze(-1)  # [N]
+        mag = terrain_delta.abs().squeeze(-1)
 
-    # 只把“正高度（向上台阶）”当作放开信号；坑洞(负值)按0处理
-    h = torch.clamp(bins, min=0.0)  # [N], 单位近似米（已在[-1,1]截断）
-    # 线性门控：h<=h_free_min 强抑制；h>=h_free_max 几乎不抑制
-    gate = torch.clamp((h - h_free_min) / max(1e-6, (h_free_max - h_free_min)), 0.0, 1.0)  # [0,1]
-    # 抑制系数 s ∈ [stand_still_scale, 1]：台阶越高，s 越接近 1（越不抑制）
-    s = stand_still_scale - (stand_still_scale - 1.0) * gate
+    # 4) 连续门控：|变化| ≤ h_free_min 强制动；≥ h_free_max 基本放开
+    gate = torch.clamp((mag - h_free_min) / max(1e-6, (h_free_max - h_free_min)), 0.0, 1.0)  # [0,1]
 
-    # 3) 只在“指令很小且自身速度很小”时套用抑制；否则按正常权重
+    # 5) EMA 平滑，避免门控抖动
+    if not hasattr(env, "pose_gate_ema"):
+        env.pose_gate_ema = gate
+    env.pose_gate_ema = (1.0 - alpha) * env.pose_gate_ema + alpha * gate
+    g = env.pose_gate_ema
+
+    # 6) 制动倍数：g=0 → stand_still_scale；g=1 → 1
+    s = stand_still_scale - (stand_still_scale - 1.0) * g
+
+    # 7) 应用策略（两种模式见下文）
     use_standstill = torch.logical_and(cmd <= command_threshold, body_vel <= velocity_threshold)
-    scale = torch.where(use_standstill, s, torch.ones_like(s))
+    scale = torch.where(use_standstill, s, torch.ones_like(s))  # “仅静止/慢行时制动”的版本
 
-    # 4) 姿态保护：离开直立时降权，避免翻倒时“乱动”也得分
-    upright = torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    return pos_err * scale  # 外面配 weight 为负，使其成为惩罚项
 
-    # 返回“越大越罚”的量（外部配 weight 为负数）
-    return pos_err * scale * upright
 
 # 安全的高度门控版平姿态损失：近处低障强烈压制倾斜；高障主动鼓励倾斜
 def flat_orientation_height_gated(
