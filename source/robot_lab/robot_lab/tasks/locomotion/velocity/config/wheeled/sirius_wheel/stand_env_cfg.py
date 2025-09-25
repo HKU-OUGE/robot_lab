@@ -88,14 +88,14 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
 
     base_link_name = "trunk"
-    foot_link_name = ".*_FOOT"
+    foot_link_name = ".*_FOOT_link"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
     joint_names = [
-        "LF_HAA", "LF_HFE", "LF_KFE",
-        "LH_HAA", "LH_HFE", "LH_KFE",
-        "RF_HAA", "RF_HFE", "RF_KFE",
-        "RH_HAA", "RH_HFE", "RH_KFE",
+        "LF_HAA", "LF_HFE", "LF_KNEE",
+        "LH_HAA", "LH_HFE", "LH_KNEE",
+        "RF_HAA", "RF_HFE", "RF_KNEE",
+        "RH_HAA", "RH_HFE", "RH_KNEE",
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
     ]
     # fmt: on
@@ -186,7 +186,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = {".*_HAA": 0.125, "^(?!.*_HAA).*": 0.25}
+        self.actions.joint_pos.scale = 0.25
         self.actions.joint_vel.scale = 1.5
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
@@ -276,8 +276,8 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 3.0
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.weight = 1.5
+        self.rewards.track_ang_vel_z_exp.weight = 1.0
         self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_x_world_exp
         self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_world_exp
         self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
@@ -304,7 +304,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height_body_exp.params["target_height"] = -0.4
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0
-        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RH_FOOT"), ("RF_FOOT", "LH_FOOT"))
+        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RH_FOOT_link"), ("RF_FOOT_link", "LH_FOOT_link"))
         self.rewards.feet_contact_without_cmd.weight = 0.0
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.weight = 0
@@ -313,8 +313,8 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
-            ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+            ["LF_(HAA|HFE|KNEE).*", "RF_(HAA|HFE|KNEE).*"],
+            ["LH_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         ]
         # self.rewards.feet_continue_contact.weight = 0.5
         # self.rewards.feet_continue_contact.params["expect_contact_num"] = 2
@@ -322,25 +322,25 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # HandStand
         handstand_type = "front"  # which leg on air, can be "front", "back", "left", "right"
         if handstand_type == "front":
-            air_foot_name = ".*F_FOOT"
+            air_foot_name = ".*F_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.9
         elif handstand_type == "back":
-            air_foot_name = ".*H_FOOT"
+            air_foot_name = ".*H_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.9
         elif handstand_type == "left":
-            air_foot_name = "L.*_FOOT"
+            air_foot_name = "L.*_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, -1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.4
         elif handstand_type == "right":
-            air_foot_name = "R.*_FOOT"
+            air_foot_name = "R.*_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.3
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.4
         self.rewards.handstand_feet_height_exp.weight = 10
         self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
         self.rewards.handstand_feet_on_air.weight = 5.0
@@ -358,7 +358,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.5)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
 
         # ------------------------------Terrains------------------------------
         self.scene.terrain.terrain_type = "plane"
@@ -369,6 +369,6 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.height_scan = None
         # no terrain curriculum
         self.curriculum.terrain_levels = None
-        self.curriculum.command_levels = None
+        # self.curriculum.command_levels = None
 
 

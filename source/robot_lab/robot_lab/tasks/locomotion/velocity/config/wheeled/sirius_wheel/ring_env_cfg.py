@@ -98,11 +98,16 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.0,
+        weight=0.05,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
+    )
+    knee_undesired_contacts = RewTerm(
+        func=mdp.undesired_contacts,
+        weight=0.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
     )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -349,7 +354,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.feet_continue_contact.weight = 0.0
+        self.rewards.feet_continue_contact.weight = 0.1
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
@@ -357,9 +362,13 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.action_rate_l2.weight = -0.005
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -2.0
+        self.rewards.undesired_contacts.weight = -10.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name})).*"
+            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
+        ]
+        self.rewards.knee_undesired_contacts.weight = -4.0
+        self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = [
+            rf"{self.calf_link_name}"
         ]
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]

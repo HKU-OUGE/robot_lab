@@ -104,8 +104,7 @@ def track_lin_vel_x_world_exp(
     v_x_w   = asset.data.root_com_lin_vel_w[:, 0]                               # 实际 vx（世界系）
     err = (v_cmd_x_world - v_x_w).pow(2)
     rew = torch.exp(-err / (std**2))
-    # 可选：只有机器人“站直/直立”时才给这项奖励（用重力在机体系 z 轴上的投影做 gating）
-    rew *= torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 0.7) / 0.7  # projected_gravity_b 定义见文档
+    rew *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return rew
 
 def track_ang_vel_z_world_exp(
@@ -875,7 +874,7 @@ def joint_pos_penalty_height_gated(
     # 7) 应用策略（两种模式见下文）
     use_standstill = torch.logical_and(cmd <= command_threshold, body_vel <= velocity_threshold)
     scale = torch.where(use_standstill, s, torch.ones_like(s))  # “仅静止/慢行时制动”的版本
-
+    scale *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return pos_err * scale  # 外面配 weight 为负，使其成为惩罚项
 
 
