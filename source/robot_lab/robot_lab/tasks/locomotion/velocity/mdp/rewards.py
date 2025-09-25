@@ -821,41 +821,42 @@ def base_height_l2(
 
 def joint_pos_penalty_height_gated(
     env,
-    command_name: str,
+    command_name: str,          # 不再使用速度门槛，但保留签名兼容 RewardTermCfg
     asset_cfg,                  # SceneEntityCfg("robot", joint_names=腿部关节)
-    sensor_cfg,                 # SceneEntityCfg("front_height") 或你的高度传感器名
-    stand_still_scale: float = 5.0,   # 平地/小起伏时的最强制动倍数
+    sensor_cfg,                 # SceneEntityCfg("front_height")
+    stand_still_scale: float = 5.0,
+    # velocity_threshold / command_threshold 不再使用，但保留参数以兼容旧配置
     velocity_threshold: float = 0.5,
     command_threshold: float = 0.1,
-    h_free_min: float = 0.10,          # m：低于它强制动
-    h_free_max: float = 0.45,          # m：高于它几乎不制动
-    offset: float = 0.5,               # 传给 mdp.height_scan 的 offset
-    alpha: float = 0.2,                # EMA 平滑系数，0.1~0.3
+    h_free_min: float = 0.10,
+    h_free_max: float = 0.45,
+    offset: float = 0.5,
+    alpha: float = 0.2,
+    # 可选：倾斜缩放的下限，避免被乘成 0 完全没梯度
+    tilt_floor: float = 0.2,    # ∈[0,1]；0.2 表示至少保留 20%
 ):
     """
     连续高度扫描做门控：|前方高度变化| 越大，越“放开”；|变化|小则强制动。
-    正、负高度（上台阶/坑）都会放开。
+    与机器人速度无关；全时生效。倾斜越大，惩罚越小（鼓励在倾斜时调整姿态）。
     """
     import torch
-    from isaaclab.envs.mdp import observations as mdp_obs  # 若你的导入是 mdp.height_scan，就沿用原写法
+    from isaaclab.envs.mdp import observations as mdp  # 这里用 mdp.height_scan
 
     # 1) 基础量
     asset = env.scene[asset_cfg.name]
-    cmd = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
-    body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
     pos_err = torch.linalg.norm(
         asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids], dim=1
     )
 
     # 2) 连续高度扫描（不离散）
-    H = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, K] 或 [N, 1]
-    # Isaac Lab 的 height_scan 是“传感器高度 - 命中点z - offset”，
-    # 通常：前方“上台阶”→返回值偏负；“坑”→返回值偏正（见官方API与教程说明）。为了统一为“高度变化量”，用 -H。
+    H = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, K] or [N, 1]
+    # height_scan 返回(传感器高度 - 命中点z - offset)；常见设置下上台阶为负、坑为正
     terrain_delta = -H
 
-    # 3) 取“最需要动作”的幅值（你也可改成前方扇区的percentile/mean）
+    # 3) 取代表性幅值（可换成 quantile 更稳）
     if terrain_delta.ndim == 2 and terrain_delta.shape[1] > 1:
-        mag = terrain_delta.abs().max(dim=1).values  # |上台阶| 或 |坑| 的最大幅值
+        mag = terrain_delta.abs().max(dim=1).values
+        # 也可用更鲁棒的分位数：mag = torch.quantile(terrain_delta.abs(), q=0.8, dim=1)
     else:
         mag = terrain_delta.abs().squeeze(-1)
 
@@ -869,13 +870,16 @@ def joint_pos_penalty_height_gated(
     g = env.pose_gate_ema
 
     # 6) 制动倍数：g=0 → stand_still_scale；g=1 → 1
-    s = stand_still_scale - (stand_still_scale - 1.0) * g
+    s = stand_still_scale - (stand_still_scale - 1.0) * g   # 与速度无关
 
-    # 7) 应用策略（两种模式见下文）
-    use_standstill = torch.logical_and(cmd <= command_threshold, body_vel <= velocity_threshold)
-    scale = torch.where(use_standstill, s, torch.ones_like(s))  # “仅静止/慢行时制动”的版本
-    scale *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
-    return pos_err * scale  # 外面配 weight 为负，使其成为惩罚项
+    # 7) 倾斜缩放（直立时因子≈1，越倾斜越小；带 floor 避免缩放为 0）
+    proj_gz = env.scene["robot"].data.projected_gravity_b[:, 2]  # 直立≈-1
+    grav = torch.clamp(-proj_gz, 0.0, 0.7) / 0.7                # [0,1]
+    grav = tilt_floor + (1.0 - tilt_floor) * grav               # [tilt_floor, 1]
+
+    scale = s * grav
+    return pos_err * scale   # 外面配 weight 为负，使其成为惩罚项
+
 
 
 # 安全的高度门控版平姿态损失：近处低障强烈压制倾斜；高障主动鼓励倾斜

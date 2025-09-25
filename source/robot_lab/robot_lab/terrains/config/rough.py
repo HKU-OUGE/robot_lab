@@ -236,7 +236,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.2), platform_width=3.0, border_width=2.0,
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=3.0, border_width=2.0,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,   
@@ -246,7 +246,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.0, 0.2), platform_width=3.0, border_width=2.0,
+            proportion=0.10, slope_range=(0.0, 0.4), platform_width=3.0, border_width=2.0,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,    
@@ -255,16 +255,16 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
                 )
             },
         ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.005, border_width=2.0,
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,      
-                    patch_radius=0.5,    
-                    max_height_diff=0.05
-                )
-            },
-        ),
+        # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.005, border_width=2.0,
+        #     flat_patch_sampling={
+        #         "target": FlatPatchSamplingCfg(
+        #             num_patches=50,      
+        #             patch_radius=0.5,    
+        #             max_height_diff=0.05
+        #         )
+        #     },
+        # ),
         "flat": terrain_gen.trimesh.mesh_terrains_cfg.MeshPlaneTerrainCfg(
             proportion=0.1,size=(15,15),
             flat_patch_sampling={
