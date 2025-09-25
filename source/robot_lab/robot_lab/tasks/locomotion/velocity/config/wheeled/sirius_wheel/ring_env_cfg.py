@@ -80,6 +80,22 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_threshold": 1.0,
         },
     )
+    joint_pos_penalty_height_gated = RewTerm(
+        func=mdp.joint_pos_penalty_height_gated,
+        weight=0.0,   # 建议起步 -0.5 ~ -1.5 之间，后续再调
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names="(LF|RF|LH|RH)_(HAA|HFE|KNEE)"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "stand_still_scale": 5.0,
+            "velocity_threshold": 1.0,
+            "command_threshold": 1.0,
+            "h_free_min": 0.00,
+            "h_free_max": 0.5,
+            "offset": 0.5,
+            "alpha": 0.2,
+        },
+    )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
         weight=0.0,
@@ -144,7 +160,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
             debug_vis=True,
@@ -328,8 +344,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -1.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.1
-        self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_pos_penalty_height_gated.weight = -1.0
+        self.rewards.joint_pos_penalty_height_gated.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
