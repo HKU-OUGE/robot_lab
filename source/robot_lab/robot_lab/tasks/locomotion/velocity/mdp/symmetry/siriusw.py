@@ -216,87 +216,104 @@ def compute_symmetric_states_siriusw(
 # -------------------------
 # Observation transforms
 # -------------------------
+# === 新增：仅 4 维轮子的左右/前后交换 ===
+def _switch_wheel4_left_right(w: torch.Tensor, wheel_sign: float = +1.0) -> torch.Tensor:
+    """
+    输入顺序假设为 [LF, LH, RF, RH]（与你 16 维中的 [12,13,14,15] 一致的语义）。
+    LR 交换：LF<->RF, LH<->RH => 索引 [2,3,0,1]
+    """
+    out = torch.empty_like(w)
+    out[..., [0, 1, 2, 3]] = w[..., [2, 3, 0, 1]]
+    if wheel_sign != 1.0:
+        out *= wheel_sign
+    return out
 
-def _obs_left_right_siriusw(
-    env: ManagerBasedRLEnv,
-    obs: torch.Tensor,
-    obs_type: str,
-    layout: ObsLayout,
-    signs: SiriusWSymmetrySigns,
-) -> torch.Tensor:
+def _switch_wheel4_front_back(w: torch.Tensor, wheel_sign: float = -1.0) -> torch.Tensor:
+    """
+    FB 交换：每侧前<->后。 [LF, LH, RF, RH] -> [LH, LF, RH, RF] => 索引 [1,0,3,2]
+    """
+    out = torch.empty_like(w)
+    out[..., [0, 1, 2, 3]] = w[..., [1, 0, 3, 2]]
+    if wheel_sign != 1.0:
+        out *= wheel_sign
+    return out
+
+def _obs_left_right_siriusw(env, obs, obs_type, layout, signs):
     x = obs.clone()
     dev = x.device
 
-    # ang vel [wx, wy, wz] → LR: [-wx, +wy, -wz]
-    x[:, layout.ang_vel] *= torch.tensor([-1.0, 1.0, -1.0], device=dev)
-
-    # projected gravity [gx, gy, gz] → LR: [+gx, -gy, +gz]
+    # ... 角速度/重力/速度命令、腿位姿这些保持不变 ...
+    x[:, layout.ang_vel]      *= torch.tensor([-1.0, 1.0, -1.0], device=dev)
     x[:, layout.proj_gravity] *= torch.tensor([+1.0, -1.0, +1.0], device=dev)
-
-    # velocity command [vx, vy, wz] → LR: [+vx, -vy, -wz]
-    x[:, layout.vel_cmd] *= torch.tensor([+1.0, -1.0, -1.0], device=dev)
-
-    # leg joint positions (12) : swap L↔R, flip HAA sign
+    x[:, layout.vel_cmd]      *= torch.tensor([+1.0, -1.0, -1.0], device=dev)
     x[:, layout.leg_pos] = _switch_leg12_left_right(x[:, layout.leg_pos], flip_haa=True)
 
-    # joint velocities (16 = 12 legs + 4 wheels): swap L↔R, flip leg HAA; wheel sign per config
-    x[:, layout.joint_vel] = _switch_all16_left_right(
-        x[:, layout.joint_vel],
-        wheel_sign=signs.wheel_lr_sign,
-        flip_leg_haa=True,
-    )
+    # ---- joint_vel 分流 ----
+    j = x[:, layout.joint_vel]
+    jv_len = j.shape[1]
+    if jv_len == 16:
+        x[:, layout.joint_vel] = _switch_all16_left_right(j, wheel_sign=signs.wheel_lr_sign, flip_leg_haa=True)
+    elif jv_len == 12:
+        x[:, layout.joint_vel] = _switch_leg12_left_right(j, flip_haa=True)
+    elif jv_len == 4:
+        x[:, layout.joint_vel] = _switch_wheel4_left_right(j, wheel_sign=signs.wheel_lr_sign)
+    else:
+        raise AssertionError(f"Unexpected joint_vel length: {jv_len}. Expect one of [4,12,16].")
 
-    # last actions: assume at the end and length==16
-    last_actions = x.shape[1] - 16
-    x[:, last_actions:] = _switch_all16_left_right(
-        x[:, last_actions:],
-        wheel_sign=signs.wheel_lr_sign,
-        flip_leg_haa=True,
-    )
+    # ---- last_actions 只在确定动作维度时再做 ----
+    A = None
+    if hasattr(env, "action_manager"):
+        A = getattr(env.action_manager, "action_dim", None) or getattr(env.action_manager, "num_actions", None)
+    if A in (4, 12, 16) and x.shape[1] >= A:
+        start = x.shape[1] - A
+        la = x[:, start:]
+        if A == 16:
+            x[:, start:] = _switch_all16_left_right(la, wheel_sign=signs.wheel_lr_sign, flip_leg_haa=True)
+        elif A == 12:
+            x[:, start:] = _switch_leg12_left_right(la, flip_haa=True)
+        elif A == 4:
+            x[:, start:] = _switch_wheel4_left_right(la, wheel_sign=signs.wheel_lr_sign)
+    # 否则：不处理 last_actions，避免错改其他观测片段
 
-    # Height-scan等网格型观测若存在：LR 可在其内部做列翻转（此处留给你的 obs 管线）
     return x
 
 
-def _obs_front_back_siriusw(
-    env: ManagerBasedRLEnv,
-    obs: torch.Tensor,
-    obs_type: str,
-    layout: ObsLayout,
-    signs: SiriusWSymmetrySigns,
-) -> torch.Tensor:
+
+def _obs_front_back_siriusw(env, obs, obs_type, layout, signs):
     x = obs.clone()
     dev = x.device
 
-    # ang vel [wx, wy, wz] → FB: [+wx, -wy, -wz]
-    x[:, layout.ang_vel] *= torch.tensor([+1.0, -1.0, -1.0], device=dev)
-
-    # projected gravity [gx, gy, gz] → FB: [-gx, +gy, +gz]
+    x[:, layout.ang_vel]      *= torch.tensor([+1.0, -1.0, -1.0], device=dev)
     x[:, layout.proj_gravity] *= torch.tensor([-1.0, +1.0, +1.0], device=dev)
-
-    # velocity command [vx, vy, wz] → FB: [-vx, +vy, -wz]
-    x[:, layout.vel_cmd] *= torch.tensor([-1.0, +1.0, -1.0], device=dev)
-
-    # leg joint positions (12) : swap F↔H, flip HFE/KFE sign
+    x[:, layout.vel_cmd]      *= torch.tensor([-1.0, +1.0, -1.0], device=dev)
     x[:, layout.leg_pos] = _switch_leg12_front_back(x[:, layout.leg_pos], flip_hfe_kfe=True)
 
-    # joint velocities (16 = 12 legs + 4 wheels): swap F↔H, flip leg HFE/KFE; wheel sign per config
-    x[:, layout.joint_vel] = _switch_all16_front_back(
-        x[:, layout.joint_vel],
-        wheel_sign=signs.wheel_fb_sign,
-        flip_leg_hfe_kfe=True,
-    )
+    j = x[:, layout.joint_vel]
+    jv_len = j.shape[1]
+    if jv_len == 16:
+        x[:, layout.joint_vel] = _switch_all16_front_back(j, wheel_sign=signs.wheel_fb_sign, flip_leg_hfe_kfe=True)
+    elif jv_len == 12:
+        x[:, layout.joint_vel] = _switch_leg12_front_back(j, flip_hfe_kfe=True)
+    elif jv_len == 4:
+        x[:, layout.joint_vel] = _switch_wheel4_front_back(j, wheel_sign=signs.wheel_fb_sign)
+    else:
+        raise AssertionError(f"Unexpected joint_vel length: {jv_len}. Expect one of [4,12,16].")
 
-    # last actions: assume at the end and length==16
-    last_actions = x.shape[1] - 16
-    x[:, last_actions:] = _switch_all16_front_back(
-        x[:, last_actions:],
-        wheel_sign=signs.wheel_fb_sign,
-        flip_leg_hfe_kfe=True,
-    )
+    A = None
+    if hasattr(env, "action_manager"):
+        A = getattr(env.action_manager, "action_dim", None) or getattr(env.action_manager, "num_actions", None)
+    if A in (4, 12, 16) and x.shape[1] >= A:
+        start = x.shape[1] - A
+        la = x[:, start:]
+        if A == 16:
+            x[:, start:] = _switch_all16_front_back(la, wheel_sign=signs.wheel_fb_sign, flip_leg_hfe_kfe=True)
+        elif A == 12:
+            x[:, start:] = _switch_leg12_front_back(la, flip_hfe_kfe=True)
+        elif A == 4:
+            x[:, start:] = _switch_wheel4_front_back(la, wheel_sign=signs.wheel_fb_sign)
 
-    # Height-scan等网格型观测若存在：FB 可在其内部做行翻转
     return x
+
 
 
 # -------------------------

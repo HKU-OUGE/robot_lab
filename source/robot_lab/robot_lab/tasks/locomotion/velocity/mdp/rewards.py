@@ -367,10 +367,10 @@ def wheel_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
         # ===== 选择一种聚合方式（任选其一）=====
 
         # 1) 求和（不平均）：多个异常叠加更痛
-        # reward = terms.sum(dim=-1)
+        reward = terms.sum(dim=-1)
 
         # 2) 取“最差一对”（最负的那一列）：任意一对异常就很痛
-        reward, _ = terms.min(dim=-1)
+        # reward, _ = terms.min(dim=-1)
 
         # 3) Top-k 平均（例如最差的2对）
         # k = min(2, terms.shape[-1])
