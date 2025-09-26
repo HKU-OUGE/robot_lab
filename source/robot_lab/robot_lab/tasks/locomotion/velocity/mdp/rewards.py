@@ -833,7 +833,7 @@ def joint_pos_penalty_height_gated(
     offset: float = 0.5,
     alpha: float = 0.2,
     # 可选：倾斜缩放的下限，避免被乘成 0 完全没梯度
-    tilt_floor: float = 0.2,    # ∈[0,1]；0.2 表示至少保留 20%
+    tilt_floor: float = 0.1,    # ∈[0,1]；0.1 表示至少保留 10%
 ):
     """
     连续高度扫描做门控：|前方高度变化| 越大，越“放开”；|变化|小则强制动。
@@ -841,7 +841,7 @@ def joint_pos_penalty_height_gated(
     """
     import torch
     from isaaclab.envs.mdp import observations as mdp  # 这里用 mdp.height_scan
-
+    import math
     # 1) 基础量
     asset = env.scene[asset_cfg.name]
     pos_err = torch.linalg.norm(
@@ -873,10 +873,17 @@ def joint_pos_penalty_height_gated(
     s = stand_still_scale - (stand_still_scale - 1.0) * g   # 与速度无关
 
     # 7) 倾斜缩放（直立时因子≈1，越倾斜越小；带 floor 避免缩放为 0）
-    proj_gz = env.scene["robot"].data.projected_gravity_b[:, 2]  # 直立≈-1
-    grav = torch.clamp(-proj_gz, 0.0, 0.7) / 0.7                # [0,1]
-    grav = tilt_floor + (1.0 - tilt_floor) * grav               # [tilt_floor, 1]
+    # proj_gz = env.scene["robot"].data.projected_gravity_b[:, 2]  # 直立≈-1
+    # grav = torch.clamp(-proj_gz, 0.0, 0.7) / 0.7                # [0,1]
+    # grav = tilt_floor + (1.0 - tilt_floor) * grav               # [tilt_floor, 1]
+    g_b = asset.data.projected_gravity_b  # [N,3], 直立≈[0,0,-1]
+    # 用重力在机体系的 x、z 分量估计俯仰角：pitch = atan2(|gx|, -gz)
+    pitch = torch.atan2(g_b[:, 0].abs(), (-g_b[:, 2]).clamp_min(1e-6))  # [rad]
 
+    lo = math.radians(10.0)
+    hi = math.radians(30.0)
+    t = ((pitch - lo) / (hi - lo)).clamp(0.0, 1.0)          # [0,1]
+    grav = 1.0 - t * (1.0 - tilt_floor)                     # 1 → tilt_floor
     scale = s * grav
     return pos_err * scale   # 外面配 weight 为负，使其成为惩罚项
 
