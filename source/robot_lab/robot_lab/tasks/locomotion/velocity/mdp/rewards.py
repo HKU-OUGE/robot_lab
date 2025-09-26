@@ -882,54 +882,63 @@ def joint_pos_penalty_height_gated(
 
 
 
-# 安全的高度门控版平姿态损失：近处低障强烈压制倾斜；高障主动鼓励倾斜
+# 安全的“高台/坑”双向门控版：平地强压制，遇高台或坑逐步放开并适度鼓励俯仰
 def flat_orientation_height_gated(
     env,
-    sensor_cfg=None,             # SceneEntityCfg("height_scanner")
-    h_low: float = 0.10,         # 低于此高度→强烈抑制倾斜
-    h_high: float = 0.25,        # 高于此高度→开始鼓励倾斜（线性过渡）
-    encourage_scale: float = 0.5,# 鼓励倾斜强度(系数)
-    use_disc: bool = True,       # 复用你提供的 height_scan_disc
-    offset: float = 0.5,         # 与你的扫描一致
+    sensor_cfg=None,              # SceneEntityCfg("height_scanner")
+    h_low: float = 0.10,          # 低于此(米/分位)→视作低风险，强压制倾斜
+    h_high: float = 0.25,         # 高于此开始完全放开(线性-光滑过渡)
+    encourage_scale: float = 0.5, # 鼓励俯仰强度
+    use_disc: bool = True,        # 复用你的 height_scan_disc
+    offset: float = 0.5,          # 与你的扫描一致
+    alpha: float = 0.2,           # 门控EMA，抑制抖动(0.1~0.3)
+    tilt_cap_rad: float = 0.35,   # 最多鼓励到 ~20° 的俯仰，防止过大倾斜
 ):
-    # 1) 基础“平姿态”误差：proj_g_b 应该接近 [0,0,-1]，所以用 x/y 两分量的平方和
-    proj_g = env.scene["robot"].data.projected_gravity_b  # [N,3]
-    upright_err = (proj_g[:, 0] ** 2 + proj_g[:, 1] ** 2)  # [N]
+    import torch, math
+    robot = env.scene["robot"]
 
-    # 2) 读取前向高度，做鲁棒的“实体存在性”检查（不要直接 `name in env.scene`）
-    front_h = None
-    sensor_name = getattr(sensor_cfg, "name", None) if (sensor_cfg is not None) else None
-    if isinstance(sensor_name, str) and sensor_name:
+    # 1) 倾斜度：XY分量的模（≈ sin(倾角)）；以及原始“平姿态”惩罚
+    g = robot.data.projected_gravity_b  # [N,3]
+    tilt_xy = torch.sqrt(torch.clamp(g[:, 0]**2 + g[:, 1]**2, min=1e-9))     # [N]
+    upright_pen = tilt_xy**2                                                 # 与 isaaclab flat_orientation_l2 对齐
+
+    # 2) 读取前向“高度/坑深”并做成对称的“危险度”hazard ∈ [0,1]
+    hazard = None
+    if isinstance(getattr(sensor_cfg, "name", None), str):
         try:
-            _ = env.scene[sensor_name]  # 若不存在会抛 KeyError
+            _ = env.scene[sensor_cfg.name]
             if use_disc:
-                # 你给的离散化接口：返回 [-1,1] 的 bin。这里把它转成一个“高障指标” in [0,1]
+                # 约定：bins ∈ [-1,1]；绝对值越大说明越“极端”(高台 or 坑更明显/更近)
                 bins = mdp.height_scan_disc(env, sensor_cfg=sensor_cfg, offset=offset).squeeze(-1)  # [N]
-                # 经验约定：bins 越小（更负）意味着前方越高/越近的台阶或障碍
-                high_obs_score = (-bins).clamp(0.0, 1.0)  # [0,1]：0=平地/低障，1=高障
-                # 用一个“等效高度”表达门控（不必是物理米值，只要单调即可）
-                front_h = high_obs_score
+                hazard = bins.abs().clamp(0.0, 1.0)   # 同时覆盖“台阶高”和“坑深”
             else:
-                # 若你使用未离散化的真实高度（米），就直接 squeeze
-                heights = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset).squeeze(-1)  # [N]
-                # 这里假设 heights 越大代表障碍越高；如含义相反，请对号入座取负
-                front_h = heights
+                # 连续高度：正=台阶高、负=坑深（若你语义相反，可取负号）
+                h = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset).squeeze(-1)          # [N]
+                # 统一成“危险度”：取绝对值，并按阈值映射
+                hazard = h.abs()
         except KeyError:
             pass
 
-    # 3) 计算门控系数 gate ∈ [0,1]：低障→0（强抑制倾斜），高障→1（鼓励倾斜）
-    if front_h is None:
-        gate = torch.zeros_like(upright_err)  # 没有传感器就当低障/平地处理
+    if hazard is None:
+        gate = torch.zeros_like(upright_pen)  # 没传感器→当平地处理
     else:
-        # 如果用 disc：front_h 已在 [0,1]，可以直接把 h_low/h_high 视作阈值分位
-        # 如果用真实米值：h_low/h_high 请用米。两者只要保证单调映射即可。
-        gate = (front_h - h_low) / max(1e-6, (h_high - h_low))
-        gate = torch.clamp(gate, 0.0, 1.0)
+        # 3) hazard→[0,1] 门控；支持“米值”或“分位值”，并用 smoothstep 让过渡更平滑
+        gate_lin = torch.clamp((hazard - h_low) / max(1e-6, (h_high - h_low)), 0.0, 1.0)
+        gate = gate_lin * gate_lin * (3.0 - 2.0 * gate_lin)  # smoothstep
 
-    # 4) 组合：低障时 (1-gate)*upright_err 强力压制倾斜；高障时 -encourage_scale*gate*tilt_reward 鼓励倾斜
-    # 这里以“前后俯仰倾斜”为例，鼓励 |gx|（有需要你也可以加 |gy|）
-    tilt_magnitude = torch.abs(proj_g[:, 0])  # 主要鼓励 pitch 方向的倾斜
-    reward = (1.0 - gate) * upright_err - encourage_scale * gate * tilt_magnitude
-    return reward
+    # 4) EMA平滑，避免相机/射线抖动引起奖励震荡
+    if not hasattr(env, "_tilt_gate_ema"):
+        env._tilt_gate_ema = gate
+    else:
+        env._tilt_gate_ema = (1.0 - alpha) * env._tilt_gate_ema + alpha * gate
+    gate_smooth = env._tilt_gate_ema
+
+    # 5) 只鼓励到一个安全上限，防止把机器人“教”到大仰角翻车
+    tilt_cap = math.sin(tilt_cap_rad)
+    encouraged_tilt = torch.clamp(tilt_xy, max=tilt_cap)
+
+    # 6) 组合：平地(门控小)→强压制；遇高台/坑(门控大)→减惩罚并适度鼓励俯仰
+    #    返回“代价”型项：权重大于0时，就是惩罚 − 奖励 的形式
+    return (1.0 - gate_smooth) * upright_pen - encourage_scale * gate_smooth * encouraged_tilt
 
 

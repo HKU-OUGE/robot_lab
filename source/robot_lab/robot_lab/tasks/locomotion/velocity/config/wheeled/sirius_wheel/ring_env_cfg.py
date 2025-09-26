@@ -98,7 +98,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_mirror = RewTerm(
         func=mdp.wheel_mirror,
-        weight=0.05,
+        weight=0.0,
         params={
             "asset_cfg": SceneEntityCfg("robot"),
             "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
@@ -108,6 +108,20 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         func=mdp.undesired_contacts,
         weight=0.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
+    )
+    flat_orientation_height_gated = RewTerm(
+        func=mdp.flat_orientation_height_gated,
+        weight=1.0,   # 先给一个中等权重；之后再按训练曲线微调
+        params={
+            "sensor_cfg": SceneEntityCfg("height_scanner"),  # 关键：用高度扫描器
+            "h_low": 0.10,          # 低于它=平地/低障，强压制倾斜
+            "h_high": 0.20,         # 高于它=高障/深坑，允许并鼓励适度倾斜
+            "encourage_scale": 1.0, # 倾斜鼓励强度（需要更积极就调大）
+            "use_disc": True,       # 你若在用 mdp.height_scan_disc()，就保留 True
+            "offset": 0.5,          # 与你的 height_scan 偏置一致
+            "alpha": 0.2,           # 门控EMA，抑抖(0.1~0.3常用)
+            "tilt_cap_rad": 1.5,   # 倾斜鼓励上限（~20°），防止过度仰俯
+        },
     )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -165,7 +179,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner = RayCasterCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
+            offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
             debug_vis=True,
@@ -275,7 +289,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.scale = 0.5
         self.actions.joint_vel.scale = 1.5
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
@@ -315,7 +329,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.events.randomize_rigid_body_mass = None
         # ------------------------------Rewards------------------------------
         # General
-        self.rewards.is_terminated.weight = -200
+        self.rewards.is_terminated.weight = -1000
 
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -0.5
@@ -410,9 +424,10 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_thigh_link", ".*_abad_link"]
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_thigh_link", ".*_abad_link"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_abad_link"]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        # self.terminations.illegal_contact = None
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
