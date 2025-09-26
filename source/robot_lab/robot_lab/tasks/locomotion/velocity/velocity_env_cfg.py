@@ -55,7 +55,7 @@ class MySceneCfg(InteractiveSceneCfg):
         # terrain_generator=SLOPE_TERRAINS_CFG,
         terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
-        max_init_terrain_level=20,
+        max_init_terrain_level=0,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -325,8 +325,8 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.5, 2.0),
-            "damping_distribution_params": (0.5, 2.0),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
             "operation": "scale",
             "distribution": "log_uniform",
         },
