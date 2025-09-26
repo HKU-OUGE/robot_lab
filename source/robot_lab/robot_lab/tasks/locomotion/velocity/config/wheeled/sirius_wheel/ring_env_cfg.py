@@ -115,9 +115,9 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         params={
             "sensor_cfg": SceneEntityCfg("height_scanner"),  # 关键：用高度扫描器
             "h_low": 0.10,          # 低于它=平地/低障，强压制倾斜
-            "h_high": 0.20,         # 高于它=高障/深坑，允许并鼓励适度倾斜
+            "h_high": 0.10,         # 高于它=高障/深坑，允许并鼓励适度倾斜
             "encourage_scale": 1.0, # 倾斜鼓励强度（需要更积极就调大）
-            "use_disc": True,       # 你若在用 mdp.height_scan_disc()，就保留 True
+            "use_disc": False,       # 你若在用 mdp.height_scan_disc()，就保留 True
             "offset": 0.5,          # 与你的 height_scan 偏置一致
             "alpha": 0.2,           # 门控EMA，抑抖(0.1~0.3常用)
             "tilt_cap_rad": 1.5,   # 倾斜鼓励上限（~20°），防止过度仰俯
