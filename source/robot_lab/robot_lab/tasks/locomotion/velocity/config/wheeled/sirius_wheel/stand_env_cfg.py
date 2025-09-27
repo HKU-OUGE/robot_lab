@@ -276,8 +276,10 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 1.5
-        self.rewards.track_ang_vel_z_exp.weight = 1.0
+        # self.rewards.track_lin_vel_xy_exp.weight = 1.5
+        # self.rewards.track_ang_vel_z_exp.weight = 1.0
+        self.rewards.track_lin_vel_xy_exp.weight = 0.01
+        self.rewards.track_ang_vel_z_exp.weight = 0.01
         self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_x_world_exp
         self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_world_exp
         self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
@@ -325,12 +327,12 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             air_foot_name = ".*F_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.9
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
         elif handstand_type == "back":
             air_foot_name = ".*H_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.9
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
         elif handstand_type == "left":
             air_foot_name = "L.*_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
@@ -356,10 +358,12 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.5)
+        # self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.5)
+        # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        # self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)
         # ------------------------------Terrains------------------------------
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
