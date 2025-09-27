@@ -133,7 +133,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "h_low": 0.10,          # 低于它=平地/低障，强压制倾斜
             "h_high": 0.10,         # 高于它=高障/深坑，允许并鼓励适度倾斜
             "encourage_scale": 1.5, # 倾斜鼓励强度（需要更积极就调大）
-            "use_disc": False,       # 你若在用 mdp.height_scan_disc()，就保留 True
+            "use_disc": True,       # 你若在用 mdp.height_scan_disc()，就保留 True
             "offset": 0.5,          # 与你的 height_scan 偏置一致
             "alpha": 0.2,           # 门控EMA，抑抖(0.1~0.3常用)
             "tilt_cap_rad": 1.5,   # 倾斜鼓励上限（~20°），防止过度仰俯
@@ -350,7 +350,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = 0
+        self.rewards.flat_orientation_l2.weight = -1.0
         self.rewards.base_height_l2.weight = 0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -380,7 +380,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty_height_gated.weight = -0.5
-        self.rewards.abad_joint_pos_penalty_height_gated.weight = -0.1
+        self.rewards.abad_joint_pos_penalty_height_gated.weight = -0.25
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -404,7 +404,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5.5
+        self.rewards.track_lin_vel_xy_exp.weight = 10.0
         self.rewards.track_ang_vel_z_exp.weight = 3.0
 
         # Others
@@ -428,7 +428,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
-        self.rewards.upward.weight = 0.0
+        self.rewards.upward.weight = 3.0
         self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
