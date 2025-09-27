@@ -240,7 +240,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = 0.0
         self.rewards.flat_orientation_l2.weight = 0.0
         self.rewards.base_height_l2.weight = -3.5
-        self.rewards.base_height_l2.params["target_height"] = 1.5
+        self.rewards.base_height_l2.params["target_height"] = 1.2
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -327,12 +327,12 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             air_foot_name = ".*F_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.5
         elif handstand_type == "back":
             air_foot_name = ".*H_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
             self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.8
+            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.5
         elif handstand_type == "left":
             air_foot_name = "L.*_FOOT_link"
             self.rewards.handstand_orientation_l2.weight = -5.0
