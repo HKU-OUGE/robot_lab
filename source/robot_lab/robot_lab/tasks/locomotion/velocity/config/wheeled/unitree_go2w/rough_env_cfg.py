@@ -105,7 +105,7 @@ class UnitreeGo2WRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Events------------------------------
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
+        #self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
 
         # ------------------------------Rewards------------------------------

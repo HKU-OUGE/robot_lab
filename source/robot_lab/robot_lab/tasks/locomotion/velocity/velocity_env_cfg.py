@@ -55,7 +55,7 @@ class MySceneCfg(InteractiveSceneCfg):
         # terrain_generator=SLOPE_TERRAINS_CFG,
         terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
-        max_init_terrain_level=15,
+        max_init_terrain_level=0,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -270,34 +270,36 @@ class EventCfg:
         },
     )
 
+    # 2) 质量随机：改为“scale”且开启重算惯量；body_names 填全
     randomize_rigid_body_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=""),
-            "mass_distribution_params": (0.0, 3.0),
-            "operation": "add",
-        },
-    )
-
-    randomize_rigid_body_inertia = EventTerm(
-        func=mdp.randomize_rigid_body_inertia,
-        mode="startup",
-        params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "inertia_distribution_params": (0.5, 1.5),
+            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
             "operation": "scale",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
         },
     )
 
-    randomize_com_positions = EventTerm(
-        func=mdp.randomize_rigid_body_com,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
-        },
-    )
+    # randomize_rigid_body_inertia = EventTerm(
+    #     func=mdp.randomize_rigid_body_inertia,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+    #         "inertia_distribution_params": (0.5, 1.5),
+    #         "operation": "scale",
+    #     },
+    # )
+
+    # randomize_com_positions = EventTerm(
+    #     func=mdp.randomize_rigid_body_com,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+    #         "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+    #     },
+    # )
 
     # reset
     randomize_apply_external_force_torque = EventTerm(

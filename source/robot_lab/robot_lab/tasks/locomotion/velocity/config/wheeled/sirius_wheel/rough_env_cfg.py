@@ -253,7 +253,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     },
         # }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
+        #self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
         self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
