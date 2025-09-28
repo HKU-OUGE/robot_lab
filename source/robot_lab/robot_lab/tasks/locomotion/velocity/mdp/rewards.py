@@ -47,20 +47,20 @@ def joint_pos_penalty(
     # scale = torch.clamp((uprightness - threshold) / (1 - threshold), 0.0, 1.0)
 
     # reward *= scale
-def track_lin_vel_xy_exp(
-    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
-) -> torch.Tensor:
-    """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
-    # extract the used quantities (to enable type-hinting)
-    asset: RigidObject = env.scene[asset_cfg.name]
-    # compute the error
-    lin_vel_error = torch.sum(
-        torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b[:, :2]),
-        dim=1,
-    )
-    reward = torch.exp(-lin_vel_error / std**2)
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
-    return reward
+# def track_lin_vel_xy_exp(
+#     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+# ) -> torch.Tensor:
+#     """Reward tracking of linear velocity commands (xy axes) using exponential kernel."""
+#     # extract the used quantities (to enable type-hinting)
+#     asset: RigidObject = env.scene[asset_cfg.name]
+#     # compute the error
+#     lin_vel_error = torch.sum(
+#         torch.square(env.command_manager.get_command(command_name)[:, :2] - asset.data.root_lin_vel_b[:, :2]),
+#         dim=1,
+#     )
+#     reward = torch.exp(-lin_vel_error / std**2)
+#     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+#     return reward
 
 
 def track_ang_vel_z_exp(
@@ -947,5 +947,70 @@ def flat_orientation_height_gated(
     # 6) 组合：平地(门控小)→强压制；遇高台/坑(门控大)→减惩罚并适度鼓励俯仰
     #    返回“代价”型项：权重大于0时，就是惩罚 − 奖励 的形式
     return (1.0 - gate_smooth) * upright_pen - encourage_scale * gate_smooth * encouraged_tilt
+
+
+def upright_gate(env, asset_cfg):
+    asset = env.scene[asset_cfg.name]
+    # 直立度：-gz ∈ [0,1]；直立≈1，倾倒≈0
+    upright = torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 1.0)
+    return upright
+
+# 利用高度扫描做“障碍门控”：有台阶/平台时缩小这项的权重
+def obstacle_gate(env, sensor_cfg, h_low=0.10, h_high=0.25, offset=0.5):
+    # height_scan: 传感器高度 - 击中点z - offset，越大越“有台阶”
+    h = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)  # [N, M] 或 [N,1]
+    h = h.abs().max(dim=1).values  # 取最大幅度
+    gate = torch.clamp((h - h_low) / (h_high - h_low + 1e-6), 0.0, 1.0)
+    return gate
+
+def upward_for_climb(env, asset_cfg=SceneEntityCfg("robot"),
+                     sensor_cfg=None, k_progress=0.5, relax_scale=0.3):
+    asset = env.scene[asset_cfg.name]
+
+    # 1) 门控：有明显台阶/平台时 gate→1，否则→0
+    if sensor_cfg is not None:
+        gate = obstacle_gate(env, sensor_cfg)  # 见上面实现
+    else:
+        gate = torch.zeros(asset.data.root_pos_w.shape[0], device=asset.device)
+
+    # 2) 直立度惩罚（平地强，遇障放松）
+    upright = torch.clamp(-asset.data.projected_gravity_b[:, 2], 0.0, 1.0)  # 直立≈1
+    pen_tilt = (1.0 - upright)**2
+    pen_tilt *= (1.0 - gate + gate * relax_scale)
+
+    # 3) 向上“进度”奖励（PBRS），只在 gate>0 时起作用
+    z = asset.data.root_pos_w[:, 2]
+    if not hasattr(env, "_last_z"): env._last_z = z.clone()
+    dz = torch.clamp(z - env._last_z, min=0.0)
+    env._last_z = z
+    r_progress = k_progress * dz * gate
+
+    # 4) 汇总（注意：惩罚在总奖励里给负权重）
+    return r_progress - pen_tilt
+
+
+def climb_progress_dyn_pbrs(env, asset_cfg=SceneEntityCfg("robot"),
+                            sensor_cfg=None, k: float = 2.0, gamma_shape: float = 0.99,
+                            h_low: float = 0.10, h_high: float = 0.25, offset: float = 0.5):
+    asset = env.scene[asset_cfg.name]
+    z = asset.data.root_pos_w[:, 2]
+
+    # 门控：这里以“增强门控”为例（有障碍→更强调爬高），若要抑制，把  alpha 换成 (1-alpha)
+    if sensor_cfg is not None:
+        h = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
+        h = h.abs().max(dim=1).values
+        alpha = torch.clamp((h - h_low) / (h_high - h_low + 1e-6), 0.0, 1.0)
+        g = alpha  # 有障碍→g↑
+    else:
+        g = torch.ones_like(z)
+
+    phi = k * g * z
+    if not hasattr(env, "_phi_prev"):
+        env._phi_prev = phi.clone()
+    if hasattr(env, "reset_buf"):
+        env._phi_prev = torch.where(env.reset_buf.bool(), phi, env._phi_prev)
+    rew = gamma_shape * phi - env._phi_prev
+    env._phi_prev = phi
+    return rew
 
 
