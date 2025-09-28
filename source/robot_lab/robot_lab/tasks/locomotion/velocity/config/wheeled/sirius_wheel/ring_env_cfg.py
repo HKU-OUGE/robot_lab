@@ -406,7 +406,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
         self.rewards.upward.weight = 0.0
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
             ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
