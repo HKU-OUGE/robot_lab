@@ -65,14 +65,14 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
-    foot_link_name = ".*_FOOT"
+    foot_link_name = ".*_FOOT_link"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
     joint_names = [
-        "LF_HAA", "LF_HFE", "LF_KFE",
-        "LH_HAA", "LH_HFE", "LH_KFE",
-        "RF_HAA", "RF_HFE", "RF_KFE",
-        "RH_HAA", "RH_HFE", "RH_KFE",
+        "LF_HAA", "LF_HFE", "LF_KNEE",
+        "LH_HAA", "LH_HFE", "LH_KNEE",
+        "RF_HAA", "RF_HFE", "RF_KNEE",
+        "RH_HAA", "RH_HFE", "RH_KNEE",
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
     ]
     # fmt: on
@@ -81,6 +81,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
         # self.only_positive_rewards = True
 
         # ------------------------------Sence------------------------------
@@ -101,7 +102,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.terrain.terrain_generator = None
         # # no height scan
         # self.scene.height_scanner = None
-        # self.observations.policy.height_scan = None
+        self.observations.policy.height_scan = None
         # self.observations.critic.height_scan = None
         # no terrain curriculum
         # self.curriculum.terrain_levels = None
@@ -127,9 +128,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     scale=1.0,
         # )
         self.scene.terrain.terrain_generator = PIT_TERRAINS_CFG
-        # self.observations.critic.height_scan = ObsTerm(
-        #     func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("ray_caster")}, scale=1.0, clip=(-1.0, 1.0)
-        # )
+        self.observations.critic.height_scan = ObsTerm(
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner_base")}, scale=1.0, clip=(-1.0, 1.0)
+        )
         # self.observations.policy.joint_pos.func = mdp.joint_pos_rel_without_wheel
         # self.observations.policy.joint_pos.params["wheel_asset_cfg"] = SceneEntityCfg(
         #     "robot", joint_names=[self.wheel_joint_name]
@@ -163,8 +164,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = {".*_HAA": 0.125, "^(?!.*_HAA).*": 0.25}
-        self.actions.joint_vel.scale = 5.0
+        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_vel.scale = 1.5
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -192,6 +193,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         #self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 3.0)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 3.0)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -201,10 +204,10 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = 0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -2.0
+        self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -0.5
-        self.rewards.base_height_l2.weight = -1.0
+        self.rewards.flat_orientation_l2.weight = -0.1
+        self.rewards.base_height_l2.weight = 0.0
         self.rewards.base_height_l2.params["target_height"] = 0.64
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -225,7 +228,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_acc_wheel_l2.weight = -2.5e-10
         self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = [self.wheel_joint_name]
         # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_l1", 0, [""])
-        self.rewards.joint_pos_limits.weight = -5.0
+        self.rewards.joint_pos_limits.weight = -2.0
         self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_vel_limits.weight = 0
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = [self.wheel_joint_name]
@@ -252,7 +255,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.weight = 0.05
         self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_stumble.weight = -1.0
+        self.rewards.feet_stumble.weight = -0.0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_slide.weight = 0
         self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -271,22 +274,28 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_height_body_exp.params["target_height"] = -0.4
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0
-        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT", "RH_FOOT"), ("RF_FOOT", "LH_FOOT"))
-        self.rewards.feet_contact_without_cmd.weight = 0.1
+        self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RH_FOOT_link"), ("RF_FOOT_link", "LH_FOOT_link"))
+        self.rewards.feet_contact_without_cmd.weight = 0.0
         self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.weight = 0
         self.rewards.wheel_spin_in_air_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_spin_in_air_penalty.params["asset_cfg"].joint_names = [self.wheel_joint_name]
+        self.rewards.upward.weight = 1.0
+        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.joint_mirror.params["mirror_joints"] = [
+            ["RF_(HAA|HFE|KNEE).*", "LF_(HAA|HFE|KNEE).*"],
+            ["LH_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
+        ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWPitEnvCfg":
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
-        # self.terminations.illegal_contact = None
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.5, 1.5)

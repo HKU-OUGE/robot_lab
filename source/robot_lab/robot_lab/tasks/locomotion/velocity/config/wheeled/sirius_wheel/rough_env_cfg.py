@@ -11,7 +11,7 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
 from isaaclab.managers import CommandTermCfg as CmdTerm
-
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
 ##
 # Pre-defined configs
 ##
@@ -92,14 +92,14 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
-    foot_link_name = ".*_FOOT"
+    foot_link_name = ".*_FOOT_link"
     wheel_joint_name = ".*_WHEEL"
     # fmt: off
     leg_joint_names = [
-        "LF_HAA", "LF_HFE", "LF_KFE",
-        "LH_HAA", "LH_HFE", "LH_KFE",
-        "RF_HAA", "RF_HFE", "RF_KFE",
-        "RH_HAA", "RH_HFE", "RH_KFE",
+        "LF_HAA", "LF_HFE", "LF_KNEE",
+        "LH_HAA", "LH_HFE", "LH_KNEE",
+        "RF_HAA", "RF_HFE", "RF_KNEE",
+        "RH_HAA", "RH_HFE", "RH_KNEE",
     ]
     wheel_joint_names = [
         "LF_WHEEL", "LH_WHEEL", "RF_WHEEL", "RH_WHEEL",
@@ -110,25 +110,25 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.63)
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
-            "LF_HAA": 0.00,
-            "LH_HAA": 0.00,
-            "RF_HAA": -0.00,
-            "RH_HAA": -0.00,
-            "LF_HFE": 0.2,
-            "LH_HFE": -0.2,
-            "RF_HFE": 0.2,
-            "RH_HFE": -0.2,
-            "LF_KFE": -1.2,
-            "LH_KFE": 1.2,
-            "RF_KFE": -1.2,
-            "RH_KFE": 1.2,
-            "LF_WHEEL": 0.00,
-            "LH_WHEEL": 0.00,
-            "RF_WHEEL": 0.00,
-            "RH_WHEEL": 0.00,
-        }
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
+        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
+        #     "LF_HAA": 0.00,
+        #     "LH_HAA": 0.00,
+        #     "RF_HAA": -0.00,
+        #     "RH_HAA": -0.00,
+        #     "LF_HFE": 0.2,
+        #     "LH_HFE": -0.2,
+        #     "RF_HFE": 0.2,
+        #     "RH_HFE": -0.2,
+        #     "LF_KNEE": -1.2,
+        #     "LH_KNEE": 1.2,
+        #     "RF_KNEE": -1.2,
+        #     "RH_KNEE": 1.2,
+        #     "LF_WHEEL": 0.00,
+        #     "LH_WHEEL": 0.00,
+        #     "RF_WHEEL": 0.00,
+        #     "RH_WHEEL": 0.00,
+        # }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -162,6 +162,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     debug_vis=False,
         # )
         # self.scene.terrain.terrain_generator = None
+        self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
         # # no height scan
         # self.scene.height_scanner = None
         # self.observations.policy.height_scan = None
@@ -216,7 +217,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.wheel_joint_names, preserve_order=True
         )
-        self.observations.policy.joint_vel.scale = 0.05
+        self.observations.policy.joint_vel.scale = 0.5
         self.observations.policy.base_lin_vel = None
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
@@ -226,8 +227,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 1.5
+        self.actions.joint_pos.scale = 1.0
+        self.actions.joint_vel.scale = 2
         self.actions.joint_pos.clip = {".*": (-20.0, 20.0)}
         self.actions.joint_vel.clip = {".*": (-20.0, 20.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -340,12 +341,12 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KFE).*", "LF_(HAA|HFE|KFE).*"],
-            ["RH_(HAA|HFE|KFE).*", "LH_(HAA|HFE|KFE).*"],
+            ["RF_(HAA|HFE|KNEE).*", "LF_(HAA|HFE|KNEE).*"],
+            ["RH_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
         ]
         # self.rewards.joint_mirror.params["mirror_joints"] = [
-        #     ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
-        #     ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
+        #     ["LF_(HAA|HFE|KNEE).*", "RF_(HAA|HFE|KNEE).*"],
+        #     ["LH_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         # ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
@@ -353,11 +354,12 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_hip"]
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+

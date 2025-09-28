@@ -279,7 +279,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.track_lin_vel_xy_exp.weight = 1.5
         # self.rewards.track_ang_vel_z_exp.weight = 1.0
         self.rewards.track_lin_vel_xy_exp.weight = 0.01
-        self.rewards.track_ang_vel_z_exp.weight = 0.01
+        self.rewards.track_ang_vel_z_exp.weight = 2.0
         self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_x_world_exp
         self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_world_exp
         self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
@@ -363,7 +363,9 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.lin_vel_x = (-0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.0, 0.0)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
+        self.commands.base_velocity.resampling_time_range = (20.0, 20.0)
         # ------------------------------Terrains------------------------------
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
