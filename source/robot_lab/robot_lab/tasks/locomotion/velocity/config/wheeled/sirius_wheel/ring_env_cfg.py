@@ -178,7 +178,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         )
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
+        self.scene.terrain.terrain_generator=EASY_ROUGH_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
         #     update_period=1.0 / 30.0,          # 30 Hz
@@ -350,7 +350,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.25
+        self.rewards.joint_pos_penalty.weight = -0.
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
