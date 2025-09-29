@@ -470,7 +470,7 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.2, noise_range=(0.01, 0.10), noise_step=0.005, border_width=0.25,
+            proportion=0.2, noise_range=(0.01, 0.03), noise_step=0.005, border_width=0.25,
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
                     num_patches=50,      
