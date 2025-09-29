@@ -231,6 +231,45 @@ def make_serializable(info: dict):
         else:
             serializable_info[key] = tensor_to_list(value)
     return serializable_info
+# === Add: Spectral-Normalized ActorCritic defined inline in train.py ===
+import torch.nn as nn
+# 兼容两种导入路径（不同 PyTorch 版本）
+try:
+    from torch.nn.utils.parametrizations import spectral_norm as _spectral_norm
+except Exception:
+    from torch.nn.utils import spectral_norm as _spectral_norm
+
+# rsl-rl 的 ActorCritic 基类
+try:
+    from rsl_rl.modules.actor_critic import ActorCritic as _BaseActorCritic
+except Exception:
+    import rsl_rl.modules.actor_critic as _ac_mod
+    _BaseActorCritic = _ac_mod.ActorCritic
+
+def _apply_sn(module: nn.Module, n_power_iterations: int = 1):
+    """给模块里所有 Linear 施加谱归一化。"""
+    for m in module.modules():
+        if isinstance(m, nn.Linear):
+            _spectral_norm(m, n_power_iterations=n_power_iterations)
+    return module
+
+class ActorCriticSN(_BaseActorCritic):
+    """Actor-Critic with Spectral Normalization on all Linear layers."""
+    def __init__(self, *args, sn_on=("actor", "critic"), n_power_iterations: int = 1, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "actor" in sn_on and hasattr(self, "actor"):
+            _apply_sn(self.actor, n_power_iterations)
+        if "critic" in sn_on and hasattr(self, "critic"):
+            _apply_sn(self.critic, n_power_iterations)
+
+# ---- 最关键的一行：把默认类名映射到我们的 SN 版本（无需改任何 cfg）----
+import rsl_rl.modules.actor_critic as _ac
+_ac.ActorCritic = ActorCriticSN
+# （可选）如果你在 cfg 里把 class_name 改成了 "ActorCriticSN"：
+# import rsl_rl.runners.on_policy_runner as _opr
+# _opr.ActorCriticSN = ActorCriticSN
+# 这样 eval("ActorCriticSN") 也能解析到这个类。
+# === End Add ===
 
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):

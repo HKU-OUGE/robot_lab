@@ -139,7 +139,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
         #     ),
         #     # debug_vis=not args_cli.headless,
-        #     debug_vis=True,
+        #     debug_vis=False,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
@@ -229,7 +229,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
             rel_heading_envs=0.0,
             heading_command=False,
             heading_control_stiffness=0.5,
-            debug_vis=True,
+            debug_vis=False,
             ranges=mdp.UniformThresholdVelocityCommandCfg.Ranges(
                 lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
                 # lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)

@@ -40,7 +40,7 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # goal_pose = TerrainBasedPose2dCommandCfg(
     #     asset_name="robot",
     #     resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
-    #     debug_vis=True,                      # 可视化目标箭头
+    #     debug_vis=False,                      # 可视化目标箭头
     #     simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
     #     ranges=TerrainBasedPose2dCommandCfg.Ranges(
     #         heading=(0.0, 3.14), # useless if simple_heading=True
@@ -180,7 +180,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=True,
+            debug_vis=False,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.back_height = RayCasterCfg(
@@ -188,7 +188,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             offset=RayCasterCfg.OffsetCfg(pos=(-0.9, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=True,
+            debug_vis=False,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
@@ -241,7 +241,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
         #     ),
         #     # debug_vis=not args_cli.headless,
-        #     debug_vis=True,
+        #     debug_vis=False,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
