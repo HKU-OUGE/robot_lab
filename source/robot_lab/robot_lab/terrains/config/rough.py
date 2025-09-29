@@ -103,14 +103,14 @@ EASY_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.2,                           # 完全生成此地形
+            proportion=0.3,                           # 完全生成此地形
             ring_width_range=(1.5, 1.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
             ring_height_range=(0.0, 0.18),             # 环的离地高度范围
             ring_thickness=0.05,                       # 环厚度（z 方向）
             platform_width=3.0,                       # 地形中心的方形平台大小
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
+            proportion=0.3,
             step_height_range=(0.05, 0.23),
             step_width=2.0,
             platform_width=3.0,
@@ -125,12 +125,12 @@ EASY_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         #     border_width=1.0,
         #     holes=False,
         # ),
-        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.1, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
-        ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.1, noise_range=(0.01, 0.10), noise_step=0.02, border_width=0.25
-        ),
+        # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
+        #     proportion=0.1, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
+        # ),
+        # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.1, noise_range=(0.01, 0.10), noise_step=0.02, border_width=0.25
+        # ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.2, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
         ),
@@ -151,14 +151,14 @@ HARD1_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.2,                           # 完全生成此地形
+            proportion=0.3,                           # 完全生成此地形
             ring_width_range=(1.5, 1.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
             ring_height_range=(0.18, 0.65),             # 环的离地高度范围
             ring_thickness=0.05,                       # 环厚度（z 方向）
             platform_width=3.0,                       # 地形中心的方形平台大小
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
+            proportion=0.3,
             step_height_range=(0.23, 0.7),
             step_width=2.0,
             platform_width=3.0,
@@ -173,9 +173,9 @@ HARD1_RING_TERRAINS_CFG = TerrainGeneratorCfg(
         #     border_width=1.0,
         #     holes=False,
         # ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.02, border_width=0.25
-        ),
+        # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+        #     proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.02, border_width=0.25
+        # ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.2, slope_range=(0.2, 0.55), platform_width=2.0, border_width=0.25
         ),
@@ -395,7 +395,7 @@ PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
 
 
 FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(15.0, 15.0),       # 整个 terrain tile 尺寸
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
     border_width=20.0,        # 地形边界，防止掉落
     num_rows=15,
     num_cols=20,
@@ -404,90 +404,80 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     slope_threshold=0.75,
     use_cache=False,
     sub_terrains={
-        # "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-        #     proportion=0.3,                           # 完全生成此地形
-        #     ring_width_range=(3.0, 3.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-        #     ring_height_range=(-0.05, 0.85),             # 环的离地高度范围
-        #     ring_thickness=0.15,                       # 环厚度（z 方向）
-        #     platform_width=3.5,                       # 地形中心的方形平台大小
-        #     size=(15.0, 15.0),                        # 每块地形大小
-        #     # flat_patch_sampling={
-        #     #     "target": FlatPatchSamplingCfg(
-        #     #         num_patches=50,     
-        #     #         patch_radius=0.15,    
-        #     #         max_height_diff=0.05
-        #     #     )
-        #     # },
-        # ),
-        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.1, 1.0),
-            step_width=3.0,
-            platform_width=5.0,
-            border_width=2.0,
-            holes=False,
-            # flat_patch_sampling={
-            #     "target": FlatPatchSamplingCfg(
-            #         num_patches=50,     
-            #         patch_radius=0.5,    
-            #         max_height_diff=0.05
-            #     )
-            # },
-        ),
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.1, 1.0),
-            step_width=3.0,
-            platform_width=5.0,
-            border_width=2.0,
-            holes=False,
-            # flat_patch_sampling={
-            #     "target": FlatPatchSamplingCfg(
-            #         num_patches=50,     
-            #         patch_radius=0.5,    
-            #         max_height_diff=0.05
-            #     )
-            # },
-        ),
-        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.1, slope_range=(0.0, 0.4), platform_width=5.0, border_width=2.0,
-            # flat_patch_sampling={
-            #     "target": FlatPatchSamplingCfg(
-            #         num_patches=50,   
-            #         patch_radius=0.15,   
-            #         max_height_diff=0.05
-            #     )
-            # },
-        ),
-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.1, slope_range=(0.0, 0.4), platform_width=5.0, border_width=2.0,
-            # flat_patch_sampling={
-            #     "target": FlatPatchSamplingCfg(
-            #         num_patches=50,    
-            #         patch_radius=0.15,    
-            #         max_height_diff=0.05 
-            #     )
-            # },
-        ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.005, border_width=2.0,
+        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+            proportion=0.3,                           # 完全生成此地形
+            ring_width_range=(2.0, 2.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.1, 1.0),             # 环的离地高度范围
+            ring_thickness=0.01,                       # 环厚度（z 方向）
+            platform_width=3.0,                       # 地形中心的方形平台大小
+            size=(5.0, 5.0),                        # 每块地形大小
             flat_patch_sampling={
                 "target": FlatPatchSamplingCfg(
-                    num_patches=50,      
-                    patch_radius=0.5,    
+                    num_patches=50,     
+                    patch_radius=0.15,    
                     max_height_diff=0.05
                 )
             },
         ),
-        "flat": terrain_gen.trimesh.mesh_terrains_cfg.MeshPlaneTerrainCfg(
-            proportion=0.1,size=(15,15),
-            # flat_patch_sampling={
-            #     "target": FlatPatchSamplingCfg(
-            #         num_patches=50,      
-            #         patch_radius=0.5,    
-            #         max_height_diff=0.05
-            #     )
-            # },
+        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.1,
+            step_height_range=(0.10, 1.0),
+            step_width=1.5,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
+        ),
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.10, 1.0),
+            step_width=1.5,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
+        ),
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.10, slope_range=(0.0, 1.0), platform_width=2.0, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,   
+                    patch_radius=0.15,   
+                    max_height_diff=0.05
+                )
+            },
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.10, slope_range=(0.0, 1.0), platform_width=2.0, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,    
+                    patch_radius=0.15,    
+                    max_height_diff=0.05 
+                )
+            },
+        ),
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.2, noise_range=(0.01, 0.10), noise_step=0.005, border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,      
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
         )
     }
 )
