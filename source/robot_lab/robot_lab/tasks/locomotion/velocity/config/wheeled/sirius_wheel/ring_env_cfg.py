@@ -317,8 +317,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.00, 3.0)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 3.0)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -358,7 +358,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.5
+        self.rewards.joint_pos_penalty.weight = -0.4
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
@@ -368,7 +368,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.005
+        self.rewards.action_rate_l2.weight = -0.01
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
