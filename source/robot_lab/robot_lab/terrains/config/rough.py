@@ -498,8 +498,8 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
             proportion=0.5,                           # 完全生成此地形
             ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.0, 0.2),             # 环的离地高度范围
-            ring_thickness=0.4,                       # 环厚度（z 方向）
+            ring_height_range=(0.1, 0.3),             # 环的离地高度范围
+            ring_thickness=0.3,                       # 环厚度（z 方向）
             platform_width=2.5,                       # 地形中心的方形平台大小
             size=(12.0, 12.0),                        # 每块地形大小
             flat_patch_sampling={
@@ -510,23 +510,23 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
                 )
             },
         ),
-        # "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
-        #     proportion=0.2,
-        #     step_height_range=(0.4, 0.6),
-        #     step_width=3.5,
-        #     platform_width=2,
-        #     border_width=1.5,
-        #     holes=False,
-        #     flat_patch_sampling={
-        #         "target": FlatPatchSamplingCfg(
-        #             num_patches=50,     
-        #             patch_radius=0.15,    
-        #             max_height_diff=0.05
-        #         )
-        #     },
-        # ),
+        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.4, 0.6),
+            step_width=3.5,
+            platform_width=2,
+            border_width=1.5,
+            holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
+        ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.5,
+            proportion=0.3,
             step_height_range=(0.4, 0.6),
             step_width=3.5,
             platform_width=2,
