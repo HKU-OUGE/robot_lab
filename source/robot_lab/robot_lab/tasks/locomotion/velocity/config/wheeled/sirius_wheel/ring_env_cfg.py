@@ -40,7 +40,7 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     # goal_pose = TerrainBasedPose2dCommandCfg(
     #     asset_name="robot",
     #     resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
-    #     debug_vis=False,                      # 可视化目标箭头
+    #     debug_vis=True,                      # 可视化目标箭头
     #     simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
     #     ranges=TerrainBasedPose2dCommandCfg.Ranges(
     #         heading=(0.0, 3.14), # useless if simple_heading=True
@@ -75,6 +75,17 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         },
     )
     joint_pos_penalty = RewTerm(
+        func=mdp.joint_pos_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stand_still_scale": 5.0,
+            "velocity_threshold": 0.3,
+            "command_threshold": 0.3,
+        },
+    )
+    abad_pos_penalty = RewTerm(
         func=mdp.joint_pos_penalty,
         weight=0.0,
         params={
@@ -181,7 +192,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             offset=RayCasterCfg.OffsetCfg(pos=(0.85, 0.0, 20.0)),
             ray_alignment='yaw',
             pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=False,
+            debug_vis=True,
             mesh_prim_paths=["/World/ground"],
         )
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
@@ -233,7 +244,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         #         channels=4, vertical_fov_range=[-20, 20], horizontal_fov_range=[-180, 180], horizontal_res=10.0
         #     ),
         #     # debug_vis=not args_cli.headless,
-        #     debug_vis=False,
+        #     debug_vis=True,
         # )
         # ------------------------------Observations------------------------------
         # self.observations.policy.height_scan = ObsTerm(
@@ -343,7 +354,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_torques_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_vel_l2.weight = -2.5e-6
         self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_vel_wheel_l2.weight = -2.5e-4
+        self.rewards.joint_vel_wheel_l2.weight = -3.0e-4
         self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_acc_l2.weight = -2.5e-7
         self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
@@ -360,6 +371,11 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.1
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.abad_pos_penalty.weight = -2.0
+        self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
+            "LF_HAA", 
+            "RF_HAA", 
+        ]
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -368,20 +384,23 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.00
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -4.0
+        self.rewards.undesired_contacts.weight = -10
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
-        self.rewards.knee_undesired_contacts.weight = -0.5
-        self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = self.calf_link_name
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+            f"^(?!.*({self.foot_link_name})).*"
+        ]
+        # self.rewards.knee_undesired_contacts.weight = -0.5
+        # self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = self.calf_link_name
         self.rewards.contact_forces.weight = -1.5e-4
         self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0
+        self.rewards.track_lin_vel_xy_exp.weight = 6.0
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
@@ -408,8 +427,8 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.upward.weight = 1.0
         self.rewards.joint_mirror.weight = -0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
-            ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
-            ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
+            ["RF_(HAA|HFE|KNEE).*", "LF_(HAA|HFE|KNEE).*"],
+            ["LH_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
@@ -419,10 +438,10 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        self.terminations.illegal_contact = None
+        # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.3, 0.6)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.heading = (3.14,3.14)
