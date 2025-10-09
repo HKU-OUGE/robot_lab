@@ -108,12 +108,179 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import robot_lab.tasks  # noqa: F401
-
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
+# --- MoE Actor that can drop-in replace the base policy's actor MLP ---
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
+def _make_mlp(in_dim: int, hidden: list[int], out_dim: int, act: nn.Module):
+    layers: list[nn.Module] = []
+    last = in_dim
+    for h in hidden:
+        layers += [nn.Linear(last, h), act()]
+        last = h
+    layers += [nn.Linear(last, out_dim)]
+    return nn.Sequential(*layers)
+
+class _MoEActor(nn.Module):
+    """Deterministic MoE actor head: softmax routing over expert MLPs.
+
+    - No randomness inside the actor mean; all exploration still comes from base policy's Normal(mean, std).
+    - Supports top-k sparse routing by zeroing non-topk logits before softmax (still deterministic).
+    """
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        hidden: list[int],
+        act: type[nn.Module],
+        num_experts: int = 4,
+        topk: int = 1,
+        temperature: float = 1.0,
+    ):
+        super().__init__()
+        assert num_experts >= 1
+        assert 1 <= topk <= num_experts
+        self.num_experts = num_experts
+        self.topk = topk
+        self.register_buffer("temperature", torch.tensor(float(temperature)))
+        self.experts = nn.ModuleList([_make_mlp(in_dim, hidden, out_dim, act) for _ in range(num_experts)])
+        # 一个小 gating MLP（与基类 actor 的规模同一量级即可）
+        gate_hidden = max(64, (hidden[0] if hidden else 128) // 2)
+        self.gate = _make_mlp(in_dim, [gate_hidden], num_experts, act)
+        # 暴露一个路由熵指标，便于 wandb 打点
+        self.last_router_probs: torch.Tensor | None = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits = self.gate(x)  # [B, E]
+        if self.topk < self.num_experts:
+            # 稀疏 top-k：非 top-k 位置置为 -inf，再 softmax
+            topk_vals, topk_idx = logits.topk(self.topk, dim=-1)
+            mask = torch.zeros_like(logits, dtype=torch.bool).scatter(1, topk_idx, True)
+            logits = logits.masked_fill(~mask, float("-inf"))
+        probs = F.softmax(logits / self.temperature.clamp(min=1e-6), dim=-1)  # [B, E]
+        means = torch.stack([e(x) for e in self.experts], dim=1)              # [B, E, A]
+        out = torch.einsum("be,bea->ba", probs, means)                        # [B, A]
+        self.last_router_probs = probs
+        return out
+
+# -------- Policy that reuses ALL rsl-rl logic and just swaps the actor --------
+try:
+    from rsl_rl.modules.actor_critic import ActorCritic as _BaseActorCritic
+except Exception:
+    import rsl_rl.modules.actor_critic as _ac_mod
+    _BaseActorCritic = _ac_mod.ActorCritic
+
+import torch
+import torch.nn as nn
+
+class ActorCriticMoE(_BaseActorCritic):
+    """RSL-RL v3 兼容：基于基类的 MoE 策略。
+    - 复用基类：obs 归一化 / log_std / act() / evaluate() / evaluate_actions() / 导出等
+    - 仅替换 actor 的 MLP 为 MoE 头（确定性均值；探索仍由基类的 Normal(mean, std) 完成）
+    """
+    def __init__(
+        self,
+        # ★ v3 签名：先给 obs、obs_groups，再给 num_actions 与其余 cfg ★
+        obs,                      # dict 或 TensorDict：来自环境的一个样本观测（含各组）
+        obs_groups: dict,         # 形如 {'actor': ['policy'], 'critic': ['critic']}
+        num_actions: int,
+        *,
+        actor_hidden_dims = [256, 256],
+        critic_hidden_dims = [512, 256],
+        activation = "elu",
+        init_noise_std = 0.8,
+        noise_std_type = "scalar",
+        actor_obs_normalization = True,
+        critic_obs_normalization = True,
+        # MoE 相关
+        num_experts: int = 4,
+        topk: int = 1,
+        moe_temperature: float = 1.0,
+        **kwargs,
+    ):
+        # 先让基类按 v3 流程把一切搭好（包含 obs 归一化、log_std 等）
+        super().__init__(
+            obs,
+            obs_groups,
+            num_actions,
+            actor_hidden_dims = actor_hidden_dims,
+            critic_hidden_dims = critic_hidden_dims,
+            activation = activation,
+            init_noise_std = init_noise_std,
+            noise_std_type = noise_std_type,
+            actor_obs_normalization = actor_obs_normalization,
+            critic_obs_normalization = critic_obs_normalization,
+            **kwargs,
+        )
+
+        act = dict(relu=nn.ReLU, elu=nn.ELU, gelu=nn.GELU)[activation.lower()]
+
+        # 1) 从基类已构建好的 actor MLP 里取首层 Linear 的 in_features（最稳妥）
+        base_actor = self.actor
+        actor_in_dim = None
+        for m in base_actor.modules():
+            if isinstance(m, nn.Linear):
+                actor_in_dim = m.in_features
+                break
+
+        # 2) 兜底：如果意外没取到（几乎不会发生），再用 obs_groups 的 'policy' 写法；若还没有就取第一个键
+        if actor_in_dim is None:
+            def _lastdim(t):
+                return int(t.shape[-1])
+            keys_for_actor = obs_groups.get("policy", None)
+            if keys_for_actor is None and "actor" in obs_groups:  # 兼容别处用过的命名
+                keys_for_actor = obs_groups["actor"]
+            if keys_for_actor is None:
+                keys_for_actor = ["policy"] if (isinstance(obs, dict) and "policy" in obs) else [next(iter(obs.keys()))]
+            actor_in_dim = sum(_lastdim(obs[k]) for k in keys_for_actor)
+
+        # 3) 构建 MoE 头并替换
+        self.actor = _MoEActor(
+            in_dim = actor_in_dim,
+            out_dim = num_actions,
+            hidden = list(actor_hidden_dims),
+            act    = act,
+            num_experts = num_experts,
+            topk        = topk,
+            temperature = float(moe_temperature),
+        )
+
+        # 4) （可选）继续给 MoE 线性层加谱归一化，与你现有风格一致
+        try:
+            from torch.nn.utils.parametrizations import spectral_norm as _sn
+            for m in self.actor.modules():
+                if isinstance(m, nn.Linear):
+                    _sn(m, n_power_iterations=1)
+        except Exception:
+            pass
+
+        # （可选）给 MoE 里的 Linear 上谱归一化，与你之前的 SN 风格一致
+        try:
+            from torch.nn.utils.parametrizations import spectral_norm as _sn
+            for m in self.actor.modules():
+                if isinstance(m, nn.Linear):
+                    _sn(m, n_power_iterations=1)
+        except Exception:
+            pass
+
+    # 便于监控 gating 的平均熵（可 wandb.log）
+    @property
+    def routing_entropy(self):
+        p = getattr(self.actor, "last_router_probs", None)
+        if p is None:
+            return None
+        eps = 1e-8
+        return (-(p * (p + eps).log()).sum(dim=-1)).mean()
+# 让 Isaac Lab 用 getattr(...) 能找到：rsl_rl.modules.actor_critic.ActorCriticMoE
+import rsl_rl.modules.actor_critic as ac
+ac.ActorCriticMoE = ActorCriticMoE
+import rsl_rl.runners.on_policy_runner as _opr
+_opr.ActorCriticMoE = ActorCriticMoE
 # --- CustomRecordVideo: PyAV + W&B---
 from typing import Callable
 try:
@@ -475,6 +642,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
     dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
     # run training
+    ac = runner.alg.policy  # 某些版本也叫 runner.alg.actor_critic
+    print(">> Actor type:", ac.actor.__class__.__name__)  # 期望看到 _MoEActor
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
     # Optional: Force commit
     try:

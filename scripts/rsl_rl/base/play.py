@@ -44,6 +44,7 @@ parser.add_argument("--real-time", action="store_true", default=False, help="Run
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
+parser.add_argument("--moe", action="store_true", default=False, help="Whether to use MoE.")
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -80,6 +81,179 @@ from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_po
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
 from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
 import robot_lab.tasks  # noqa: F401
+# --- MoE Actor that can drop-in replace the base policy's actor MLP ---
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+def _make_mlp(in_dim: int, hidden: list[int], out_dim: int, act: nn.Module):
+    layers: list[nn.Module] = []
+    last = in_dim
+    for h in hidden:
+        layers += [nn.Linear(last, h), act()]
+        last = h
+    layers += [nn.Linear(last, out_dim)]
+    return nn.Sequential(*layers)
+
+class _MoEActor(nn.Module):
+    """Deterministic MoE actor head: softmax routing over expert MLPs.
+
+    - No randomness inside the actor mean; all exploration still comes from base policy's Normal(mean, std).
+    - Supports top-k sparse routing by zeroing non-topk logits before softmax (still deterministic).
+    """
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        hidden: list[int],
+        act: type[nn.Module],
+        num_experts: int = 4,
+        topk: int = 1,
+        temperature: float = 1.0,
+    ):
+        super().__init__()
+        self._in_features = int(in_dim)     # NEW: 供导出器探测
+        self._out_features = int(out_dim)   # NEW: 供导出器探测
+        assert num_experts >= 1
+        assert 1 <= topk <= num_experts
+        self.num_experts = num_experts
+        self.topk = topk
+        self.register_buffer("temperature", torch.tensor(float(temperature)))
+        self.experts = nn.ModuleList([_make_mlp(in_dim, hidden, out_dim, act) for _ in range(num_experts)])
+        # 一个小 gating MLP（与基类 actor 的规模同一量级即可）
+        gate_hidden = max(64, (hidden[0] if hidden else 128) // 2)
+        self.gate = _make_mlp(in_dim, [gate_hidden], num_experts, act)
+    # --- 以下三个方法是“顺序模块”兼容探针 ---
+    class _FakeLayer:
+        def __init__(self, **kw):
+            for k, v in kw.items():
+                setattr(self, k, v)
+
+    def __len__(self):                      # NEW
+        # 让导出器可以 len(self.actor)
+        return 2
+
+    def __getitem__(self, idx):             # NEW
+        # 导出器会读 [0].in_features，可能也会读 [-1].out_features
+        if idx in (0, -2):
+            return self._FakeLayer(in_features=self._in_features)
+        if idx in (-1, 1):
+            return self._FakeLayer(out_features=self._out_features)
+        raise IndexError(idx)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits = self.gate(x)  # [B, E]
+        if self.topk < self.num_experts:
+            # 稀疏 top-k：非 top-k 位置置为 -inf，再 softmax
+            topk_vals, topk_idx = logits.topk(self.topk, dim=-1)
+            mask = torch.zeros_like(logits, dtype=torch.bool).scatter(1, topk_idx, True)
+            logits = logits.masked_fill(~mask, float("-inf"))
+        probs = F.softmax(logits / self.temperature.clamp(min=1e-6), dim=-1)  # [B, E]
+        means = torch.stack([e(x) for e in self.experts], dim=1)              # [B, E, A]
+        out = torch.einsum("be,bea->ba", probs, means)                        # [B, A]
+        return out
+
+# -------- Policy that reuses ALL rsl-rl logic and just swaps the actor --------
+try:
+    from rsl_rl.modules.actor_critic import ActorCritic as _BaseActorCritic
+except Exception:
+    import rsl_rl.modules.actor_critic as _ac_mod
+    _BaseActorCritic = _ac_mod.ActorCritic
+
+import torch
+import torch.nn as nn
+
+class ActorCriticMoE(_BaseActorCritic):
+    """RSL-RL v3 兼容：基于基类的 MoE 策略。
+    - 复用基类：obs 归一化 / log_std / act() / evaluate() / evaluate_actions() / 导出等
+    - 仅替换 actor 的 MLP 为 MoE 头（确定性均值；探索仍由基类的 Normal(mean, std) 完成）
+    """
+    def __init__(
+        self,
+        # ★ v3 签名：先给 obs、obs_groups，再给 num_actions 与其余 cfg ★
+        obs,                      # dict 或 TensorDict：来自环境的一个样本观测（含各组）
+        obs_groups: dict,         # 形如 {'actor': ['policy'], 'critic': ['critic']}
+        num_actions: int,
+        *,
+        actor_hidden_dims = [256, 256],
+        critic_hidden_dims = [512, 256],
+        activation = "elu",
+        init_noise_std = 0.8,
+        noise_std_type = "scalar",
+        actor_obs_normalization = True,
+        critic_obs_normalization = True,
+        # MoE 相关
+        num_experts: int = 4,
+        topk: int = 1,
+        moe_temperature: float = 1.0,
+        **kwargs,
+    ):
+        # 先让基类按 v3 流程把一切搭好（包含 obs 归一化、log_std 等）
+        super().__init__(
+            obs,
+            obs_groups,
+            num_actions,
+            actor_hidden_dims = actor_hidden_dims,
+            critic_hidden_dims = critic_hidden_dims,
+            activation = activation,
+            init_noise_std = init_noise_std,
+            noise_std_type = noise_std_type,
+            actor_obs_normalization = actor_obs_normalization,
+            critic_obs_normalization = critic_obs_normalization,
+            **kwargs,
+        )
+
+        act = dict(relu=nn.ReLU, elu=nn.ELU, gelu=nn.GELU)[activation.lower()]
+
+        # 1) 从基类已构建好的 actor MLP 里取首层 Linear 的 in_features（最稳妥）
+        base_actor = self.actor
+        actor_in_dim = None
+        for m in base_actor.modules():
+            if isinstance(m, nn.Linear):
+                actor_in_dim = m.in_features
+                break
+
+        # 2) 兜底：如果意外没取到（几乎不会发生），再用 obs_groups 的 'policy' 写法；若还没有就取第一个键
+        if actor_in_dim is None:
+            def _lastdim(t):
+                return int(t.shape[-1])
+            keys_for_actor = obs_groups.get("policy", None)
+            if keys_for_actor is None and "actor" in obs_groups:  # 兼容别处用过的命名
+                keys_for_actor = obs_groups["actor"]
+            if keys_for_actor is None:
+                keys_for_actor = ["policy"] if (isinstance(obs, dict) and "policy" in obs) else [next(iter(obs.keys()))]
+            actor_in_dim = sum(_lastdim(obs[k]) for k in keys_for_actor)
+
+        # 3) 构建 MoE 头并替换
+        self.actor = _MoEActor(
+            in_dim = actor_in_dim,
+            out_dim = num_actions,
+            hidden = list(actor_hidden_dims),
+            act    = act,
+            num_experts = num_experts,
+            topk        = topk,
+            temperature = float(moe_temperature),
+        )
+
+        # 4) （可选）继续给 MoE 线性层加谱归一化，与你现有风格一致
+        try:
+            from torch.nn.utils.parametrizations import spectral_norm as _sn
+            for m in self.actor.modules():
+                if isinstance(m, nn.Linear):
+                    _sn(m, n_power_iterations=1)
+        except Exception:
+            pass
+
+        # （可选）给 MoE 里的 Linear 上谱归一化，与你之前的 SN 风格一致
+        try:
+            from torch.nn.utils.parametrizations import spectral_norm as _sn
+            for m in self.actor.modules():
+                if isinstance(m, nn.Linear):
+                    _sn(m, n_power_iterations=1)
+        except Exception:
+            pass
+
+    # 便于监控 gating 的平均熵（可 wandb.log）
+# 让 Isaac Lab 用 getattr(...) 能找到：rsl_rl.modules.actor_critic.ActorCriticMoE
 
 # === NEW: debug helper to print root pose & target height ===
 def _print_root_and_target(env):
@@ -132,7 +306,18 @@ def main():
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlBaseRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
-
+    if args_cli.moe:
+        import rsl_rl.modules.actor_critic as ac
+        ac.ActorCriticMoE = ActorCriticMoE
+        import rsl_rl.runners.on_policy_runner as _opr
+        _opr.ActorCriticMoE = ActorCriticMoE
+        agent_cfg.policy.class_name = "ActorCriticMoE"
+        # 2) 强制对齐训练时的网络维度 / 激活 / 探索噪声
+        #    （Hydra 风格的 'agent.policy.*' 在这个脚本里会被忽略，所以在代码里直接改 cfg）
+        agent_cfg.policy.actor_hidden_dims = [512, 256, 128]
+        agent_cfg.policy.critic_hidden_dims = [512, 256, 128]
+        agent_cfg.policy.activation = "elu"
+        agent_cfg.policy.init_noise_std = 0.8
     # make a smaller scene for play
     env_cfg.scene.num_envs = args_cli.num_envs
     # spawn the robot randomly in the grid (instead of their terrain levels)
@@ -147,7 +332,7 @@ def main():
     env_cfg.observations.policy.enable_corruption = False
     # remove random pushing
     env_cfg.events.randomize_apply_external_force_torque = None
-    env_cfg.events.push_robot = None
+    env_cfg.events.randomize_push_robot = None
     env_cfg.curriculum.terrain_levels = None
     env_cfg.curriculum.command_levels = None
 
@@ -247,6 +432,23 @@ def main():
 
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+    # --- De-parametrize all layers before TorchScript export ---
+    from torch.nn.utils.parametrize import is_parametrized, remove_parametrizations
+
+    def _deparametrize_all(m):
+        # 遍历所有子模块，若存在任何参数化(如 spectral_norm)则移除
+        for mod in m.modules():
+            if is_parametrized(mod):
+                # 逐个把所有被参数化的参数（通常是 "weight"）恢复成普通参数
+                if hasattr(mod, "parametrizations"):
+                    for pname in list(mod.parametrizations.keys()):
+                        try:
+                            remove_parametrizations(mod, pname, leave_parametrized=False)
+                        except Exception:
+                            pass
+
+    # 对策略网络做去参数化
+    _deparametrize_all(policy_nn)
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
