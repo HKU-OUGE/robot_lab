@@ -8,10 +8,12 @@ the curriculum introduced by the function.
 """
 
 from __future__ import annotations
-
+import math
 import torch
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
+import robot_lab.tasks.locomotion.velocity.mdp as mdp
+from isaaclab.envs.mdp.commands.commands_cfg import UniformPoseCommandCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -58,3 +60,29 @@ def command_levels_vel(
             base_velocity_ranges.lin_vel_y = new_vel_y.tolist()
 
     return torch.tensor(base_velocity_ranges.lin_vel_x[1], device=env.device)
+
+POSE_EPS = 1e-3
+def _mk_ranges(roll, pitch):
+    return UniformPoseCommandCfg.Ranges(
+        pos_x=(0.0, 0.0), pos_y=(0.0, 0.0), pos_z=(0.0, 0.0),
+        roll=(roll-POSE_EPS, roll+POSE_EPS),
+        pitch=(pitch-POSE_EPS, pitch+POSE_EPS),
+        yaw=(-math.pi, math.pi),
+    )
+    
+
+def switch_posture(env, env_ids, old_ranges, *, switch_time_s=10.0, next_state="front"):
+    t = env.common_step_counter * env.step_dt  # 全局步计数 * dt
+    if t < switch_time_s:
+        # 初始保持“平”
+        return mdp.modify_term_cfg.NO_CHANGE
+    # 10s 之后切到目标状态（返回单一 Ranges；不要用 batch ）
+    presets = {
+        "flat":  (0.0, 0.0),
+        "front": (0.0, +0.5*math.pi),
+        "back":  (0.0, -0.5*math.pi),
+        "left":  (-0.5*math.pi, 0.0),
+        "right": (+0.5*math.pi, 0.0),
+    }
+    roll, pitch = presets[next_state]
+    return _mk_ranges(roll, pitch)

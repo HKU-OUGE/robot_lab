@@ -3,14 +3,17 @@
 import isaaclab.sim as sim_utils
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import CurriculumTermCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CurriculumCfg, CommandsCfg, EventCfg
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
+from isaaclab.envs.mdp.commands.commands_cfg import TerrainBasedPose2dCommandCfg, UniformPoseCommandCfg
+from isaaclab.envs.mdp.curriculums import modify_env_param
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 import math
@@ -20,7 +23,38 @@ import math
 ##
 from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_CFG  # isort: skip
 
+@configclass
+class CUHKLRLSiriusWEventCfg(EventCfg):
+    randomize_posture_ranges_on_reset = EventTerm(
+        func=modify_env_param,
+        mode="reset",
+        params={
+            "address": "command_manager.cfg.posture.ranges",
+            "modify_fn": mdp.sample_posture_ranges,
+            # 例：完全固定 flat；也可以用 probs 等概率
+            "modify_params": {
+                "probs": (0.3, 0.35, 0.35, 0.0, 0.0),
+                "force": None,     # 若 force 给定（'flat'/'front'/...），就用它；否则按 probs 采样一种
+                "band": 1e-3,
+                "yaw_band": 0.0,
+            },
+        },
+    )
 
+@configclass
+class CUHKLRLSiriusWCurriculumCfg(CurriculumCfg):
+    """Curriculum terms for the MDP."""
+
+    # 把课程项挂到配置里：修改地址为 command term 的 ranges
+    # posture_curriculum = CurriculumTermCfg(
+    #     func=modify_env_param,
+    #     params={
+    #         "address": "command_manager.cfg.posture.ranges",
+    #         "modify_fn": mdp.switch_posture,
+    #         "modify_params": {"switch_time_s": 10.0},
+    #     },
+    # )
+    pass
 @configclass
 class CUHKLRLSiriusWActionsCfg(ActionsCfg):
     """Action specifications for the MDP."""
@@ -32,7 +66,30 @@ class CUHKLRLSiriusWActionsCfg(ActionsCfg):
     joint_vel = mdp.JointVelocityActionCfg(
         asset_name="robot", joint_names=[""], scale=5.0, use_default_offset=True, clip=None, preserve_order=True
     )
-
+@configclass
+class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
+    """Action specifications for the MDP."""
+    # # 新增基于地形的目标位姿命令
+    # goal_pose = TerrainBasedPose2dCommandCfg(
+    #     asset_name="robot",
+    #     resampling_time_range=(20.0, 20.0),  # 关键动作阶段不换目标；也可在事件里显式重采样
+    #     debug_vis=True,                      # 可视化目标箭头
+    #     simple_heading=True,                 # 默认正对目标；需要“贴边”时可改 False 并自行给 heading
+    #     ranges=TerrainBasedPose2dCommandCfg.Ranges(
+    #         heading=(0.0, 3.14), # useless if simple_heading=True
+    #     ),
+    # )
+    posture = UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name="trunk",
+        make_quat_unique=True,                   # 规范化四元数，避免 ±q 二义性
+        resampling_time_range=(100.0, 100.0),        # 每步重采样，但我们用零宽范围将其钉住
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.0, 0.0), pos_y=(0.0, 0.0), pos_z=(2.0, 2.0),
+            roll=(0.0, 0.0), pitch=(0.0, 0.0), yaw=(0.0, 0.0)  # 初始“平”
+        ),
+    )
 
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
@@ -53,14 +110,15 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     handstand_feet_height_exp = RewTerm(
         func=mdp.handstand_feet_height_exp,
         weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot"), "target_height": 0.0, "std": math.sqrt(0.25)},
+        params={"asset_cfg": SceneEntityCfg("robot"), "target_height": 0.0, "std": math.sqrt(0.25), "command_name": "posture"},
     )
 
     handstand_feet_on_air = RewTerm(
         func=mdp.handstand_feet_on_air,
         weight=0.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "sensor_cfg": SceneEntityCfg("contact_forces"),
+            "command_name": "posture",
         },
     )
 
@@ -68,7 +126,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         func=mdp.handstand_feet_air_time,
         weight=0.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "sensor_cfg": SceneEntityCfg("contact_forces"),
+            "command_name": "posture",
             "threshold": 5.0,
         },
     )
@@ -77,7 +136,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         func=mdp.handstand_orientation_l2,
         weight=0.0,
         params={
-            "target_gravity": [],
+            "target_gravity": None,
+            "command_name": "posture",
         },
     )
 
@@ -86,7 +146,9 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
 class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: CUHKLRLSiriusWActionsCfg = CUHKLRLSiriusWActionsCfg()
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
-
+    commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
+    curriculum: CUHKLRLSiriusWCurriculumCfg = CUHKLRLSiriusWCurriculumCfg()
+    events: CUHKLRLSiriusWEventCfg = CUHKLRLSiriusWEventCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT_link"
     wheel_joint_name = ".*_WHEEL"
@@ -225,13 +287,13 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity = mdp.UniformThresholdVelocityCommandCfg(
             asset_name="robot",
             resampling_time_range=(20.0, 20.0),
-            rel_standing_envs=0.02,
-            rel_heading_envs=0.0,
-            heading_command=False,
+            rel_standing_envs=0.05,
+            rel_heading_envs=0.5,
+            heading_command=True,
             heading_control_stiffness=0.5,
             debug_vis=False,
             ranges=mdp.UniformThresholdVelocityCommandCfg.Ranges(
-                lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
+                lin_vel_x=(-1.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
                 # lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)
             ),
         )
@@ -239,7 +301,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = 0.0
         self.rewards.ang_vel_xy_l2.weight = 0.0
         self.rewards.flat_orientation_l2.weight = 0.0
-        self.rewards.base_height_l2.weight = -3.5
+        self.rewards.base_height_l2.weight = -0.5
         self.rewards.base_height_l2.params["target_height"] = 1.2
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
@@ -278,10 +340,10 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Velocity-tracking rewards
         # self.rewards.track_lin_vel_xy_exp.weight = 1.5
         # self.rewards.track_ang_vel_z_exp.weight = 1.0
-        self.rewards.track_lin_vel_xy_exp.weight = 0.01
-        self.rewards.track_ang_vel_z_exp.weight = 2.0
+        self.rewards.track_lin_vel_xy_exp.weight = 3.5
+        self.rewards.track_ang_vel_z_exp.weight = 1.5
         self.rewards.track_lin_vel_xy_exp.func = mdp.track_lin_vel_x_world_exp
-        self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_world_exp
+        self.rewards.track_ang_vel_z_exp.func = mdp.track_ang_vel_z_base_exp
         self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
         self.rewards.track_ang_vel_z_exp.params["std"] = 0.5
         # Others
@@ -322,33 +384,39 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_continue_contact.params["expect_contact_num"] = 2
         # self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # HandStand
-        handstand_type = "front"  # which leg on air, can be "front", "back", "left", "right"
-        if handstand_type == "front":
-            air_foot_name = ".*F_FOOT_link"
-            self.rewards.handstand_orientation_l2.weight = -5.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.5
-        elif handstand_type == "back":
-            air_foot_name = ".*H_FOOT_link"
-            self.rewards.handstand_orientation_l2.weight = -5.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.5
-        elif handstand_type == "left":
-            air_foot_name = "L.*_FOOT_link"
-            self.rewards.handstand_orientation_l2.weight = -5.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, -1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.4
-        elif handstand_type == "right":
-            air_foot_name = "R.*_FOOT_link"
-            self.rewards.handstand_orientation_l2.weight = -5.0
-            self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 1.0, 0.0]
-            self.rewards.handstand_feet_height_exp.params["target_height"] = 1.4
+        # handstand_type = "front"  # which leg on air, can be "front", "back", "left", "right"
+        # if handstand_type == "front":
+        #     air_foot_name = ".*F_FOOT_link"
+        #     self.rewards.handstand_orientation_l2.weight = -5.0
+        #     self.rewards.handstand_orientation_l2.params["target_gravity"] = [-1.0, 0.0, 0.0]
+        #     self.rewards.handstand_feet_height_exp.params["target_height"] = 1.2
+        # elif handstand_type == "back":
+        #     air_foot_name = ".*H_FOOT_link"
+        #     self.rewards.handstand_orientation_l2.weight = -5.0
+        #     self.rewards.handstand_orientation_l2.params["target_gravity"] = [1.0, 0.0, 0.0]
+        #     self.rewards.handstand_feet_height_exp.params["target_height"] = 1.2
+        # elif handstand_type == "left":
+        #     air_foot_name = "L.*_FOOT_link"
+        #     self.rewards.handstand_orientation_l2.weight = -5.0
+        #     self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, -1.0, 0.0]
+        #     self.rewards.handstand_feet_height_exp.params["target_height"] = 1.2
+        # elif handstand_type == "right":
+        #     air_foot_name = "R.*_FOOT_link"
+        #     self.rewards.handstand_orientation_l2.weight = -5.0
+        #     self.rewards.handstand_orientation_l2.params["target_gravity"] = [0.0, 1.0, 0.0]
+        #     self.rewards.handstand_feet_height_exp.params["target_height"] = 1.2
+        # self.rewards.handstand_feet_height_exp.weight = 10
+        # self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
+        # self.rewards.handstand_feet_on_air.weight = 5.0
+        # self.rewards.handstand_feet_on_air.params["sensor_cfg"].body_names = [air_foot_name]
+        # self.rewards.handstand_feet_air_time.weight = 5.0
+        # self.rewards.handstand_feet_air_time.params["sensor_cfg"].body_names = [air_foot_name]
+
+        self.rewards.handstand_orientation_l2.weight = -5.0
+        self.rewards.handstand_feet_height_exp.params["target_height"] = 1.2
         self.rewards.handstand_feet_height_exp.weight = 10
-        self.rewards.handstand_feet_height_exp.params["asset_cfg"].body_names = [air_foot_name]
         self.rewards.handstand_feet_on_air.weight = 5.0
-        self.rewards.handstand_feet_on_air.params["sensor_cfg"].body_names = [air_foot_name]
         self.rewards.handstand_feet_air_time.weight = 5.0
-        self.rewards.handstand_feet_air_time.params["sensor_cfg"].body_names = [air_foot_name]
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWStandEnvCfg":
             self.disable_zero_weight_rewards()
@@ -361,7 +429,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 0.5)
         # self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         # self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.lin_vel_x = (-0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.heading = (-3.14, 3.14)

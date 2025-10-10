@@ -12,7 +12,7 @@ from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
-
+from isaaclab.utils import math as math_utils
 
 def randomize_rigid_body_inertia(
     env: ManagerBasedEnv,
@@ -243,3 +243,38 @@ def set_joint_positions_simple(env: ManagerBasedRLEnv, env_ids, joint_pos: dict)
 
     # 写回仿真
     robot.write_joint_state_to_sim(q, dq)
+
+from isaaclab.envs.mdp.commands.commands_cfg import UniformPoseCommandCfg
+import math
+POSTURE_SET = ("flat", "front", "back", "left", "right")
+_PRESETS_RP = {
+    "flat":  (0.0,  0.0),
+    "front": (0.0,  +0.5 * math.pi),
+    "back":  (0.0,  -0.5 * math.pi),
+    "left":  (-0.5 * math.pi, 0.0),
+    "right": (+0.5 * math.pi, 0.0),
+}
+
+def sample_posture_ranges(env, env_ids, old_ranges, *, probs=(0.2,)*5, band=1e-3, yaw_band=0.0, force=None):
+    """
+    返回一个新的 UniformPoseCommandCfg.Ranges：
+    - 若 force 给定（'flat'/'front'/...），就用它；否则按 probs 采样一种。
+    - 把 roll/pitch 设为 [target - band, target + band] 的窄区间，yaw 也给一个很小窗口。
+    """
+    import torch
+    device = env.device
+    if force is None:
+        p = torch.tensor(probs, device=device, dtype=torch.float32)
+        if not torch.isclose(p.sum(), torch.tensor(1.0, device=device)):
+            p = p / p.sum()
+        idx = torch.multinomial(p, 1).item()
+        name = POSTURE_SET[idx]
+    else:
+        name = force
+    r_tgt, p_tgt = _PRESETS_RP[name]
+    return UniformPoseCommandCfg.Ranges(
+        pos_x=(0.0, 0.0), pos_y=(0.0, 0.0), pos_z=(0.0, 0.0),
+        roll=(r_tgt - band, r_tgt + band),
+        pitch=(p_tgt - band, p_tgt + band),
+        yaw=(-yaw_band, +yaw_band),
+    )

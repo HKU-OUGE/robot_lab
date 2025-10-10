@@ -91,32 +91,46 @@ def track_lin_vel_xy_yaw_frame_exp(
     return reward
 
 def track_lin_vel_x_world_exp(
-    env, command_name: str, std: float,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    command_name: str,  # 通常是 "base_velocity"
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """世界系 x 方向线速度跟踪（指数核）"""
     asset = env.scene[asset_cfg.name]
-    cmd_b = env.command_manager.get_command("base_velocity")[:, :2]          # [N,2]  (vx^b, vy^b)
-    quat_w = asset.data.root_link_quat_w                                     # [N,4], wxyz
-    cmd_b3 = torch.cat([cmd_b, torch.zeros_like(cmd_b[:, :1])], dim=1)       # [N,3]
-    cmd_w3 = math_utils.quat_apply_yaw(quat_w, cmd_b3)                 # 旋到世界
-    v_cmd_x_world = cmd_w3[:, 0]
-    v_x_w   = asset.data.root_com_lin_vel_w[:, 0]                               # 实际 vx（世界系）
-    err = (v_cmd_x_world - v_x_w).pow(2)
-    rew = torch.exp(-err / (std**2))
-    rew *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+
+    # 1) 取命令的 (vx^b, vy^b)，扩到 3D 向量，z=0
+    cmd_b = env.command_manager.get_command(command_name)[:, :2]           # [N,2]
+    cmd_b3 = torch.cat([cmd_b, torch.zeros_like(cmd_b[:, :1])], dim=1)     # [N,3]
+
+    # 2) 仅用 yaw 把命令旋到世界系（忽略 pitch/roll）
+    #    quat_apply_yaw 文档：只绕航向旋转向量
+    quat_w = asset.data.root_link_quat_w                                   # [N,4], wxyz
+    cmd_w3 = math_utils.quat_apply_yaw(quat_w, cmd_b3)                     # [N,3]
+    v_cmd_x_w = cmd_w3[:, 0]                                               # 目标世界 x 速度
+
+    # 3) 实际世界 x 速度（用 root_com_lin_vel_w）
+    v_x_w = asset.data.root_com_lin_vel_w[:, 0]
+
+    # 4) 指数核
+    err = (v_cmd_x_w - v_x_w).pow(2)
+    rew = torch.exp(-err / (std ** 2))
+
+    # 5) 不要再用 “-projected_gravity_b[:,2]” 去关停奖励（会在站立时 → 0）
+    #    如需门控，可改用与“竖直更友好”的 gate（见上文）
     return rew
 
-def track_ang_vel_z_world_exp(
-    env, command_name: str, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+def track_ang_vel_z_base_exp(
+    env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """Reward tracking of angular velocity commands (yaw) in world frame using exponential kernel."""
+    """Reward tracking of angular velocity commands (yaw) using exponential kernel."""
     # extract the used quantities (to enable type-hinting)
-    asset = env.scene[asset_cfg.name]
-    ang_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_w[:, 2])
+    asset: RigidObject = env.scene[asset_cfg.name]
+    # compute the error
+    ang_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_b[:, 2])
     reward = torch.exp(-ang_vel_error / std**2)
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    # reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
+
 
 def joint_power(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Reward joint_power"""
