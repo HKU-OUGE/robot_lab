@@ -7,7 +7,7 @@ from isaaclab.managers import CurriculumTermCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CurriculumCfg, CommandsCfg, EventCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CurriculumCfg, CommandsCfg, EventCfg, ObservationsCfg
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
@@ -33,7 +33,7 @@ class CUHKLRLSiriusWEventCfg(EventCfg):
             "modify_fn": mdp.sample_posture_ranges,
             # 例：完全固定 flat；也可以用 probs 等概率
             "modify_params": {
-                "probs": (0.3, 0.35, 0.35, 0.0, 0.0),
+                "probs": (0.0, 0.5, 0.5, 0.0, 0.0),
                 "force": None,     # 若 force 给定（'flat'/'front'/...），就用它；否则按 probs 采样一种
                 "band": 1e-3,
                 "yaw_band": 0.0,
@@ -92,6 +92,48 @@ class CUHKLRLSiriusWCommandsCfg(CommandsCfg):
     )
 
 @configclass
+class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
+    """Reward terms for the MDP."""
+    @configclass
+    class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
+        # # ... 你已有的观测项
+        # obs_scan = ObsTerm(
+        #             func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
+        #             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #             # 根据需要保留噪声，或设为 0
+        #             noise=Unoise(n_min=0.0, n_max=0.0),
+        #             clip=(0.0, 1.0),
+        #             scale=1.0,
+        #         )
+        pose_commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "posture"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        obs_scan = None
+    @configclass
+    class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
+        # # ... 你已有的观测项
+        # obs_scan = ObsTerm(
+        #             func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
+        #             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+        #             # 根据需要保留噪声，或设为 0
+        #             noise=Unoise(n_min=0.0, n_max=0.0),
+        #             clip=(0.0, 1.0),
+        #             scale=1.0,
+        #         )
+        pose_commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "posture"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        obs_scan = None
+
+    policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
+    critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
+@configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     """Reward terms for the MDP."""
 
@@ -149,6 +191,7 @@ class CUHKLRLSiriusWStandEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     curriculum: CUHKLRLSiriusWCurriculumCfg = CUHKLRLSiriusWCurriculumCfg()
     events: CUHKLRLSiriusWEventCfg = CUHKLRLSiriusWEventCfg()
+    observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT_link"
     wheel_joint_name = ".*_WHEEL"
