@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlSymmetryCfg
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlSymmetryCfg, RslRlPpoActorCriticRecurrentCfg
 from robot_lab.tasks.locomotion.velocity.mdp.symmetry import siriusw
 
 
@@ -119,17 +119,21 @@ class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 32
+    num_steps_per_env = 64
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_ring"
-    policy = RslRlPpoActorCriticCfg(
-        init_noise_std=0.8,
-        actor_obs_normalization=False,
-        critic_obs_normalization=False,
+    obs_groups = {"policy": ["policy"], "critic": ["critic"]}
+    policy = RslRlPpoActorCriticRecurrentCfg(
+        init_noise_std=1.0,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
+        rnn_type="lstm",          # 或 "gru"
+        rnn_hidden_dim=128,
+        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -145,6 +149,7 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
 
 @configclass
 class CUHKLRLSiriusWFlatPPORunnerCfg(CUHKLRLSiriusWRoughPPORunnerCfg):

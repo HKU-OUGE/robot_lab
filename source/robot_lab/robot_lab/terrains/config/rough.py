@@ -94,7 +94,7 @@ EASY_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
 )
 
 EASY_BOX_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(9.0, 9.0),
+    size=(15.0, 15.0),
     border_width=20.0,
     num_rows=15,
     num_cols=20,
@@ -104,20 +104,27 @@ EASY_BOX_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
+            proportion=0.5,
             step_height_range=(0.05, 1.5),
             step_width=2.0,
-            platform_width=3.0,
+            platform_width=6.0,
             border_width=2.0,
             holes=False,
         ),
-        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.05, 1.5),
-            step_width=2.0,
-            platform_width=3.0,
-            border_width=2.0,
-            holes=False,
+        # "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.05, 1.5),
+        #     step_width=2.0,
+        #     platform_width=6.0,
+        #     border_width=2.0,
+        #     holes=False,
+        # ),
+        "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
+            proportion=0.5,                     
+            pit_depth_range=(0.05, 1.5),              # 坑的深度范围
+            platform_width=6.0,                      # 中心平台宽度
+            double_pit=True,                         # 启用双层坑（更难）
+            size=(15.0, 15.0),                       # 每块子地形的大小
         ),
         # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
         #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
