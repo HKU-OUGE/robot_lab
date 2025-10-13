@@ -128,8 +128,8 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         init_noise_std=1.0,
         actor_obs_normalization=True,
         critic_obs_normalization=True,
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+        actor_hidden_dims=[256, 256],
+        critic_hidden_dims=[256, 256],
         activation="elu",
         rnn_type="lstm",          # 或 "gru"
         rnn_hidden_dim=128,
