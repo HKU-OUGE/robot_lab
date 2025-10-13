@@ -132,22 +132,22 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         critic_hidden_dims=[256, 256],
         activation="elu",
         rnn_type="lstm",          # 或 "gru"
-        rnn_hidden_dim=128,
+        rnn_hidden_dim=256,
         rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
+        entropy_coef=0.005,
         num_learning_epochs=5,
-        num_mini_batches=4,
-        learning_rate=1.0e-3,
+        num_mini_batches=8,
+        learning_rate=3e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
-        desired_kl=0.01,
-        max_grad_norm=1.0,
+        desired_kl=0.008,
+        max_grad_norm=0.5,
     )
 
 
