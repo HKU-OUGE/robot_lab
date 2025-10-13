@@ -205,7 +205,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
+        self.scene.terrain.terrain_generator=EASY_ROUGH_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
         #     update_period=1.0 / 30.0,          # 30 Hz
@@ -370,9 +370,9 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.5
+        self.rewards.joint_pos_penalty.weight = -0.2
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.abad_pos_penalty.weight = -0.5
+        self.rewards.abad_pos_penalty.weight = -0.1
         self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
             "LF_HAA", 
             "RF_HAA", 
