@@ -55,7 +55,7 @@ class MySceneCfg(InteractiveSceneCfg):
         # terrain_generator=SLOPE_TERRAINS_CFG,
         terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
-        max_init_terrain_level=0,
+        max_init_terrain_level=5,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -125,7 +125,7 @@ class MySceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    base_velocity = mdp.UniformVelocityCommandCfg(
+    base_velocity = mdp.UniformThresholdVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.02,
@@ -133,7 +133,7 @@ class CommandsCfg:
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
-        ranges=mdp.UniformVelocityCommandCfg.Ranges(
+        ranges=mdp.UniformThresholdVelocityCommandCfg.Ranges(
             lin_vel_x=(-1.0, 1.0), lin_vel_y=(-1.0, 1.0), ang_vel_z=(-1.0, 1.0), heading=(-math.pi, math.pi)
             # lin_vel_x=(0.0, 1.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0), heading=(-math.pi, math.pi)
         ),
@@ -730,12 +730,12 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         # self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # GPU 碰撞内存配置
-        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 * 2
-        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 * 2
-        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 * 2
-        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 * 2
-        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 * 2
-        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 * 2
+        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 
+        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 
+        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 
+        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 
+        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 
+        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 
 
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)

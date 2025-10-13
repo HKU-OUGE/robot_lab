@@ -21,7 +21,7 @@ class UniformThresholdVelocityCommand(mdp.UniformVelocityCommand):
     def _resample_command(self, env_ids: Sequence[int]):
         super()._resample_command(env_ids)
         # set small commands to zero
-        self.vel_command_b[env_ids, :2] *= (torch.norm(self.vel_command_b[env_ids, :2], dim=1) > 0.2).unsqueeze(1)
+        self.vel_command_b[env_ids, :2] *= (torch.norm(self.vel_command_b[env_ids, :2], dim=1) > 0.3).unsqueeze(1)
 
 
 @configclass

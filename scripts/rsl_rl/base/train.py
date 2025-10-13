@@ -430,8 +430,8 @@ class ActorCriticSN(_BaseActorCritic):
             _apply_sn(self.critic, n_power_iterations)
 
 # ---- 最关键的一行：把默认类名映射到我们的 SN 版本（无需改任何 cfg）----
-import rsl_rl.modules.actor_critic as _ac
-_ac.ActorCritic = ActorCriticSN
+# import rsl_rl.modules.actor_critic as _ac
+# _ac.ActorCritic = ActorCriticSN
 # （可选）如果你在 cfg 里把 class_name 改成了 "ActorCriticSN"：
 # import rsl_rl.runners.on_policy_runner as _opr
 # _opr.ActorCriticSN = ActorCriticSN

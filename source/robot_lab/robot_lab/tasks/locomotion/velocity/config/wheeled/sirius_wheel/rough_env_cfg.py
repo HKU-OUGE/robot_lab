@@ -81,6 +81,17 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
             "stand_still_scale": 5.0,
+            "velocity_threshold": 0.3,
+            "command_threshold": 0.3,
+        },
+    )
+    abad_pos_penalty = RewTerm(
+        func=mdp.joint_pos_penalty,
+        weight=0.0,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stand_still_scale": 5.0,
             "velocity_threshold": 1.1,
             "command_threshold": 1.1,
         },
@@ -175,24 +186,24 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.front_height = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
-            ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
-        self.scene.back_height = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            offset=RayCasterCfg.OffsetCfg(pos=(-0.9, 0.0, 20.0)),
-            ray_alignment='yaw',
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
-        self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.front_height = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/base",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(0.9, 0.0, 20.0)),
+        #     ray_alignment='yaw',
+        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
+        #     debug_vis=False,
+        #     mesh_prim_paths=["/World/ground"],
+        # )
+        # self.scene.back_height = RayCasterCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/base",
+        #     offset=RayCasterCfg.OffsetCfg(pos=(-0.9, 0.0, 20.0)),
+        #     ray_alignment='yaw',
+        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.05, 0.05]),
+        #     debug_vis=False,
+        #     mesh_prim_paths=["/World/ground"],
+        # )
+        # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
@@ -318,8 +329,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.2)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 3.0)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 3.0)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -361,6 +372,17 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.5
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.abad_pos_penalty.weight = -0.5
+        self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
+            "LF_HAA", 
+            "RF_HAA", 
+            "LH_HAA", 
+            "RH_HAA", 
+            "LF_HFE", 
+            "RF_HFE", 
+            "LH_HFE", 
+            "RH_HFE", 
+        ]
         self.rewards.wheel_vel_penalty.weight = 0
         self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -369,7 +391,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.005
+        self.rewards.action_rate_l2.weight = -0.01
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -2.0
@@ -414,8 +436,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
-        self.rewards.upward.weight = 0.0
-        self.rewards.joint_mirror.weight = -0.05
+        self.rewards.upward.weight = 1.0
+        self.rewards.joint_mirror.weight = 0.0
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
             ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
@@ -435,4 +457,4 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
         self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
-        self.curriculum.command_levels.params["range_multiplier"] = (0.5, 1.0)
+        self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
