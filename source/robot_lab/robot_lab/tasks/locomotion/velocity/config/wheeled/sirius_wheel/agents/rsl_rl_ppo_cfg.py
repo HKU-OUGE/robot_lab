@@ -12,7 +12,7 @@ class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_rough"
-    empirical_normalization = False
+    obs_groups = {"policy": ["policy"], "critic": ["critic"]}
     policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
         actor_obs_normalization=True,
@@ -21,8 +21,8 @@ class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
         rnn_type="gru",          # 或 "gru"/"lstm"
-        rnn_hidden_dim=512,
-        rnn_num_layers=2,
+        rnn_hidden_dim=256,
+        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -30,12 +30,12 @@ class CUHKLRLSiriusWRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.01,
         num_learning_epochs=5,
-        num_mini_batches=8,
-        learning_rate=5.0e-4,
+        num_mini_batches=4,
+        learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
-        desired_kl=0.005,
+        desired_kl=0.01,
         max_grad_norm=1.0,
     )
 @configclass
@@ -137,22 +137,22 @@ class CUHKLRLSiriusWRingPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
         rnn_type="gru",          # 或 "gru"/"lstm"
-        rnn_hidden_dim=512,
-        rnn_num_layers=2,
+        rnn_hidden_dim=256,
+        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.008,
+        entropy_coef=0.01,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1e-3,
+        learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
         desired_kl=0.01,
-        max_grad_norm=0.5,
+        max_grad_norm=1.0,
     )
 
 

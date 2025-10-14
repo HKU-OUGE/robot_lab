@@ -339,7 +339,7 @@ class CustomRecordVideo(RecordVideo):
         stream.width, stream.height = self.video_resolution
         stream.pix_fmt = "yuv420p"
         # CRF defines video quality
-        stream.options = {"crf": str(self.video_crf), "preset": "veryslow"}
+        stream.options = {"crf": str(self.video_crf), "preset": "ultrafast"}
         for fr in frames:
             vf = av.VideoFrame.from_ndarray(fr, format="rgb24")
             vf = vf.reformat(width=self.video_resolution[0], height=self.video_resolution[1])
@@ -529,7 +529,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "disable_logger": True,
             "enable_wandb": (agent_cfg.logger == "wandb"),
             "wandb_key": "train/video",
-            "video_resolution": (1280, 720),
+            "video_resolution": (640, 360),
             "video_crf": 30,
         }
         print("[INFO] Recording videos during training.")
