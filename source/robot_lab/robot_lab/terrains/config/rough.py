@@ -93,6 +93,46 @@ EASY_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
     },
 )
 
+EASY_PIT_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=15,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
+            proportion=0.3,                     
+            pit_depth_range=(0.0, 0.23),              # 坑的深度范围
+            platform_width=3.0,                      # 中心平台宽度
+            double_pit=True,                         # 启用双层坑（更难）
+            size=(8.0, 8.0),                       # 每块子地形的大小
+        ),
+        # "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+        #     proportion=0.2,
+        #     step_height_range=(0.05, 0.23),
+        #     step_width=0.3,
+        #     platform_width=3.0,
+        #     border_width=1.0,
+        #     holes=False,
+        # ),
+        "box": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
+            proportion=0.3, grid_width=0.45, box_height_range=(0.00, 0.23), platform_width=3.0, double_box=True,size=(8.0, 8.0), 
+        ),
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.02, border_width=0.25
+        ),
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        ),
+    },
+)
+
 EASY_BOX_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(15.0, 15.0),
     border_width=20.0,
