@@ -179,25 +179,25 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
-        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
-        #     "LF_HAA": 0.00,
-        #     "LH_HAA": 0.00,
-        #     "RF_HAA": -0.00,
-        #     "RH_HAA": -0.00,
-        #     "LF_HFE": 0.2,
-        #     "LH_HFE": -0.2,
-        #     "RF_HFE": 0.2,
-        #     "RH_HFE": -0.2,
-        #     "LF_KNEE": -1.2,
-        #     "LH_KNEE": 1.2,
-        #     "RF_KNEE": -1.2,
-        #     "RH_KNEE": 1.2,
-        #     "LF_WHEEL": 0.00,
-        #     "LH_WHEEL": 0.00,
-        #     "RF_WHEEL": 0.00,
-        #     "RH_WHEEL": 0.00,
-        # }
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.5)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
+            "LF_HAA": 0.00,
+            "LH_HAA": 0.00,
+            "RF_HAA": -0.00,
+            "RH_HAA": -0.00,
+            "LF_HFE": 0.52,
+            "LH_HFE": -0.52,
+            "RF_HFE": 0.52,
+            "RH_HFE": -0.52,
+            "LF_KNEE": -1.6,
+            "LH_KNEE": 1.6,
+            "RF_KNEE": -1.6,
+            "RH_KNEE": 1.6,
+            "LF_WHEEL": 0.00,
+            "LH_WHEEL": 0.00,
+            "RF_WHEEL": 0.00,
+            "RH_WHEEL": 0.00,
+        }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
