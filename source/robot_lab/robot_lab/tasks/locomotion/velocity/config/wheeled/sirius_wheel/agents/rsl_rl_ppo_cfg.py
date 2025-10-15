@@ -96,16 +96,21 @@ class CUHKLRLSiriusWBackFlipPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
-    max_iterations = 3000
+    num_steps_per_env = 32
+    max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_pit"
-    empirical_normalization = False
-    policy = RslRlPpoActorCriticCfg(
+    obs_groups = {"policy": ["policy"], "critic": ["critic"]}
+    policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
+        actor_obs_normalization=True,
+        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
+        rnn_type="gru",          # 或 "gru"/"lstm"
+        rnn_hidden_dim=256,
+        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,

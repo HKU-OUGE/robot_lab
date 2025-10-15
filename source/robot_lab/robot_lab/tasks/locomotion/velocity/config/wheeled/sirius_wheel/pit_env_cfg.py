@@ -6,7 +6,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg, TerminationsCfg
+from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import ActionsCfg, LocomotionVelocityRoughEnvCfg, RewardsCfg, CommandsCfg, ObservationsCfg, TerminationsCfg, EventCfg
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns, CameraCfg
@@ -20,6 +20,19 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_CFG  # isort: skip
 from robot_lab.terrains.config.rough import *
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
+
+@configclass
+class CUHKLRLSiriusWEventCfg(EventCfg):
+    set_discrete_basevel_ranges = EventTerm(
+        func=mdp.set_discrete_basevel_ranges,
+        mode="reset",   # 只在开局改一次范围；若要持续重采样，见下个“interval”示例
+        params={
+            "term_name": "base_velocity",  # ← 这里从 command_name 改成 term_name
+            "heading_value": 0.0,          # 固定朝向：0 朝 +x；要朝 -x 改为 math.pi
+            "speed_abs": 0.4,              # |v_x|
+            "include_zero": True,          # v_x ∈ {+0.4, 0, -0.4}
+        },
+    )
 
 @configclass
 class CUHKLRLSiriusWActionsCfg(ActionsCfg):
@@ -144,6 +157,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
     observations: CUHKLRLSiriusWObservationsCfg = CUHKLRLSiriusWObservationsCfg()
     terminations: CUHKLRLSiriusWTerminationsCfg = CUHKLRLSiriusWTerminationsCfg()
+    events: CUHKLRLSiriusWEventCfg = CUHKLRLSiriusWEventCfg()
     base_link_name = "trunk"
     foot_link_name = ".*_FOOT_link"
     calf_link_name = ".*_shank_link"
@@ -454,8 +468,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
+        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        self.commands.base_velocity.resampling_time_range = (0.0, 0.0)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)

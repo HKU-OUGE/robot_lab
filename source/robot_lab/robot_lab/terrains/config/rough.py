@@ -119,7 +119,7 @@ EASY_PIT_TERRAINS_CFG = TerrainGeneratorCfg(
         #     holes=False,
         # ),
         "box": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
-            proportion=0.3, grid_width=0.45, box_height_range=(0.00, 0.23), platform_width=3.0, double_box=True,size=(8.0, 8.0), 
+            proportion=0.3, box_height_range=(0.00, 0.23), platform_width=3.0, double_box=True, size=(8.0, 8.0), 
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.1, noise_range=(0.01, 0.05), noise_step=0.02, border_width=0.25

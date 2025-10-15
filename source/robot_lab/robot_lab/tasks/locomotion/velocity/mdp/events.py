@@ -278,3 +278,73 @@ def sample_posture_ranges(env, env_ids, old_ranges, *, probs=(0.2,)*5, band=1e-3
         pitch=(p_tgt - band, p_tgt + band),
         yaw=(-yaw_band, +yaw_band),
     )
+
+@torch.no_grad()
+def set_discrete_basevel_ranges(
+    env: ManagerBasedRLEnv,
+    env_ids: Sequence[int],
+    *,
+    heading_value: float = 0.0,   # 固定朝向（弧度），0 面向 +x，pi 面向 -x
+    speed_abs: float = 0.4,       # 线速度幅值
+    include_zero: bool = True,    # 是否允许 0 速度桶
+    term_name: str = "base_velocity",
+) -> None:
+    """
+    在 reset 时，按离散桶为子环境设置“采样范围”，并调用命令项自身的 reset(env_ids) 完成重采样。
+    - 不直接写 command tensor，而是通过修改 cfg.ranges 并立刻按子集 reset 来实现离散取值：
+        { +speed_abs }, { 0 }, { -speed_abs }
+    - 同时固定 heading，禁用侧移与自转。
+
+    参数
+    ----
+    env : Isaac Lab 的 ManagerBasedRLEnv
+    env_ids : 需要应用本事件的子环境 id 列表
+    heading_value : 固定期望朝向（rad），例如 0 或 pi
+    speed_abs : 线速度幅值（m/s）
+    include_zero : 是否包含 0 速度的桶
+    term_name : 命令项名称（默认 "base_velocity"）
+    """
+    if len(env_ids) == 0:
+        return
+
+    # 取得命令项（注意：没有 get_term_cfg）
+    cmd_mgr = env.command_manager
+    term = cmd_mgr.get_term(term_name)  # CommandTerm
+    cfg = term.cfg                      # CommandTermCfg（UniformVelocityCommandCfg）
+
+    # 先设置与“对准箱子/固定朝向且不转弯”相关的范围
+    cfg.heading_command = True
+    cfg.ranges.heading = (float(heading_value), float(heading_value))
+    cfg.ranges.lin_vel_y = (0.0, 0.0)
+    cfg.ranges.ang_vel_z = (0.0, 0.0)
+
+    # 把 env_ids 打乱并划分桶：前进 / （可选）零速 / 后退
+    env_ids_t = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    n = int(env_ids_t.numel())
+    perm = env_ids_t[torch.randperm(n, device=env.device)]
+
+    if include_zero:
+        n_fwd = int(math.ceil(n / 3.0))
+        n_zero = int(math.floor(n / 3.0))
+        n_back = n - n_fwd - n_zero
+    else:
+        n_fwd = n // 2
+        n_zero = 0
+        n_back = n - n_fwd
+
+    idx_fwd = perm[:n_fwd]
+    idx_zero = perm[n_fwd:n_fwd + n_zero] if n_zero > 0 else torch.empty(0, dtype=torch.long, device=env.device)
+    idx_back = perm[n_fwd + n_zero:]
+
+    # 关键：对不同桶“临时设置 lin_vel_x 的采样范围”，并仅对该桶重采样
+    if idx_fwd.numel() > 0:
+        cfg.ranges.lin_vel_x = (float(speed_abs), float(speed_abs))  # 退化为常数 → 离散 +speed_abs
+        term.reset(idx_fwd.tolist())
+
+    if idx_zero.numel() > 0:
+        cfg.ranges.lin_vel_x = (0.0, 0.0)                            # 离散 0
+        term.reset(idx_zero.tolist())
+
+    if idx_back.numel() > 0:
+        cfg.ranges.lin_vel_x = (-float(speed_abs), -float(speed_abs))  # 离散 -speed_abs
+        term.reset(idx_back.tolist())
