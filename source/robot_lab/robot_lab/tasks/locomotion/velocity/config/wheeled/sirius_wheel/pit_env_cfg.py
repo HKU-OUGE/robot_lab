@@ -23,16 +23,17 @@ from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
 
 @configclass
 class CUHKLRLSiriusWEventCfg(EventCfg):
-    set_discrete_basevel_ranges = EventTerm(
-        func=mdp.set_discrete_basevel_ranges,
-        mode="reset",   # 只在开局改一次范围；若要持续重采样，见下个“interval”示例
-        params={
-            "term_name": "base_velocity",  # ← 这里从 command_name 改成 term_name
-            "heading_value": 0.0,          # 固定朝向：0 朝 +x；要朝 -x 改为 math.pi
-            "speed_abs": 0.4,              # |v_x|
-            "include_zero": True,          # v_x ∈ {+0.4, 0, -0.4}
-        },
-    )
+    # set_discrete_basevel_ranges = EventTerm(
+    #     func=mdp.set_discrete_basevel_ranges,
+    #     mode="reset",   # 只在开局改一次范围；若要持续重采样，见下个“interval”示例
+    #     params={
+    #         "term_name": "base_velocity",  # ← 这里从 command_name 改成 term_name
+    #         "heading_value": 0.0,          # 固定朝向：0 朝 +x；要朝 -x 改为 math.pi
+    #         "speed_abs": 0.4,              # |v_x|
+    #         "include_zero": False,          # v_x ∈ {+0.4, 0, -0.4}
+    #     },
+    # )
+    events = None
 
 @configclass
 class CUHKLRLSiriusWActionsCfg(ActionsCfg):
@@ -330,7 +331,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "z": (0.0, 0.2),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
-                "yaw": (-3.14, 3.14),
+                "yaw": (0.0, 0.0),
             },
             "velocity_range": {
                 "x": (-0.5, 0.5),
@@ -468,9 +469,10 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (0.4, 0.4)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
         self.commands.base_velocity.ranges.heading = (0.0, 0.0)
-        self.commands.base_velocity.resampling_time_range = (0.0, 0.0)
+        self.commands.base_velocity.resampling_time_range = (100.0, 100.0)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
+        self.curriculum.command_levels = None
