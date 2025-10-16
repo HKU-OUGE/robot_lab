@@ -223,6 +223,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.terrain.terrain_generator=EASY_PIT_TERRAINS_CFG # 前2K轮
         # self.scene.terrain.terrain_generator=HARD1_PIT_TERRAINS_CFG # 中间1K轮
         self.scene.terrain.terrain_generator=HARD2_PIT_TERRAINS_CFG # 随后1K轮
+        # self.scene.terrain.terrain_generator=FINE1_PIT_TERRAINS_CFG # FINE TUNE
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
         #     update_period=1.0 / 30.0,          # 30 Hz
@@ -348,8 +349,8 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         # 前2K轮
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.6, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.2, 1.2)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
         # self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.2)
         # self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.6, 1.0)
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
@@ -360,7 +361,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = 0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -1.0
+        self.rewards.lin_vel_z_l2.weight = -1.0 # 前4K轮 <1m
+        self.rewards.lin_vel_z_l2.weight = -0.5 # 随后1K轮 >1m
+        self.rewards.lin_vel_z_l2.weight = 0.0 # Fine tune
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
         self.rewards.base_height_l2.weight = 0
@@ -391,9 +394,13 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_pos_penalty.weight = -0.2
+        # self.rewards.joint_pos_penalty.weight = -0.2 # 前3K轮
+        self.rewards.joint_pos_penalty.weight = -0.1 # 随后2K
+        # self.rewards.joint_pos_penalty.weight = -0.2 # fine tune
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.abad_pos_penalty.weight = -0.1
+        # self.rewards.abad_pos_penalty.weight = -0.1 # 前3K轮
+        self.rewards.abad_pos_penalty.weight = -0.05 # >0.8m
+        # self.rewards.abad_pos_penalty.weight = -0.1 # <0.8m / fine tune
         self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
             "LF_HAA", 
             "RF_HAA", 
@@ -419,9 +426,9 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name})).*"
-        ]
+        # self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [ # 前4K轮 <1m
+        #     f"^(?!.*({self.foot_link_name})).*"
+        # ]
         self.rewards.knee_undesired_contacts.weight = 0.0
         self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = self.calf_link_name
         self.rewards.contact_forces.weight = -1.5e-4
