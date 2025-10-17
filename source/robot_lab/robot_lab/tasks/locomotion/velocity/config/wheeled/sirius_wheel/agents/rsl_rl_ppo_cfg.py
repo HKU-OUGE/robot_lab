@@ -96,7 +96,7 @@ class CUHKLRLSiriusWBackFlipPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class CUHKLRLSiriusWPitPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 32
+    num_steps_per_env = 24
     max_iterations = 20000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_pit"
