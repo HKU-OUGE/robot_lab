@@ -223,6 +223,7 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.terrain.terrain_generator=EASY_PIT_TERRAINS_CFG # 前2K轮
         # self.scene.terrain.terrain_generator=HARD1_PIT_TERRAINS_CFG # 中间1K轮
         self.scene.terrain.terrain_generator=HARD2_PIT_TERRAINS_CFG # 随后1K轮
+        # self.scene.terrain.terrain_generator=HARD3_PIT_TERRAINS_CFG # 随后1K轮
         # self.scene.terrain.terrain_generator=FINE1_PIT_TERRAINS_CFG # FINE TUNE
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
