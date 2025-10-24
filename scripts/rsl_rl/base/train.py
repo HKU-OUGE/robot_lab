@@ -50,9 +50,9 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-# always enable cameras to record video
-if args_cli.video:
-    args_cli.enable_cameras = True
+# # always enable cameras to record video
+# if args_cli.video:
+#     args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -63,7 +63,12 @@ IS_DISTRIBUTED = (WORLD_SIZE > 1) or bool(args_cli.distributed)
 IS_MASTER = (LOCAL_RANK == 0)
 
 # enable camera only on master
-args_cli.enable_cameras = bool(args_cli.video and IS_MASTER)
+if args_cli.enable_cameras:
+    args_cli.enable_cameras = True
+elif args_cli.video:
+    args_cli.enable_cameras = bool(args_cli.video and IS_MASTER)
+# always enable cameras to record video
+
 
 # disable W&B in slaves
 if IS_DISTRIBUTED and not IS_MASTER:

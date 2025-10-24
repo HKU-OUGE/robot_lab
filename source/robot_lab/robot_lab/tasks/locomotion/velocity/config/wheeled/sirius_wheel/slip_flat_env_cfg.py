@@ -115,17 +115,14 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         # # ... 你已有的观测项
-        img_feat = ObsTerm(
-                    func=mdp.observations.image_features,                      # 调用离散化后的扫描函数
-                    params={
-                        "sensor_cfg": SceneEntityCfg("main_camera"),  # 关键：相机名
-                        "data_type": "rgb",                           # 也可 "distance_to_camera"
-                        "model_name": "resnet18",                     # 默认即 resnet18
-                        # "model_device": "cuda:0",                     # 可把特征提取放到独立设备
-                    },
-                    clip=None,
-                    scale=1.0,
-                )
+        # front_scan = ObsTerm(
+        #             func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+        #             params={"sensor_cfg": SceneEntityCfg("front_height")},
+        #             # 根据需要保留噪声，或设为 0
+        #             noise=Unoise(n_min=0.0, n_max=0.0),
+        #             clip=(0.0, 1.0),
+        #             scale=1.0,
+        #         )
         # back_scan = ObsTerm(
         #             func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
         #             params={"sensor_cfg": SceneEntityCfg("back_height")},
@@ -135,28 +132,13 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
         #             scale=1.0,
         #         )
         obs_scan = None
-    @configclass
-    class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
-        img_feat = ObsTerm(
-                    func=mdp.observations.image_features,                      # 调用离散化后的扫描函数
-                    params={
-                        "sensor_cfg": SceneEntityCfg("main_camera"),  # 关键：相机名
-                        "data_type": "rgb",                           # 也可 "distance_to_camera"
-                        "model_name": "resnet18",                     # 默认即 resnet18
-                        # "model_device": "cuda:0",                     # 可把特征提取放到独立设备
-                    },
-                    clip=None,
-                    scale=1.0,
-                )
-        obs_scan = None
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
-    critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
 
 
 
 @configclass
-class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
+class CUHKLRLSiriusWSlipFlatEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: CUHKLRLSiriusWActionsCfg = CUHKLRLSiriusWActionsCfg()
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
@@ -224,23 +206,23 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=EASY_ROUGH_TERRAINS_CFG
-        self.scene.main_camera = CameraCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
-            update_period=1.0 / 30.0,          # 30 Hz
-            height=120,
-            width=120,
-            data_types=["depth", "rgb"],
-            spawn=sim_utils.PinholeCameraCfg(
-                horizontal_aperture=20.955,    # mm
-                focal_length=11.0,             # mm →  FOV ≈ 2 * atan(0.5*A / f) ≈ 87°
-                clipping_range=(0.1, 10.0),    # m
-            ),
-            offset=CameraCfg.OffsetCfg(
-                pos=(0.45, 0.0, 0.0),
-                rot=(0.5, -0.5, 0.5, -0.5),
-                convention="ros"
-            ),
-        )
+        # self.scene.main_camera = CameraCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
+        #     update_period=1.0 / 30.0,          # 30 Hz
+        #     height=120,
+        #     width=120,
+        #     data_types=["depth"],
+        #     spawn=sim_utils.PinholeCameraCfg(
+        #         horizontal_aperture=20.955,    # mm
+        #         focal_length=11.0,             # mm →  FOV ≈ 2 * atan(0.5*A / f) ≈ 87°
+        #         clipping_range=(0.1, 10.0),    # m
+        #     ),
+        #     offset=CameraCfg.OffsetCfg(
+        #         pos=(0.45, 0.0, 0.0),
+        #         rot=(0.5, -0.5, 0.5, -0.5),
+        #         convention="ros"
+        #     ),
+        # )
         # self.scene.terrain.usd_path ="/home/ouge/Software/robot_lab/source/robot_lab/data/Terrains/Flat_Mountain_B/Flat_Mountain_B.usd"
         # self.scene.terrain = TerrainImporterCfg(
         #     prim_path="/World/ground",
@@ -348,8 +330,18 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 2.0)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 2.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.02, 0.05)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.01, 0.04)
+        self.events.randomize_rigid_body_material.params["restitution_range"] = (0.0, 0.03)
+
+        # 地面物理材质（冰面）
+        self.scene.terrain.physics_material = sim_utils.RigidBodyMaterialCfg(
+            static_friction=0.03,   # 典型冰面数量级
+            dynamic_friction=0.02,
+            restitution=0.0,
+            friction_combine_mode="min",  # 和上体材料取更小的那一个
+        )
+
         # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
         # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
 
@@ -463,7 +455,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
-        if self.__class__.__name__ == "CUHKLRLSiriusWRoughEnvCfg":
+        if self.__class__.__name__ == "CUHKLRLSiriusWSlipFlatEnvCfg":
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
@@ -472,6 +464,15 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
+        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator = None
+        # no height scan
+        self.scene.height_scanner = None
+        self.observations.policy.height_scan = None
+        self.observations.critic.height_scan = None
+        self.observations.policy.base_lin_vel = None
+        # no terrain curriculum
+        self.curriculum.terrain_levels = None
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
