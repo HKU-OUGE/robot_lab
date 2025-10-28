@@ -124,30 +124,61 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
     )
 @configclass
-class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
+class CUHKLRLSiriusWObservationsCfg(ObservationsCfg): #盲走去除
     """Reward terms for the MDP."""
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         # # ... 你已有的观测项
+        front_scan = ObsTerm(
+                    func=mdp.height_scan,                      # 调用离散化后的扫描函数
+                    params={"sensor_cfg": SceneEntityCfg("front_height")},
+                    # 根据需要保留噪声，或设为 0
+                    noise=Unoise(n_min=0.0, n_max=0.0),
+                    clip=(-2.0, 2.0),
+                    scale=1.0,
+                )
+        back_scan = ObsTerm(
+                    func=mdp.height_scan,                      # 调用离散化后的扫描函数
+                    params={"sensor_cfg": SceneEntityCfg("back_height")},
+                    # 根据需要保留噪声，或设为 0
+                    noise=Unoise(n_min=0.0, n_max=0.0),
+                    clip=(-2.0, 2.0),
+                    scale=1.0,
+                )
+        obs_scan = None
+    @configclass
+    class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
+        # img_feat = ObsTerm(
+        #             func=mdp.observations.image_features,                      # 调用离散化后的扫描函数
+        #             params={
+        #                 "sensor_cfg": SceneEntityCfg("main_camera"),  # 关键：相机名
+        #                 "data_type": "rgb",                           # 也可 "distance_to_camera"
+        #                 "model_name": "resnet18",                     # 默认即 resnet18
+        #                 # "model_device": "cuda:0",                     # 可把特征提取放到独立设备
+        #             },
+        #             clip=None,
+        #             scale=1.0,
+        #         )
         # front_scan = ObsTerm(
-        #             func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
         #             params={"sensor_cfg": SceneEntityCfg("front_height")},
         #             # 根据需要保留噪声，或设为 0
         #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(0.0, 1.0),
+        #             clip=(-2.0, 2.0),
         #             scale=1.0,
         #         )
         # back_scan = ObsTerm(
-        #             func=mdp.height_scan_disc,                      # 调用离散化后的扫描函数
+        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
         #             params={"sensor_cfg": SceneEntityCfg("back_height")},
         #             # 根据需要保留噪声，或设为 0
         #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(0.0, 1.0),
+        #             clip=(-2.0, 2.0),
         #             scale=1.0,
         #         )
         obs_scan = None
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
+    critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
 
 
 
@@ -179,25 +210,26 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.5)
-        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
-            "LF_HAA": 0.00,
-            "LH_HAA": 0.00,
-            "RF_HAA": -0.00,
-            "RH_HAA": -0.00,
-            "LF_HFE": 0.52,
-            "LH_HFE": -0.52,
-            "RF_HFE": 0.52,
-            "RH_HFE": -0.52,
-            "LF_KNEE": -1.6,
-            "LH_KNEE": 1.6,
-            "RF_KNEE": -1.6,
-            "RH_KNEE": 1.6,
-            "LF_WHEEL": 0.00,
-            "LH_WHEEL": 0.00,
-            "RF_WHEEL": 0.00,
-            "RH_WHEEL": 0.00,
-        }
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)#感知走需要此姿态
+        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.5)#盲走需要此姿态
+        # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={ #盲走需要此姿态
+        #     "LF_HAA": 0.00,
+        #     "LH_HAA": 0.00,
+        #     "RF_HAA": -0.00,
+        #     "RH_HAA": -0.00,
+        #     "LF_HFE": 0.52,
+        #     "LH_HFE": -0.52,
+        #     "RF_HFE": 0.52,
+        #     "RH_HFE": -0.52,
+        #     "LF_KNEE": -1.6,
+        #     "LH_KNEE": 1.6,
+        #     "RF_KNEE": -1.6,
+        #     "RH_KNEE": 1.6,
+        #     "LF_WHEEL": 0.00,
+        #     "LH_WHEEL": 0.00,
+        #     "RF_WHEEL": 0.00,
+        #     "RH_WHEEL": 0.00,
+        # }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -219,6 +251,27 @@ class CUHKLRLSiriusWPitEnvCfg(LocomotionVelocityRoughEnvCfg):
         # )
         # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.front_height = RayCasterCfg( #盲走去除此部分
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(0.75, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.5, 0.5]),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
+        self.scene.back_height = RayCasterCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            offset=RayCasterCfg.OffsetCfg(pos=(-0.65, 0.0, 20.0)),
+            ray_alignment='yaw',
+            pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.5, 0.5]),
+            debug_vis=True,
+            mesh_prim_paths=["/World/ground"],
+        )
+        # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
+        self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.terrain.terrain_generator=EASY_PIT_TERRAINS_CFG # 前2K轮
         # self.scene.terrain.terrain_generator=HARD1_PIT_TERRAINS_CFG # 中间1K轮

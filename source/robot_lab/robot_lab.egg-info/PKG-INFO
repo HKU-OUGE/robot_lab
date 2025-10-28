@@ -6,3 +6,5 @@ Requires-Dist: lxml
 Requires-Dist: transformations
 Requires-Dist: pybullet
 Requires-Dist: colorama
+Requires-Dist: pyqt5
+Requires-Dist: pin

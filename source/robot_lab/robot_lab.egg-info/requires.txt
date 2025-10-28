@@ -3,3 +3,5 @@ lxml
 transformations
 pybullet
 colorama
+pyqt5
+pin

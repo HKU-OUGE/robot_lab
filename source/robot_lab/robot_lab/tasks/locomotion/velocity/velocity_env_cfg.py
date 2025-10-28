@@ -91,7 +91,8 @@ class MySceneCfg(InteractiveSceneCfg):
         mesh_prim_paths=["/World/ground"],
     )
     ray_caster = None
-
+    front_height = None
+    back_height = None
     main_camera = None
     # camera = CameraCfg(
     #     prim_path="{ENV_REGEX_NS}/Robot/body/camera",
@@ -741,6 +742,12 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+        if self.scene.height_scanner_base is not None:
+            self.scene.height_scanner_base.update_period = self.decimation * self.sim.dt
+        if self.scene.front_height is not None:
+            self.scene.front_height.update_period = self.decimation * self.sim.dt
+        if self.scene.back_height is not None:
+            self.scene.back_height.update_period = self.decimation * self.sim.dt
         if self.scene.ray_caster is not None:
             self.scene.ray_caster.update_period = self.decimation * self.sim.dt
         if self.scene.contact_forces is not None:
