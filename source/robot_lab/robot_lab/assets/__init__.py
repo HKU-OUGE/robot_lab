@@ -35,3 +35,4 @@ from .fftai import *
 from .unitree import *
 from .arclab import *
 from .cuhklrl import *
+from .go2arm_articulation_cfg import *
