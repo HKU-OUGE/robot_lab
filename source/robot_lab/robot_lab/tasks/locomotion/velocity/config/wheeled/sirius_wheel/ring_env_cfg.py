@@ -91,15 +91,6 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
-        # # ... 你已有的观测项
-        # obs_scan = ObsTerm(
-        #             func=mdp.obstacle_scan_disc,                      # 调用离散化后的扫描函数
-        #             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-        #             # 根据需要保留噪声，或设为 0
-        #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(0.0, 1.0),
-        #             scale=1.0,
-        #         )
         obs_scan = None
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
