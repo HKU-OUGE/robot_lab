@@ -234,7 +234,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.2, 1.2)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.0)
         self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
 
         # ------------------------------Rewards------------------------------
@@ -271,7 +271,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_power.weight = -1e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.stand_still_without_cmd.weight = -2.0
+        self.rewards.stand_still_without_cmd.weight = -6.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.2
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
@@ -334,7 +334,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
         self.rewards.upward.weight = 0.0
-        self.rewards.joint_mirror.weight = 0.0
+        self.rewards.joint_mirror.weight = -0.05
         self.rewards.joint_mirror.params["mirror_joints"] = [
             ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
             ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
@@ -349,8 +349,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-0.8, 0.8)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.5, 1.5)
         self.commands.base_velocity.ranges.lin_vel_y = (-0.4, 0.4)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.4, 0.4)
-        self.commands.base_velocity.ranges.heading = (-3.14, 3.14)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.heading = (3.14, 3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
