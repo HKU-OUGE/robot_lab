@@ -184,7 +184,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
         )
-        self.observations.policy.height_scan = None
+        # self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.leg_joint_names, preserve_order=True
@@ -202,7 +202,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         )
         self.observations.policy.joint_vel.scale = 0.5
         self.observations.critic.joint_vel.scale = 0.5
-        self.observations.policy.base_lin_vel = None
+        # self.observations.policy.base_lin_vel = None
 
         # ------------------------------Actions------------------------------
         # reduce action scale
@@ -234,8 +234,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.8, 1.0)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.8, 1.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.2, 1.2)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
 
         # ------------------------------Rewards------------------------------
         # General
@@ -244,7 +244,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -1.0
+        self.rewards.flat_orientation_l2.weight = -0.5
         self.rewards.base_height_l2.weight = 0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -275,7 +275,7 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.2
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.abad_pos_penalty.weight = -0.1
+        self.rewards.abad_pos_penalty.weight = -0.2
         self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
             "LF_HAA", 
             "RF_HAA", 
