@@ -695,6 +695,35 @@ FLOATING_RING_TERRAINS_CFG = TerrainGeneratorCfg(
     }
 )
 
+AVOID1_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=20.0,        # 地形边界，防止掉落
+    num_rows=12,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+            proportion=1.0,                           # 完全生成此地形
+            ring_width_range=(3.0, 3.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.7, 0.35),             # 环的离地高度范围
+            ring_thickness=0.1,                       # 环厚度（z 方向）
+            platform_width=3.0,                       # 地形中心的方形平台大小
+            size=(10.0, 10.0),                        # 每块地形大小
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,     
+                    patch_radius=0.15,    
+                    max_height_diff=0.05
+                )
+            },
+        )
+
+    }
+)
+
 
 FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(12.0, 12.0),       # 整个 terrain tile 尺寸
