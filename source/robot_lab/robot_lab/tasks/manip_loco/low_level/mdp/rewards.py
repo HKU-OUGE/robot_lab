@@ -150,6 +150,20 @@ def joint_torques_l2_Go2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = Sce
     return torch.sum(torch.square(asset.data.applied_torque[:, leg_joint]), dim=1)
 
 
+def joint_torques_l2_Quadruped(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint torques applied on the articulation using L2 squared kernel.
+
+    NOTE: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their joint torques contribute to the term.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    leg_joint, _ = asset.find_joints([ "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+                        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint"
+                        ])
+    return torch.sum(torch.square(asset.data.applied_torque[:, leg_joint]), dim=1)
+
 def joint_acc_l2_Go2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
     """Penalize joint accelerations on the articulation using L2 squared kernel.
 
@@ -165,10 +179,29 @@ def joint_acc_l2_Go2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
     return torch.sum(torch.square(asset.data.joint_acc[:, leg_joint]), dim=1)
 
 
+def joint_acc_l2_Quadruped(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint accelerations on the articulation using L2 squared kernel.
+
+    NOTE: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their joint accelerations contribute to the term.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    leg_joint, _ = asset.find_joints([ "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+                        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+                        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+                        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint"
+                        ])
+    return torch.sum(torch.square(asset.data.joint_acc[:, leg_joint]), dim=1)
+
 def action_rate_l2_Go2(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalize the rate of change of the actions using L2 squared kernel."""
     return torch.sum(torch.square(env.action_manager.action[:,:12] - env.action_manager.prev_action[:,:12]), dim=1)
 
+
+
+def action_rate_l2_Quadruped(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalize the rate of change of the actions using L2 squared kernel."""
+    return torch.sum(torch.square(env.action_manager.action[:,:12] - env.action_manager.prev_action[:,:12]), dim=1)
 
 def feet_air_time(
     env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float
@@ -447,6 +480,19 @@ def joint_vel_l2_Go2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEn
     arm_joint, _ = asset.find_joints([ 
                         "waist", "shoulder", "elbow", 
                         "forearm_roll", "wrist_angle", "wrist_rotate"
+                        ])
+    return torch.sum(torch.square(asset.data.joint_vel[:, arm_joint]), dim=1)
+
+def joint_vel_l2_Quadruped(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize joint velocities on the articulation using L2 squared kernel.
+
+    NOTE: Only the joints configured in :attr:`asset_cfg.joint_ids` will have their joint velocities contribute to the term.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    arm_joint, _ = asset.find_joints([ 
+                        "joint1", "joint2", "joint3", 
+                        "joint4", "joint5", "joint6"
                         ])
     return torch.sum(torch.square(asset.data.joint_vel[:, arm_joint]), dim=1)
 
