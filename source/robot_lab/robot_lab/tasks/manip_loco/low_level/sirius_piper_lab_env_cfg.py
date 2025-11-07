@@ -146,7 +146,7 @@ class EventCfg:
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
             "mass_distribution_params": (-0.1, 0.5),
             "operation": "add",
         },
@@ -218,33 +218,33 @@ class CommandsCfg:
     
     ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
         asset_name="robot",
-        body_name="gripper_link",
+        body_name="gripper_base",
         resampling_time_range=(6.0,8.0),
         debug_vis=True,
-        is_Go2ARM=True,
+        is_QuadrupedManipulator=True,
         curriculum_coeff = 1000,          
         ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.4, 0.6),
+            pos_x=(0.58, 0.78),
             pos_y=(-0.35, 0.35),
-            pos_z=(0.1, 0.55), # world frame not base frame
+            pos_z=(0.3, 0.65), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(-3.14 / 9, 3.14 / 9),  # depends on end-effector axis
+            pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
         ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.4, 0.6),
+            pos_x=(0.58, 0.78),
             pos_y=(-0.35, 0.35),
-            pos_z=(0.1, 0.55), # world frame not base frame
+            pos_z=(0.3, 0.65), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(-3.14 / 9, 3.14 / 9),  # depends on end-effector axis
+            pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
         ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.45, 0.5), 
+            pos_x=(0.60, 0.68), 
             pos_y=(-0.05, 0.05),
-            pos_z=(0.35, 0.4), # world frame not base frame
+            pos_z=(0.45, 0.5), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(-0.0, 0.0),  # depends on end-effector axis
+            pitch=(3.14, 3.14),  # depends on end-effector axis
             yaw=(-0.0, 0.0),
         ),
     )
@@ -254,7 +254,7 @@ class CommandsCfg:
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.1,
         debug_vis=True,
-        is_Go2ARM=True,
+        is_QuadrupedManipulator=True,
         curriculum_coeff= 1000,         
         ranges=mdp.command_cfg.MLUniformVelocityCommandCfg.Ranges(
             lin_vel_x=(0.2, 1.0), lin_vel_y=(-0.5, 0.5), ang_vel_z=(-0.5, 0.5),heading=(-0.0, 0.0)
@@ -307,18 +307,45 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
         # observation terms (order preserved)
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-0.0, n_max=0.0))  # dim = 3
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)) # dim = 18
-        joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5)) # dim = 18
-        actions = ObsTerm(func=mdp.last_action) # dim = 18
-        velocity_commands = ObsTerm(func=mdp.generated_commands,
-                                    params={"command_name": "base_velocity"}) # dim = 3
-        Go2_pose_command = ObsTerm(func=mdp.generated_commands,
-                                   params={"command_name": "ee_pose"}) # dim = 7
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel,
+            noise=Unoise(n_min=-0.2, n_max=0.2),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
-            noise=Unoise(n_min=-0.1, n_max=0.1)
-        )        # dim = 3
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        velocity_commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+        )
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            noise=Unoise(n_min=-1.5, n_max=1.5),
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+        )
+        actions = ObsTerm(
+            func=mdp.last_action,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
+                                   params={"command_name": "ee_pose"}) # dim = 7
         
         def __post_init__(self):
             self.enable_corruption = True
@@ -337,7 +364,7 @@ class RewardsCfg:
     end_effector_position_tracking = RewTerm(
         func=mdp.position_command_error_exp,
         weight=2.5,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"),
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
                 "command_name": "ee_pose",
                 "std": 0.2},
     )
@@ -345,7 +372,7 @@ class RewardsCfg:
     end_effector_orientation_tracking = RewTerm(
         func=mdp.orientation_command_error,
         weight=-1.5,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_link"), 
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"), 
                 "command_name": "ee_pose"},
     )
 
@@ -460,7 +487,7 @@ class RewardsCfg:
         weight=-0.02,
     )
 
-    height_reward = RewTerm(func=mdp.base_height_l2, weight=-2.0, params={"target_height": 0.35})
+    height_reward = RewTerm(func=mdp.rewards.base_height_l2, weight=-2.0, params={"target_height": 0.455})
 
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
    
@@ -488,21 +515,9 @@ class TerminationsCfg:
     """Termination terms for the MDP."""
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    base_contact = DoneTerm(
+    illegal_contact = DoneTerm(
         func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names="base"), "threshold": 0.5},
-    )
-    thigh_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_thigh"), "threshold":0.5},
-    )
-    arm_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_link"), "threshold": 0.5},
-    )
-    calf_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_calf"), "threshold": 0.5},
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 0.5},
     )
 
 

@@ -269,7 +269,7 @@ class MLUniformPoseCommand(CommandTerm):
     cfg: MLUniformPoseCommandCfg
     """Configuration for the command generator."""
 
-    def __init__(self, cfg: UniformPoseCommandCfg, env: ManagerBasedRLEnv):
+    def __init__(self, cfg: MLUniformPoseCommandCfg, env: ManagerBasedRLEnv):
         """Initialize the command generator class.
 
         Args:

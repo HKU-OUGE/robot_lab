@@ -33,11 +33,21 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
     #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
     #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
     # ]
-    joint_names = [
+    joint_names_full_body = [
         "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
         "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+        "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
+    ]
+
+    joint_names_quadruped = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+    ]
+
+    joint_names_arm = [
         "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
     ]
     # fmt: on
@@ -60,7 +70,7 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.events.push_robot = None
 
         # command
-        self.commands.ee_pose.is_Go2ARM_Flat = False #TODO
+        self.commands.ee_pose.is_QuadrupedManipulator_Flat = False #TODO
         # velocity command
         # init
         self.commands.base_velocity.ranges_init.lin_vel_x  = (0.0, 0.0)
@@ -73,13 +83,13 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
   
         # position command 
         # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.45, 0.5)
+        self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
         self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
-        self.commands.ee_pose.ranges_init.pos_z = (0.35, 0.4)
+        self.commands.ee_pose.ranges_init.pos_z = (0.45, 0.5)
         # final
-        self.commands.ee_pose.ranges_final.pos_x = (0.45, 0.5)
-        self.commands.ee_pose.ranges_final.pos_y = (-0.05, 0.05)
-        self.commands.ee_pose.ranges_final.pos_z = (0.35, 0.4)
+        self.commands.ee_pose.ranges_final.pos_x = (0.58, 0.78)
+        self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
+        self.commands.ee_pose.ranges_final.pos_z = (0.15, 0.6)
 
 
         # reward weight
@@ -105,17 +115,17 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.rewards.flat_orientation_l2.weight = -1.0
 
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = (
-            self.joint_names
+            self.joint_names_full_body
         )
         self.observations.policy.joint_vel.params["asset_cfg"].joint_names = (
-            self.joint_names
+            self.joint_names_full_body
         )
 
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
-        self.actions.joint_pos.joint_names = self.joint_names
+        self.actions.joint_pos.joint_names = self.joint_names_quadruped
 
         # ------------------------------Rewards------------------------------
         # General

@@ -8,7 +8,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class CUHKLRLSiriusPiperRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 7000
+    max_iterations = 17000
     save_interval = 100
     experiment_name = "cuhklrl_sirius_piper_rough"
     empirical_normalization = False
@@ -39,5 +39,5 @@ class CUHKLRLSiriusPiperFlatPPORunnerCfg(CUHKLRLSiriusPiperRoughPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 2000
+        self.max_iterations = 15000
         self.experiment_name = "cuhklrl_sirius_piper_flat"

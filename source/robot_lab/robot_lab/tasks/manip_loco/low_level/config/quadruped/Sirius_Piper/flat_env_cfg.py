@@ -13,14 +13,14 @@ class CUHKLRLSiriusPiperFlatEnvCfg(CUHKLRLSiriusPiperRoughEnvCfg):
         super().__post_init__()
 
         # override rewards
-        self.rewards.base_height_l2.params["sensor_cfg"] = None
+        # self.rewards.base_height_l2.params["sensor_cfg"] = None
         # change terrain to flat
         # flat terrain 
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
 
         # velocity command
-        self.commands.base_velocity.curriculum_coeff = 4000
+        self.commands.base_velocity.curriculum_coeff = 4096
         # init
         self.commands.base_velocity.ranges_init.lin_vel_x  = (0.0, 0.0)
         self.commands.base_velocity.ranges_init.lin_vel_y  = (-0.0, 0.0)
@@ -33,11 +33,11 @@ class CUHKLRLSiriusPiperFlatEnvCfg(CUHKLRLSiriusPiperRoughEnvCfg):
         # position command 
         self.commands.ee_pose.curriculum_coeff = 5000
         # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.45, 0.5)
+        self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
         self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
         self.commands.ee_pose.ranges_init.pos_z = (0.45, 0.5)
         # final
-        self.commands.ee_pose.ranges_final.pos_x = (0.4, 0.65)
+        self.commands.ee_pose.ranges_final.pos_x = (0.58, 0.78)
         self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
         self.commands.ee_pose.ranges_final.pos_z = (0.15, 0.6)
 
