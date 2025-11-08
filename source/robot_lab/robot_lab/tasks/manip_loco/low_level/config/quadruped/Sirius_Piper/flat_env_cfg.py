@@ -31,14 +31,14 @@ class CUHKLRLSiriusPiperFlatEnvCfg(CUHKLRLSiriusPiperRoughEnvCfg):
         self.commands.base_velocity.ranges_final.ang_vel_z = (-0.5, 0.5)
   
         # position command 
-        self.commands.ee_pose.curriculum_coeff = 3000
+        self.commands.ee_pose.curriculum_coeff = 2000
         # init
         self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
         self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
         self.commands.ee_pose.ranges_init.pos_z = (0.45, 0.5)
         # final
-        self.commands.ee_pose.ranges_final.pos_x = (0.58, 0.78)
-        self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
+        self.commands.ee_pose.ranges_final.pos_x = (0.58, 0.80)
+        self.commands.ee_pose.ranges_final.pos_y = (-0.55, 0.55)
         self.commands.ee_pose.ranges_final.pos_z = (0.18, 0.6)
 
         # reward weight
@@ -50,15 +50,15 @@ class CUHKLRLSiriusPiperFlatEnvCfg(CUHKLRLSiriusPiperRoughEnvCfg):
         
         # leg
 
-        self.rewards.feet_gait.weight = 5.0
+        self.rewards.feet_gait.weight = 3.0
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
             ("FL_foot", "RR_foot"),
             ("FR_foot", "RL_foot"),
         )
-        self.rewards.feet_air_time.weight = 2.0
-        self.rewards.F_feet_air_time.weight = 1.0 #0.5
-        self.rewards.R_feet_air_time.weight = 1.0 #0.5
+        self.rewards.feet_air_time.weight = 1.5
+        self.rewards.F_feet_air_time.weight = 0.0 #0.5
+        self.rewards.R_feet_air_time.weight = 0.0 #0.5
         self.rewards.feet_height.weight = 0.0 #TODO
         self.rewards.feet_height_body.weight = 0.0 #TODO
         self.rewards.foot_contact.weight = 0.005 #0.003

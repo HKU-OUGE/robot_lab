@@ -379,7 +379,7 @@ class MLUniformPoseCommand(CommandTerm):
                                                      self.pose_command_b[i, 1], 
                                                      self.pose_command_b[i, 2] 
                                                     ])) 
-                while((length_arm > 0.7) or (length_arm < 0.3) or (self.pose_command_b[i, 0] < 0.45 and torch.abs(self.pose_command_b[i, 1]) < 0.2)):
+                while((length_arm > 0.7) or (length_arm < 0.3) or (self.pose_command_b[i, 0] < 0.40)):
                         self.pose_command_b[i, 0] = (r_1.uniform_(*self.cfg.ranges_init.pos_x))  * torch.clamp((1 - count), 0, 1) + \
                                                         (r_1.uniform_(*self.cfg.ranges_final.pos_x)) * torch.clamp((count), 0, 1) 
                         self.pose_command_b[i, 1] = (r_1.uniform_(*self.cfg.ranges_init.pos_y))  * torch.clamp((1 - count), 0, 1) + \
@@ -407,19 +407,6 @@ class MLUniformPoseCommand(CommandTerm):
                                 r.uniform_(*self.cfg.ranges_init.yaw) * torch.clamp((1 - count), 0, 1) + \
                                 r.uniform_(*self.cfg.ranges_final.yaw) * torch.clamp((count), 0, 1) 
             # roll useless 
-          
-        elif self.cfg.is_QuadrupedManipulator_Play == True:
-            self.pose_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.pos_x)
-            self.pose_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.pos_y)
-            self.pose_command_w_z[env_ids, 0] = r.uniform_(*self.cfg.ranges.pos_z)
-            self.pose_command_b[env_ids, 2] =  self.pose_command_w_z[env_ids, 0] - self.robot.data.root_pos_w[env_ids, 2] 
-
-            delta_x = self.pose_command_b[env_ids, 0] 
-            delta_y = self.pose_command_b[env_ids, 1] 
-            delta_z = self.pose_command_b[env_ids, 2]         
-            euler_angles[:, 0] = r.uniform_(*self.cfg.ranges.roll)
-            euler_angles[:, 1] = - torch.atan2(delta_z, torch.sqrt(delta_x**2 + delta_y**2)) + r.uniform_(*self.cfg.ranges.pitch)
-            euler_angles[:, 2] = torch.atan2(delta_y, delta_x) + r.uniform_(*self.cfg.ranges.yaw)
         else:
             self.pose_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.pos_x)
             self.pose_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.pos_y)

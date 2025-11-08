@@ -228,7 +228,7 @@ class CommandsCfg:
             pos_y=(-0.35, 0.35),
             pos_z=(0.3, 0.65), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
+            pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
         ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
@@ -478,7 +478,7 @@ class RewardsCfg:
         weight=-0.02,
     )
 
-    height_reward = RewTerm(func=mdp.rewards.base_height_l2, weight=-2.0, params={"target_height": 0.455})
+    height_reward = RewTerm(func=mdp.rewards.base_height_l2, weight=-2.0, params={"target_height": 0.40})
 
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.0)
 
