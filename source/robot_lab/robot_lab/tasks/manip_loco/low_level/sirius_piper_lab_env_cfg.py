@@ -18,6 +18,8 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 import isaaclab.terrains as terrain_gen
+from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
+from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 
 
 import robot_lab.tasks.manip_loco.low_level.mdp as mdp
@@ -123,13 +125,14 @@ class EventCfg:
         },
     )
 
-    add_base_mass = EventTerm(
+    randomize_rigid_body_mass = EventTerm(
         func=mdp.randomize_rigid_body_mass,
         mode="startup",
         params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "mass_distribution_params": (-3.0, 3.0),
-            "operation": "add",
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
+            "operation": "scale",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
         },
     )
 
@@ -147,8 +150,9 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-            "mass_distribution_params": (-0.1, 0.5),
+            "mass_distribution_params": (-0.1, 0.8),
             "operation": "add",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
         },
     )
 
@@ -158,8 +162,8 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "force_range": (0.0, 0.0),
-            "torque_range": (-0.0, 0.0),
+            "force_range": (-10.0, 10.0),
+            "torque_range": (-10.0, 10.0),
         },
     )
 
@@ -184,8 +188,8 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.8, 1.2),
-            "damping_distribution_params": (0.8, 1.2),
+            "stiffness_distribution_params": (0.5, 2.0),
+            "damping_distribution_params": (0.5, 2.0),
             "operation": "scale",
         },
     )
@@ -284,19 +288,42 @@ class ActionsCfg:
                                          use_default_offset=True,
                                          preserve_order=True,
     )   
-    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-                                          joint_names=[
-                                              "joint1", "joint2", "joint3", 
-                                              "joint4", "joint5", "joint6"],
-                                           scale = {"joint1":        0.5, # 0.8
-                                                    "joint2":     0.5, # 0.35
-                                                    "joint3":        0.5, # 0.35
-                                                    "joint4": 0.5, # 0.35
-                                                    "joint5":  0.5, # 0.35
-                                                    "joint6": 0.5}, # 0.35
-                                            use_default_offset=True,
-                                            preserve_order=True,
-    )
+    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+    #                                       joint_names=[
+    #                                           "joint1", "joint2", "joint3", 
+    #                                           "joint4", "joint5", "joint6"],
+    #                                        scale = {"joint1":        0.5, # 0.8
+    #                                                 "joint2":     0.5, # 0.35
+    #                                                 "joint3":        0.5, # 0.35
+    #                                                 "joint4": 0.5, # 0.35
+    #                                                 "joint5":  0.5, # 0.35
+    #                                                 "joint6": 0.5}, # 0.35
+    #                                         use_default_offset=True,
+    #                                         preserve_order=True,
+    # )
+
+
+    arm_pose = DifferentialInverseKinematicsActionCfg(
+            asset_name="robot",
+            joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+            body_name="gripper_base",
+            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
+            scale=0.5,
+            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
+        )
+
+    #     self.actions.arm_action = mdp.JointPositionActionCfg(
+    #         asset_name="robot", joint_names=["panda_joint.*"], scale=0.5, use_default_offset=True
+    #     )
+
+    # actions.arm_action = DifferentialInverseKinematicsActionCfg(
+    #         asset_name="robot",
+    #         joint_names=["panda_joint.*"],
+    #         body_name="panda_hand",
+    #         controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=True, ik_method="dls"),
+    #         scale=0.5,
+    #         body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.107]),
+    #     )
 
 
 @configclass
@@ -452,7 +479,7 @@ class RewardsCfg:
         func=mdp.standing_feet_contact_force,
         weight= 0.003,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names="R.*_foot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "command_name": "base_velocity",
             "force_threshold": 7.5,
             "command_threshold": 0.1,
