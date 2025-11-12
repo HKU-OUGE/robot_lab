@@ -42,6 +42,7 @@ parser.add_argument(
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
+parser.add_argument("--se2_gamepad", action="store_true", default=False, help="Whether to use se2_gamepad.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
 parser.add_argument("--moe", action="store_true", default=False, help="Whether to use MoE.")
@@ -85,6 +86,9 @@ import robot_lab.tasks  # noqa: F401
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from isaaclab.devices import Se2Gamepad
+from isaaclab.devices.gamepad.se2_gamepad import Se2GamepadCfg
 
 def _make_mlp(in_dim: int, hidden: list[int], out_dim: int, act: nn.Module):
     layers: list[nn.Module] = []
@@ -360,6 +364,40 @@ def main():
             nonlocal obs
             obs, _ = env.reset()
         controller.add_callback("R", reset_env_callback)
+
+
+    if args_cli.se2_gamepad:
+        env_cfg.scene.num_envs = 1
+        env_cfg.terminations.time_out = None
+        env_cfg.commands.base_velocity.debug_vis = True
+
+        # 游戏手柄配置
+        se2_gamepad_cfg = Se2GamepadCfg(
+            v_x_sensitivity=2.0,
+            v_y_sensitivity=1.5,
+            omega_z_sensitivity=3.0,
+            dead_zone=0.15,
+        )
+        se2_controller = Se2Gamepad(se2_gamepad_cfg)
+
+        # 设置速度命令
+        env_cfg.observations.policy.velocity_commands = ObsTerm(
+            func=lambda env: se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+        )
+
+        # 重置环境回调
+        def reset_env_callback():
+            print("[INFO] Resetting environment...")
+            return env.reset()[0]  # 返回新的观测
+        
+        se2_controller.add_callback(7, reset_env_callback)  # Start按钮
+        
+        # 退出应用回调
+        def exit_app_callback():
+            print("[INFO] Exiting application...")
+            exit(0)
+        
+        se2_controller.add_callback(6, exit_app_callback)  # Back/Select按钮
 
 
     # specify directory for logging experiments
