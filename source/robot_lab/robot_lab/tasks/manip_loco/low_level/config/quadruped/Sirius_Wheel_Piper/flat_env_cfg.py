@@ -25,6 +25,10 @@ class CUHKLRLSiriusWPiperFlatEnvCfg(CUHKLRLSiriusWPiperRoughEnvCfg):
             ["LF_(HAA|HFE|KFE).*", "RF_(HAA|HFE|KFE).*"],
             ["LH_(HAA|HFE|KFE).*", "RH_(HAA|HFE|KFE).*"],
         ]
+        self.rewards.end_effector_position_tracking.weight = 3.0 #2.5
+        self.rewards.end_effector_orientation_tracking.weight = -2.0 #-1.5
+        self.rewards.end_effector_action_rate.weight = -0.5 #-0.005 
+        self.rewards.end_effector_action_smoothness.weight = -0.2 #-0.02
         # no height scan
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None

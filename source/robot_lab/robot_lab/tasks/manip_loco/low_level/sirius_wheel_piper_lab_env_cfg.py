@@ -128,38 +128,38 @@ class CommandsCfg:
     """Command specifications for the MDP."""
     ## SIRIUS_PIPER
     
-    # ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
-    #     asset_name="robot",
-    #     body_name="gripper_base",
-    #     resampling_time_range=(4.0,6.0),
-    #     debug_vis=True,
-    #     is_QuadrupedManipulator=True,
-    #     curriculum_coeff = 1000,          
-    #     ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-    #         pos_x=(0.58, 0.78),
-    #         pos_y=(-0.35, 0.35),
-    #         pos_z=(0.3, 0.65), # world frame not base frame
-    #         roll=(-0.0, 0.0),
-    #         pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
-    #         yaw=(-3.14 / 9, 3.14 / 9),
-    #     ),
-    #     ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-    #         pos_x=(0.58, 0.78),
-    #         pos_y=(-0.35, 0.35),
-    #         pos_z=(0.3, 0.65), # world frame not base frame
-    #         roll=(-0.0, 0.0),
-    #         pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
-    #         yaw=(-3.14 / 9, 3.14 / 9),
-    #     ),
-    #     ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-    #         pos_x=(0.60, 0.68), 
-    #         pos_y=(-0.05, 0.05),
-    #         pos_z=(0.45, 0.5), # world frame not base frame
-    #         roll=(-0.0, 0.0),
-    #         pitch=(3.14, 3.14),  # depends on end-effector axis
-    #         yaw=(-0.0, 0.0),
-    #     ),
-    # )
+    ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
+        asset_name="robot",
+        body_name="gripper_base",
+        resampling_time_range=(4.0,6.0),
+        debug_vis=True,
+        is_QuadrupedManipulator=True,
+        curriculum_coeff = 1000,          
+        ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+            pos_x=(0.58, 0.78),
+            pos_y=(-0.35, 0.35),
+            pos_z=(0.3, 0.65), # world frame not base frame
+            roll=(-0.0, 0.0),
+            pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
+            yaw=(-3.14 / 9, 3.14 / 9),
+        ),
+        ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+            pos_x=(0.58, 0.78),
+            pos_y=(-0.35, 0.35),
+            pos_z=(0.3, 0.65), # world frame not base frame
+            roll=(-0.0, 0.0),
+            pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
+            yaw=(-3.14 / 9, 3.14 / 9),
+        ),
+        ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+            pos_x=(0.60, 0.68), 
+            pos_y=(-0.05, 0.05),
+            pos_z=(0.45, 0.5), # world frame not base frame
+            roll=(-0.0, 0.0),
+            pitch=(3.14, 3.14),  # depends on end-effector axis
+            yaw=(-0.0, 0.0),
+        ),
+    )
 
     base_velocity = mdp.command_cfg.MLUniformVelocityCommandCfg(
         asset_name="robot",
@@ -298,8 +298,8 @@ class ObservationsCfg:
             clip=(-1.0, 1.0),
             scale=1.0,
         )
-        # Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
-        #                            params={"command_name": "ee_pose"}) # dim = 7
+        Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
+                                   params={"command_name": "ee_pose"}) # dim = 7
         
         def __post_init__(self):
             self.enable_corruption = True
@@ -316,8 +316,8 @@ class ObservationsCfg:
         velocity_commands = ObsTerm(
             func=mdp.generated_commands, params={"command_name": "base_velocity"}, scale=1.0, clip=(-100.0, 100.0)
         )
-        # Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
-        #                            params={"command_name": "ee_pose"}) # dim = 7
+        Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
+                                   params={"command_name": "ee_pose"}) # dim = 7
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
@@ -450,16 +450,16 @@ class EventCfg:
         params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
     )
 
-    # add_ee_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-    #         "mass_distribution_params": (-0.1, 0.8),
-    #         "operation": "add",
-    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
-    #     },
-    # )
+    add_ee_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+            "mass_distribution_params": (-0.1, 0.8),
+            "operation": "add",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
+        },
+    )
 
 
 @configclass
@@ -468,24 +468,24 @@ class RewardsCfg:
 
     # -- ARM 
     # The name must have a prefix of "end_effector_".
-    # end_effector_position_tracking = RewTerm(
-    #     func=mdp.position_command_error_exp,
-    #     weight=2.5,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-    #             "command_name": "ee_pose",
-    #             "std": 0.2},
-    # )
+    end_effector_position_tracking = RewTerm(
+        func=mdp.position_command_error_exp,
+        weight=2.5,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+                "command_name": "ee_pose",
+                "std": 0.2},
+    )
 
-    # end_effector_orientation_tracking = RewTerm(
-    #     func=mdp.orientation_command_error,
-    #     weight=-1.5,
-    #     params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"), 
-    #             "command_name": "ee_pose"},
-    # )
+    end_effector_orientation_tracking = RewTerm(
+        func=mdp.orientation_command_error,
+        weight=-1.5,
+        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"), 
+                "command_name": "ee_pose"},
+    )
 
-    # end_effector_action_rate = RewTerm(func=mdp.action_rate_l2_arm, weight=-0.005)
+    end_effector_action_rate = RewTerm(func=mdp.action_rate_l2_arm, weight=-0.005)
 
-    # end_effector_action_smoothness = RewTerm(func=mdp.arm_action_smoothness_penalty, weight=-0.02)
+    end_effector_action_smoothness = RewTerm(func=mdp.arm_action_smoothness_penalty, weight=-0.02)
 
 
     # -- LEG
