@@ -21,6 +21,7 @@ from isaaclab.managers import EventTermCfg as EventTerm
 # Pre-defined configs
 ##
 from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_PIPER_CFG  # isort: skip
+from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_CFG  # isort: skip
 from robot_lab.terrains.config.rough import *
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
 
@@ -39,19 +40,19 @@ class CUHKLRLSiriusWPiperActionsCfg(ActionsCfg):
         asset_name="robot", joint_names=[""], scale=5.0, use_default_offset=True, clip=None, preserve_order=True
     )
 
-    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-                                          joint_names=[
-                                              "joint1", "joint2", "joint3", 
-                                              "joint4", "joint5", "joint6"],
-                                           scale = {"joint1":        0.5, # 0.8
-                                                    "joint2":     0.5, # 0.35
-                                                    "joint3":        0.5, # 0.35
-                                                    "joint4": 0.5, # 0.35
-                                                    "joint5":  0.5, # 0.35
-                                                    "joint6": 0.5}, # 0.35
-                                            use_default_offset=True,
-                                            preserve_order=True,
-    )
+    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+    #                                       joint_names=[
+    #                                           "joint1", "joint2", "joint3", 
+    #                                           "joint4", "joint5", "joint6"],
+    #                                        scale = {"joint1":        0.5, # 0.8
+    #                                                 "joint2":     0.5, # 0.35
+    #                                                 "joint3":        0.5, # 0.35
+    #                                                 "joint4": 0.5, # 0.35
+    #                                                 "joint5":  0.5, # 0.35
+    #                                                 "joint6": 0.5}, # 0.35
+    #                                         use_default_offset=True,
+    #                                         preserve_order=True,
+    # )
 
 @configclass
 class CUHKLRLSiriusWPiperCommandsCfg(CommandsCfg):
@@ -86,14 +87,14 @@ class CUHKLRLSiriusWPiperRewardsCfg(RewardsCfg):
     joint_torques_wheel_l2 = RewTerm(
         func=mdp.joint_torques_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
     )
-    # wheels_stop_without_cmd = RewTerm(
-    #     func=mdp.wheels_stop_without_cmd,
-    #     weight=0.0,   # 惩罚系数，可调
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "asset_cfg": SceneEntityCfg("robot", joint_names=""),
-    #     },
-    # )
+    wheels_stop_without_cmd = RewTerm(
+        func=mdp.wheels_stop_without_cmd,
+        weight=0.0,   # 惩罚系数，可调
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
     joint_pos_penalty = RewTerm(
         func=mdp.joint_pos_penalty,
         weight=0.0,
@@ -169,13 +170,13 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
     ]
     joint_names = leg_joint_names + wheel_joint_names
-    legged_arm_joint_names = leg_joint_names + arm_joint_names
+    # legged_arm_joint_names = leg_joint_names + arm_joint_names
     # fmt: on
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_PIPER_CFG.init_state.pos=(0.0, 0.0, 0.55)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
         #     "LH_HAA": 0.00,
@@ -196,12 +197,11 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         # }
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
-        self.scene.robot = CUHKLRL_SIRIUS_WHEEL_PIPER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.ray_caster = None
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator=None
-        self.scene.terrain.terrain_type = "plane"
+        self.scene.terrain.terrain_generator=EASY_ROUGH_TERRAINS_CFG
         # self.observations.policy.height_scan = None
         self.observations.policy.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
@@ -211,12 +211,18 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         )
         self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
+        # self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=self.legged_arm_joint_names, preserve_order=True
+        # )
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.legged_arm_joint_names, preserve_order=True
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.critic.joint_pos.func = mdp.joint_pos_rel
+        # self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
+        #     "robot", joint_names=self.legged_arm_joint_names, preserve_order=True
+        # )
         self.observations.critic.joint_pos.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.legged_arm_joint_names, preserve_order=True
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
         )
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
@@ -237,7 +243,7 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
-        self.actions.arm_pose.joint_names = self.arm_joint_names
+        # self.actions.arm_pose.joint_names = self.arm_joint_names
 
         # ------------------------------Events------------------------------
         self.events.randomize_reset_base.params = {
@@ -271,8 +277,8 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = -1.0
-        self.rewards.base_height_l2.weight = 0
-        self.rewards.base_height_l2.params["target_height"] = 0.40
+        self.rewards.base_height_l2.weight = 0.5
+        self.rewards.base_height_l2.params["target_height"] = 0.50
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
         self.rewards.body_lin_acc_l2.weight = 0
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
@@ -366,14 +372,14 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
             ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         ]
 
-        self.rewards.end_effector_position_tracking.weight = 3.0 #2.5
-        self.rewards.end_effector_orientation_tracking.weight = -2.0 #-1.5
-        self.rewards.end_effector_action_rate.weight = -0.5 #-0.005 
-        self.rewards.end_effector_action_smoothness.weight = -0.2 #-0.02
+        # self.rewards.end_effector_position_tracking.weight = 3.0 #2.5
+        # self.rewards.end_effector_orientation_tracking.weight = -2.0 #-1.5
+        # self.rewards.end_effector_action_rate.weight = -0.5 #-0.005 
+        # self.rewards.end_effector_action_smoothness.weight = -0.2 #-0.02
         
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
-        if self.__class__.__name__ == "CUHKLRLSiriusWRoughEnvCfg":
+        if self.__class__.__name__ == "CUHKLRLSiriusWPiperRoughEnvCfg":
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
@@ -394,14 +400,14 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.commands.base_velocity.ranges_final.ang_vel_z = (-0.5, 0.5)
   
         # position command 
-        self.commands.ee_pose.curriculum_coeff = 3000 # 3000
-        # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
-        self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
-        self.commands.ee_pose.ranges_init.pos_z = (0.55, 0.65)
-        # final
-        self.commands.ee_pose.ranges_final.pos_x = (0.50, 0.80)
-        self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
-        self.commands.ee_pose.ranges_final.pos_z = (0.35, 0.8)
+        # self.commands.ee_pose.curriculum_coeff = 3000 # 3000
+        # # init
+        # self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
+        # self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
+        # self.commands.ee_pose.ranges_init.pos_z = (0.55, 0.65)
+        # # final
+        # self.commands.ee_pose.ranges_final.pos_x = (0.50, 0.78)
+        # self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
+        # self.commands.ee_pose.ranges_final.pos_z = (0.35, 0.7)
 
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)

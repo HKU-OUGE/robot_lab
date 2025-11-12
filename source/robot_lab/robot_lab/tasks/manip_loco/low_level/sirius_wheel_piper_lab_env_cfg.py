@@ -24,11 +24,7 @@ from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsA
 
 import robot_lab.tasks.manip_loco.low_level.mdp as mdp
 
-##
-# Pre-defined configs
-##
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
-
+from robot_lab.terrains.config.rough import *
 
 ##
 # Scene definition
@@ -60,8 +56,10 @@ class MySceneCfg(InteractiveSceneCfg):
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="generator",
-        terrain_generator=SIRIUS_PIPER_ARM_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        # terrain_generator=SLOPE_TERRAINS_CFG,
+        terrain_generator=STAIR_TERRAINS_CFG,
+        # terrain_generator=NOISE_TERRAINS_CFG,
+        max_init_terrain_level=10,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -82,22 +80,36 @@ class MySceneCfg(InteractiveSceneCfg):
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
+        ray_alignment='yaw',
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.8, 0.8]),
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
-
     height_scanner_base = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment='yaw',
+        ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.1, 0.1)),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
+    ray_caster = None
+    front_height = None
+    back_height = None
+    main_camera = None
+    # camera = CameraCfg(
+    #     prim_path="{ENV_REGEX_NS}/Robot/body/camera",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb", "distance_to_image_plane"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+    # )
 
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=8, track_air_time=True, debug_vis=True)
     # lights
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
@@ -105,141 +117,6 @@ class MySceneCfg(InteractiveSceneCfg):
             intensity=750.0,
             texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
         ),
-    )
-
-
-@configclass
-class EventCfg:
-    """Configuration for events."""
-
-    # startup
-    physics_material = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.5, 4.0),
-            "dynamic_friction_range": (0.5, 2.0),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 64,
-        },
-    )
-
-    randomize_rigid_body_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
-            "operation": "scale",
-            "recompute_inertia": True,                # 关键：改质量后重算惯量
-        },
-    )
-
-    add_ee_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-            "mass_distribution_params": (-0.1, 0.8),
-            "operation": "add",
-            "recompute_inertia": True,                # 关键：改质量后重算惯量
-        },
-    )
-
-    # reset
-    base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "force_range": (-10.0, 10.0),
-            "torque_range": (-10.0, 10.0),
-        },
-    )
-
-    reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
-        mode="reset",
-        params={
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-            "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
-            },
-        },
-    )
-    
-    actuator_gains = EventTerm(
-        func=mdp.randomize_actuator_gains,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.5, 2.0),
-            "damping_distribution_params": (0.5, 2.0),
-            "operation": "scale",
-        },
-    )
-
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_scale,
-        mode="reset",
-        params={
-            "position_range": (0.5, 1.5),
-            "velocity_range": (0.0, 0.0),
-        },
-    )
-
-    # interval
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(10.0, 15.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
-
-    randomize_reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
-        mode="reset",
-        params={
-            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-            "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
-            },
-        },
-    )
-
-    randomize_apply_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=""),
-            "force_range": (-10.0, 10.0),
-            "torque_range": (-10.0, 10.0),
-        },
-    )
-
-    # startup
-    randomize_rigid_body_material = EventTerm(
-        func=mdp.randomize_rigid_body_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.0),
-            "dynamic_friction_range": (0.3, 0.8),
-            "restitution_range": (0.0, 0.0),
-            "num_buckets": 64,
-            "make_consistent": True,
-        },
     )
 
 ##
@@ -251,38 +128,38 @@ class CommandsCfg:
     """Command specifications for the MDP."""
     ## SIRIUS_PIPER
     
-    ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
-        asset_name="robot",
-        body_name="gripper_base",
-        resampling_time_range=(4.0,6.0),
-        debug_vis=True,
-        is_QuadrupedManipulator=True,
-        curriculum_coeff = 1000,          
-        ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.58, 0.78),
-            pos_y=(-0.35, 0.35),
-            pos_z=(0.3, 0.65), # world frame not base frame
-            roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
-            yaw=(-3.14 / 9, 3.14 / 9),
-        ),
-        ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.58, 0.78),
-            pos_y=(-0.35, 0.35),
-            pos_z=(0.3, 0.65), # world frame not base frame
-            roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
-            yaw=(-3.14 / 9, 3.14 / 9),
-        ),
-        ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
-            pos_x=(0.60, 0.68), 
-            pos_y=(-0.05, 0.05),
-            pos_z=(0.45, 0.5), # world frame not base frame
-            roll=(-0.0, 0.0),
-            pitch=(3.14, 3.14),  # depends on end-effector axis
-            yaw=(-0.0, 0.0),
-        ),
-    )
+    # ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
+    #     asset_name="robot",
+    #     body_name="gripper_base",
+    #     resampling_time_range=(4.0,6.0),
+    #     debug_vis=True,
+    #     is_QuadrupedManipulator=True,
+    #     curriculum_coeff = 1000,          
+    #     ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+    #         pos_x=(0.58, 0.78),
+    #         pos_y=(-0.35, 0.35),
+    #         pos_z=(0.3, 0.65), # world frame not base frame
+    #         roll=(-0.0, 0.0),
+    #         pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
+    #         yaw=(-3.14 / 9, 3.14 / 9),
+    #     ),
+    #     ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+    #         pos_x=(0.58, 0.78),
+    #         pos_y=(-0.35, 0.35),
+    #         pos_z=(0.3, 0.65), # world frame not base frame
+    #         roll=(-0.0, 0.0),
+    #         pitch=(3.14 - 3.14 / 9, 3.14 + 3.14 / 9),  # depends on end-effector axis
+    #         yaw=(-3.14 / 9, 3.14 / 9),
+    #     ),
+    #     ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
+    #         pos_x=(0.60, 0.68), 
+    #         pos_y=(-0.05, 0.05),
+    #         pos_z=(0.45, 0.5), # world frame not base frame
+    #         roll=(-0.0, 0.0),
+    #         pitch=(3.14, 3.14),  # depends on end-effector axis
+    #         yaw=(-0.0, 0.0),
+    #     ),
+    # )
 
     base_velocity = mdp.command_cfg.MLUniformVelocityCommandCfg(
         asset_name="robot",
@@ -302,6 +179,12 @@ class CommandsCfg:
         ),
     )
 
+
+##
+# MDP settings
+##
+
+
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
@@ -319,19 +202,19 @@ class ActionsCfg:
                                          use_default_offset=True,
                                          preserve_order=True,
     )   
-    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-                                          joint_names=[
-                                              "joint1", "joint2", "joint3", 
-                                              "joint4", "joint5", "joint6"],
-                                           scale = {"joint1":        0.5, # 0.8
-                                                    "joint2":     0.5, # 0.35
-                                                    "joint3":        0.5, # 0.35
-                                                    "joint4": 0.5, # 0.35
-                                                    "joint5":  0.5, # 0.35
-                                                    "joint6": 0.5}, # 0.35
-                                            use_default_offset=True,
-                                            preserve_order=True,
-    )
+    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+    #                                       joint_names=[
+    #                                           "joint1", "joint2", "joint3", 
+    #                                           "joint4", "joint5", "joint6"],
+    #                                        scale = {"joint1":        0.5, # 0.8
+    #                                                 "joint2":     0.5, # 0.35
+    #                                                 "joint3":        0.5, # 0.35
+    #                                                 "joint4": 0.5, # 0.35
+    #                                                 "joint5":  0.5, # 0.35
+    #                                                 "joint6": 0.5}, # 0.35
+    #                                         use_default_offset=True,
+    #                                         preserve_order=True,
+    # )
 
 
     # arm_pose = DifferentialInverseKinematicsActionCfg(
@@ -415,8 +298,8 @@ class ObservationsCfg:
             clip=(-1.0, 1.0),
             scale=1.0,
         )
-        Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
-                                   params={"command_name": "ee_pose"}) # dim = 7
+        # Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
+        #                            params={"command_name": "ee_pose"}) # dim = 7
         
         def __post_init__(self):
             self.enable_corruption = True
@@ -433,8 +316,8 @@ class ObservationsCfg:
         velocity_commands = ObsTerm(
             func=mdp.generated_commands, params={"command_name": "base_velocity"}, scale=1.0, clip=(-100.0, 100.0)
         )
-        Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
-                                   params={"command_name": "ee_pose"}) # dim = 7
+        # Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
+        #                            params={"command_name": "ee_pose"}) # dim = 7
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
@@ -462,29 +345,147 @@ class ObservationsCfg:
 
 
 @configclass
+class EventCfg:
+    """Configuration for events."""
+    # startup
+    randomize_rigid_body_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": (0.3, 1.0),
+            "dynamic_friction_range": (0.3, 0.8),
+            "restitution_range": (0.0, 0.0),
+            "num_buckets": 64,
+            "make_consistent": True,
+        },
+    )
+
+    randomize_rigid_body_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
+            "operation": "scale",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
+        },
+    )
+
+    # randomize_com_positions = EventTerm(
+    #     func=mdp.randomize_rigid_body_com,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+    #         "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
+    #     },
+    # )
+
+    # reset
+    randomize_apply_external_force_torque = EventTerm(
+        func=mdp.apply_external_force_torque,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=""),
+            "force_range": (-10.0, 10.0),
+            "torque_range": (-10.0, 10.0),
+        },
+    )
+
+    randomize_reset_joints = EventTerm(
+        # func=mdp.reset_joints_by_scale,
+        func=mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (-0.2, 0.2),
+            "velocity_range": (-2.5, 2.5),
+        },
+    )
+
+    randomize_actuator_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stiffness_distribution_params": (0.5, 2.0),
+            "damping_distribution_params": (0.5, 2.0),
+            "operation": "scale",
+            "distribution": "log_uniform",
+        },
+    )
+
+    # randomize_joint_limits = EventTerm(
+    #     func=mdp.randomize_joint_parameters,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+    #         "lower_limit_distribution_params": (0.00, 0.01),
+    #         "upper_limit_distribution_params": (0.00, 0.01),
+    #         "operation": "add",
+    #         "distribution": "gaussian",
+    #     },
+    # )
+
+    randomize_reset_base = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+            "velocity_range": {
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
+            },
+        },
+    )
+
+    # interval
+    randomize_push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(10.0, 15.0),
+        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    )
+
+    # add_ee_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+    #         "mass_distribution_params": (-0.1, 0.8),
+    #         "operation": "add",
+    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
+    #     },
+    # )
+
+
+@configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- ARM 
     # The name must have a prefix of "end_effector_".
-    end_effector_position_tracking = RewTerm(
-        func=mdp.position_command_error_exp,
-        weight=2.5,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-                "command_name": "ee_pose",
-                "std": 0.2},
-    )
+    # end_effector_position_tracking = RewTerm(
+    #     func=mdp.position_command_error_exp,
+    #     weight=2.5,
+    #     params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+    #             "command_name": "ee_pose",
+    #             "std": 0.2},
+    # )
 
-    end_effector_orientation_tracking = RewTerm(
-        func=mdp.orientation_command_error,
-        weight=-1.5,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"), 
-                "command_name": "ee_pose"},
-    )
+    # end_effector_orientation_tracking = RewTerm(
+    #     func=mdp.orientation_command_error,
+    #     weight=-1.5,
+    #     params={"asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"), 
+    #             "command_name": "ee_pose"},
+    # )
 
-    end_effector_action_rate = RewTerm(func=mdp.action_rate_l2_arm, weight=-0.005)
+    # end_effector_action_rate = RewTerm(func=mdp.action_rate_l2_arm, weight=-0.005)
 
-    end_effector_action_smoothness = RewTerm(func=mdp.arm_action_smoothness_penalty, weight=-0.02)
+    # end_effector_action_smoothness = RewTerm(func=mdp.arm_action_smoothness_penalty, weight=-0.02)
 
 
     # -- LEG
@@ -584,17 +585,6 @@ class RewardsCfg:
         },
     )
 
-    # feet_air_time = RewTerm(
-    #     func=mdp.feet_air_time,
-    #     weight=0.0,
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "mode_time": 0.3,
-    #         "velocity_threshold": 0.5,
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-    #     },
-    # )
 
     feet_gait = RewTerm(
         func=mdp.GaitReward,
@@ -654,49 +644,6 @@ class RewardsCfg:
         },
     )
 
-    # feet_height_exp = RewTerm(
-    #     func=mdp.feet_height_exp,
-    #     weight=0.0,
-    #     params={
-    #         "std": math.sqrt(1),
-    #         "tanh_mult": 2.0,
-    #         "target_height": float,
-    #         "command_name": "base_velocity",
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=""),
-    #     },
-    # )
-
-    # feet_distance_y_exp = RewTerm(
-    #     func=mdp.feet_distance_y_exp,
-    #     weight=0.0,
-    #     params={
-    #         "std": math.sqrt(0.25),
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=""),
-    #         "stance_width": float,
-    #     },
-    # )
-
-    # feet_distance_xy_exp = RewTerm(
-    #     func=mdp.feet_distance_xy_exp,
-    #     weight=0.0,
-    #     params={
-    #         "std": math.sqrt(0.25),
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=""),
-    #         "stance_length": float,
-    #         "stance_width": float,
-    #     },
-    # )
-
-    # feet_height_body_exp = RewTerm(
-    #     func=mdp.feet_height_body_exp,
-    #     weight=0.0,
-    #     params={
-    #         "std": math.sqrt(0.25),
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=""),
-    #         "target_height": -0.3,
-    #     },
-    # )
-
     joint_power = RewTerm(
         func=mdp.joint_power,
         weight=0.0,
@@ -755,47 +702,37 @@ class RewardsCfg:
         },
     )
 
-    # action_sync = RewTerm(
-    #     func=mdp.action_sync,
-    #     weight=0.0,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot"),
-    #         "joint_groups": [
-    #             ["FR_hip_joint", "FL_hip_joint", "RL_hip_joint", "RR_hip_joint"],
-    #             ["FR_thigh_joint", "FL_thigh_joint", "RL_thigh_joint", "RR_thigh_joint"],
-    #             ["FR_calf_joint", "FL_calf_joint", "RL_calf_joint", "RR_calf_joint"],
-    #         ],
-    #     },
-    # )
-
-    # wheel_spin_in_air_penalty = RewTerm(
-    #     func=mdp.wheel_spin_in_air_penalty,
-    #     weight=0.0,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_names=""),
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-    #     },
-    # )
-
     upward = RewTerm(func=mdp.upward, weight=0.0)
-
 
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
 
+    # MDP terminations
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    illegal_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 0.5},
-    )
-
     # command_resample
     terrain_out_of_bounds = DoneTerm(
         func=mdp.terrain_out_of_bounds,
         params={"asset_cfg": SceneEntityCfg("robot"), "distance_buffer": 3.0},
         time_out=True,
+    )
+
+    # Root terminations
+    # bad_orientation
+    # root_height_below_minimum
+
+    # Joint terminations
+    # joint_pos_out_of_limit
+    # joint_pos_out_of_manual_limit
+    # joint_vel_out_of_limit
+    # joint_vel_out_of_manual_limit
+    # joint_effort_out_of_limit
+
+    # Contact sensor
+    illegal_contact = DoneTerm(
+        func=mdp.illegal_contact,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
     )
 
 
@@ -853,23 +790,61 @@ class ManipulationLocomotionEnvCfg(ManagerBasedRLEnvCfg):
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
+        # self.sim.disable_contact_processing = True
         self.sim.physics_material = self.scene.terrain.physics_material
-        self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        # self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
+        # GPU 碰撞内存配置
+        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 
+        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 
+        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 
+        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 
+        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 
+        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 
+
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
+        if self.scene.height_scanner_base is not None:
+            self.scene.height_scanner_base.update_period = self.decimation * self.sim.dt
+        if self.scene.front_height is not None:
+            self.scene.front_height.update_period = self.decimation * self.sim.dt
+        if self.scene.back_height is not None:
+            self.scene.back_height.update_period = self.decimation * self.sim.dt
+        if self.scene.ray_caster is not None:
+            self.scene.ray_caster.update_period = self.decimation * self.sim.dt
         if self.scene.contact_forces is not None:
             self.scene.contact_forces.update_period = self.sim.dt
+        if self.scene.main_camera is not None:
+            self.scene.main_camera.update_period = self.decimation * self.sim.dt
+        # if self.scene.camera is not None:
+        #     self.scene.camera.update_period = self.sim.dt
 
         # check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
         # this generates terrains with increasing difficulty and is useful for training
+        # if getattr(self.curriculum, "terrain_levels", None) is not None:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = True
+        # else:
+        #     if self.scene.terrain.terrain_generator is not None:
+        #         self.scene.terrain.terrain_generator.curriculum = False
+        # Check if terrain levels curriculum is enabled - if so, enable curriculum for terrain generator
+        # This generates terrains with increasing difficulty and is useful for training
         if getattr(self.curriculum, "terrain_levels", None) is not None:
-            if self.scene.terrain.terrain_generator is not None:
-                self.scene.terrain.terrain_generator.curriculum = True
+            # Check if terrain type is 'usd'
+            if self.scene.terrain.terrain_type == "usd":
+                # For USD terrain, return False and skip terrain generator curriculum
+                print("Skipping terrain generator curriculum for USD terrain.")
+                self.scene.terrain.terrain_generator.curriculum = False  # or handle it as needed
+            else:
+                # Only enable curriculum if terrain generator is available for other terrain types
+                if self.scene.terrain.terrain_generator is not None:
+                    self.scene.terrain.terrain_generator.curriculum = True
         else:
+            # Handle the case when terrain generator curriculum is not enabled
             if self.scene.terrain.terrain_generator is not None:
                 self.scene.terrain.terrain_generator.curriculum = False
+
 
     def disable_zero_weight_rewards(self):
         """If the weight of rewards is 0, set rewards to None"""
