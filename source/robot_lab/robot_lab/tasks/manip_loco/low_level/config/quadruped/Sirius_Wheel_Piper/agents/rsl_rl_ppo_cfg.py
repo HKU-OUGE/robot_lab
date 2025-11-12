@@ -44,5 +44,5 @@ class CUHKLRLSiriusWPiperFlatPPORunnerCfg(CUHKLRLSiriusWPiperRoughPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 1500
+        self.max_iterations = 15000
         self.experiment_name = "cuhkrl_siriusw_piper_flat"

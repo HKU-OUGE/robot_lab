@@ -384,9 +384,7 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
 
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_abad_link"]
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
-            self.base_link_name,
-        ]
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
 
@@ -404,9 +402,9 @@ class CUHKLRLSiriusWPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         # position command 
         self.commands.ee_pose.curriculum_coeff = 3000 # 3000
         # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.58, 0.78)
-        self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
-        self.commands.ee_pose.ranges_init.pos_z = (0.55, 0.65)
+        self.commands.ee_pose.ranges_init.pos_x = (0.50, 0.60)
+        self.commands.ee_pose.ranges_init.pos_y = (-0.00, 0.00)
+        self.commands.ee_pose.ranges_init.pos_z = (0.2, 0.40)
         # final
         self.commands.ee_pose.ranges_final.pos_x = (0.50, 0.78)
         self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
