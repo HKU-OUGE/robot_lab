@@ -19,6 +19,7 @@ import sys
 
 from isaaclab.app import AppLauncher
 from isaaclab.utils.dict import print_dict
+# from isaaclab.managers import SceneEntityCfg
 
 # import json
 
@@ -568,6 +569,21 @@ def main():
                     print(f"    [CLIP]        {term_cfg.clip}", flush=True)
                     print(f"    [SCALE]       {term_cfg.scale}", flush=True)
                     print(f"    [NOISE]       {noise_type}", flush=True)
+                    # 专门处理 joint_pos 观测项
+                    if name == "joint_pos":
+                        # 打印额外的配置信息
+                        print(f"    [SPECIFIC CONFIG FOR joint_pos]", flush=True)
+                        # 获取关节名称
+                        if hasattr(term_cfg, 'params') and 'asset_cfg' in term_cfg.params:
+                            asset_cfg = term_cfg.params['asset_cfg']
+                            print(f"      [JOINT_NAMES] {asset_cfg.joint_names}", flush=True)
+                            # try:
+                            #     asset = env.unwrapped.scene[asset_cfg.name]
+                            #     joint_names = asset.joint_names
+                            #     print(f"      [JOINT_NAMES] {joint_names}", flush=True)
+                            # except Exception as e:
+                            #     print(f"      [ERROR] Failed to get joint names: {str(e)}", flush=True)
+
         except Exception as e:
             print(f"[WARN] Observation manager terms not accessible: {e}", flush=True)
         print("======================================================\n", flush=True)
@@ -628,6 +644,58 @@ def main():
             # # 已有的 hs -> (9, 19)
             # hs_grid = hs.reshape(9, 19)
             # print_height_scan_col_major(hs_grid, precision=3)
+
+
+
+        if args_cli.debug and args_cli.se2_gamepad:
+            print("\n====== [Observatiion Information] ======", flush=True)
+            idx = 0
+            obs_mgr = env.unwrapped.observation_manager
+            # "asset_cfg"= SceneEntityCfg("robot", joint_names=".*", preserve_order=True)
+            asset_print = env.unwrapped.scene["robot"]  # 假设资产名为"robot"
+            default_joint_pose = asset_print.data.default_joint_pos
+            joint_names = asset_print.joint_names
+            # default_joint_pose = env.unwrapped.cfg.scene[SceneEntityCfg("robot", joint_names=".*", preserve_order=True)].data.default_joint_pos[:, asset_cfg.joint_ids]
+            for group_name, term_names in obs_mgr._group_obs_term_names.items():
+                # if group_name == "policy":
+                #     group_data = obs_mgr._obs_buffer[group_name].data
+                #     if isinstance(group_data, torch.Tensor):
+                #         joint_pos_rel_values = group_data.flatten()[9:21]
+                #         # 如果组数据是张量
+                #         print(f"  Type: Tensor")
+                #         print(f"  Shape: {group_data.shape}")
+                #         # 打印部分值（避免打印过大张量）
+                #         print(f"  base_ang_vel: {group_data.flatten()[0:3].tolist()}")
+                #         print(f"  projected_gravity: {group_data.flatten()[3:6].tolist()}")
+                #         print(f"  vel_command_obs: {group_data.flatten()[6:9].tolist()}")
+                #         print(f"  joint_pos_rel: {group_data.flatten()[9:21].tolist()}")
+                #         print(f"  joint_vel: {group_data.flatten()[21:33].tolist()}")
+                #         print(f"  actions: {group_data.flatten()[33:45].tolist()}")
+                #         for i, name in enumerate(joint_names):
+                #             default_joint_pose_val = default_joint_pose[0, i].item()
+                #             current_val = default_joint_pose_val + joint_pos_rel_values[i]
+                #             print(f"  {name:<25} | {current_val:10.6f}")
+
+                if group_name == "policy":
+                    group_data = obs_mgr._obs_buffer[group_name].data
+                    if isinstance(group_data, torch.Tensor):
+                        joint_pos_rel_values = group_data.flatten()[9:27]
+                        # 如果组数据是张量
+                        print(f"  Type: Tensor")
+                        print(f"  Shape: {group_data.shape}")
+                        # 打印部分值（避免打印过大张量）
+                        print(f"  base_ang_vel: {group_data.flatten()[0:3].tolist()}")
+                        print(f"  projected_gravity: {group_data.flatten()[3:6].tolist()}")
+                        print(f"  vel_command_obs: {group_data.flatten()[6:9].tolist()}")
+                        print(f"  joint_pos_rel: {group_data.flatten()[9:27].tolist()}")
+                        print(f"  joint_vel: {group_data.flatten()[27:45].tolist()}")
+                        print(f"  actions: {group_data.flatten()[45:63].tolist()}")
+                        print(f"  pose_command: {group_data.flatten()[63:70].tolist()}")
+                        for i, name in enumerate(joint_names):
+                            default_joint_pose_val = default_joint_pose[0, i].item()
+                            current_val = default_joint_pose_val + joint_pos_rel_values[i]
+                            print(f"  {name:<25} | {current_val:10.6f}")
+
 
         start_time = time.time()
         # run everything in inference mode

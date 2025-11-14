@@ -1,0 +1,119 @@
+from isaaclab.utils import configclass
+
+from robot_lab.tasks.manip_loco.low_level.go2_piper_lab_env_cfg import ManipulationLocomotionEnvCfg
+from robot_lab.assets.go2_piper_cfg import GO2PIPER_CFG
+
+
+
+@configclass
+class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
+    base_link_name = "base"
+    trunk_link_name = "trunk"
+    hip_link_name = ".*_hip"
+    knee_link_name = ".*_calf"
+    abad_link_name = ".*_thigh"
+    foot_link_name = ".*_foot"
+
+    # fmt: off
+    # joint_names = [
+    #     "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+    #     "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+    #     "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    #     "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+    # ]
+    joint_names_full_body = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+        "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
+    ]
+
+    joint_names_quadruped = [
+        "FL_hip_joint", "FR_hip_joint", "RL_hip_joint",
+        "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
+        "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
+        "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
+    ]
+
+    joint_names_arm = [
+        "joint1", "joint2", "joint3", "joint4", "joint5", "joint6",
+    ]
+    # fmt: on
+    def __post_init__(self):
+        
+        # post init of parent
+        super().__post_init__()
+
+        self.scene.robot = GO2PIPER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+        # event
+        self.events.push_robot = None
+
+        # self.observations.policy.base_lin_vel.scale = 2.0
+        self.observations.policy.base_ang_vel.scale = 0.25
+        self.observations.policy.joint_pos.scale = 1.0
+        self.observations.policy.joint_vel.scale = 0.05
+        self.observations.policy.joint_pos.params["asset_cfg"].joint_names = (
+            self.joint_names_full_body
+        )
+        self.observations.policy.joint_vel.params["asset_cfg"].joint_names = (
+            self.joint_names_full_body
+        )
+
+        # command
+        self.commands.ee_pose.is_Go2ARM_Flat = False #TODO
+        # velocity command
+        # init
+        self.commands.base_velocity.ranges_init.lin_vel_x  = (0.0, 0.0)
+        self.commands.base_velocity.ranges_init.lin_vel_y  = (0.0, 0.0)
+        self.commands.base_velocity.ranges_init.ang_vel_z  = (0.0, 0.0)
+        # final
+        self.commands.base_velocity.ranges_final.lin_vel_x = (0.1, 0.5)
+        self.commands.base_velocity.ranges_final.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges_final.ang_vel_z = (0.0, 0.0)
+  
+        # position command 
+        # init
+        self.commands.ee_pose.ranges_init.pos_x = (0.35, 0.4)
+        self.commands.ee_pose.ranges_init.pos_y = (-0.05, 0.05)
+        self.commands.ee_pose.ranges_init.pos_z = (0.35, 0.4)
+        # final
+        self.commands.ee_pose.ranges_final.pos_x = (0.45, 0.5)
+        self.commands.ee_pose.ranges_final.pos_y = (-0.05, 0.05)
+        self.commands.ee_pose.ranges_final.pos_z = (0.35, 0.4)
+
+
+        # reward weight
+        # arm
+        self.rewards.end_effector_position_tracking.weight = 2.5
+        self.rewards.end_effector_orientation_tracking.weight = -1.5
+        self.rewards.end_effector_action_rate.weight = -0.005
+        self.rewards.end_effector_action_smoothness.weight = -0.02
+        # leg
+        self.rewards.track_lin_vel_xy_exp.weight = 1.5
+        self.rewards.track_ang_vel_z_exp.weight = 1.5
+        self.rewards.lin_vel_z_l2.weight = -2.5
+        self.rewards.ang_vel_xy_l2.weight = -0.02
+        self.rewards.dof_torques_l2.weight = -2.0e-5
+        self.rewards.dof_acc_l2.weight = -2.5e-7
+        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.feet_air_time.weight = 0.5
+        self.rewards.foot_contact.weight = 0.003
+        self.rewards.hip_deviation.weight = -0.4
+        self.rewards.joint_deviation.weight = -0.04
+        self.rewards.action_smoothness.weight = -0.02
+        self.rewards.height_reward.weight = -2.0
+        self.rewards.flat_orientation_l2.weight = -1.0
+
+        # If the weight of rewards is 0, set rewards to None
+        if self.__class__.__name__ == "Go2PIPERRoughEnvCfg":
+            self.disable_zero_weight_rewards()
+
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
+            self.base_link_name,
+            # self.trunk_link_name,
+            # self.abad_link_name,
+            # self.knee_link_name,
+            # self.hip_link_name,
+        ]
