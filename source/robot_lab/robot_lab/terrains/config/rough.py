@@ -879,4 +879,22 @@ PIT_TERRAINS_CFG = TerrainGeneratorCfg(
     },
 
 )
+
+
+SAND_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=20.0,        # 地形边界，防止掉落
+    num_rows=10,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.2, noise_range=(0.00, 0.05), noise_step=0.02
+        ),
+
+    }
+)
 """Rough terrains configuration."""

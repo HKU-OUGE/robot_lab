@@ -450,7 +450,7 @@ def main():
     # 对策略网络做去参数化
     _deparametrize_all(policy_nn)
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx", verbose=True)
 
     dt = env.unwrapped.step_dt
 

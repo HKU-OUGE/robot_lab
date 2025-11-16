@@ -13,6 +13,7 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
+from typing import Optional
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -177,6 +178,71 @@ def wheels_stop_without_cmd(
     penalty = torch.sum(torch.abs(wheel_vel), dim=1)
 
     return penalty * command
+
+
+def wheel_slip_l1(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    wheel_radius: float = 0.09,
+    epsilon: float = 0.10,
+    vel_body_frame: bool = True,
+    # ---- 可选门控：与你的 wheels_stop_without_cmd 对齐 ----
+    command_name: Optional[str] = None,   # 传入则可按“无命令”门控
+    no_cmd_lin_thresh: float = 0.05,      # m/s
+    no_cmd_ang_thresh: float = 0.05,      # rad/s
+    gate_on_no_command: bool = False,     # True: 仅在“无命令”时启用惩罚
+    # ---- 可选门控：接触（需要你在 scene 里有 contact_forces） ----
+    contact_sensor_cfg: Optional[SceneEntityCfg] = None,
+    contact_threshold: float = 1.0,
+    gate_on_contact: bool = False         # True: 仅在“接地”时启用惩罚
+) -> torch.Tensor:
+    """
+    轮滑率（longitudinal slip ratio）的 L1-mean 惩罚。
+    s_i = (ω_i * R - v_x) / (|v_x| + eps)
+    - 理想纯滚: v_x = ω * R -> s -> 0
+    - 返回: 每个 env 的标量惩罚 [N]
+    """
+    # 取机器人与轮关节角速度 ω: [N, n_wheels]
+    asset: Articulation = env.scene[asset_cfg.name]
+    omega = asset.data.joint_vel[:, asset_cfg.joint_ids]  # rad/s, shape [N, n_wheels]
+
+    # 取得机体前向线速度 v_x: 优先机体系，其次世界系
+    if vel_body_frame and hasattr(asset.data, "root_lin_vel_b"):
+        v = asset.data.root_lin_vel_b  # [N, 3]
+        v_x = v[:, 0]
+    elif hasattr(asset.data, "root_lin_vel_w"):
+        # 若只有世界系速度，这里保守取 world x；更严谨可将速度投影到机体前向
+        v_x = asset.data.root_lin_vel_w[:, 0]
+    else:
+        # 兜底：若无速度可用，则不产生惩罚
+        return torch.zeros(omega.shape[0], device=omega.device, dtype=omega.dtype)
+
+    # 纵向轮滑率 s: [N, n_wheels]
+    slip = (omega * wheel_radius - v_x.unsqueeze(-1)) / (torch.abs(v_x).unsqueeze(-1) + epsilon)
+
+    # L1-mean（对大 slip 更敏感，同时与轮数无关）
+    penalty = torch.mean(torch.abs(slip), dim=1)  # [N]
+
+    # ----- 可选门控 1：仅在“无命令”时启用 -----
+    if gate_on_no_command and (command_name is not None):
+        cmd = env.command_manager.get_command(command_name)  # [N, k]
+        lin_cmd = cmd[:, :2]
+        ang_cmd = cmd[:, 2] if cmd.shape[1] >= 3 else torch.zeros_like(lin_cmd[:, 0])
+        no_lin = torch.norm(lin_cmd, dim=1) < no_cmd_lin_thresh
+        no_ang = torch.abs(ang_cmd) < no_cmd_ang_thresh
+        no_cmd_mask = (no_lin & no_ang).to(penalty.dtype)
+        penalty = penalty * no_cmd_mask
+
+    # ----- 可选门控 2：仅在接地时启用 -----
+    if gate_on_contact and (contact_sensor_cfg is not None) and (contact_sensor_cfg.name in env.scene):
+        cf = env.scene[contact_sensor_cfg.name].data.net_forces_w  # [N, B, 3] or [N,B,6]
+        if cf.ndim == 3:
+            contact_mask = (cf[..., 2].abs().max(dim=1).values > contact_threshold)
+        else:
+            contact_mask = (cf.abs().max(dim=1).values > contact_threshold)
+        penalty = penalty * contact_mask.to(penalty.dtype)
+
+    return penalty
 
 
 def joint_position_penalty(

@@ -271,8 +271,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.joint_power.weight = -1e-5
         self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.stand_still_without_cmd.weight = -6.0
-        self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
+        # self.rewards.stand_still_without_cmd.weight = -6.0
+        # self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_pos_penalty.weight = -0.2
         self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.abad_pos_penalty.weight = -0.1

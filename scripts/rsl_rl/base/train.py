@@ -645,7 +645,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
     # run training
     ac = runner.alg.policy  # 某些版本也叫 runner.alg.actor_critic
-    print(">> Actor type:", ac.actor.__class__.__name__)  # 期望看到 _MoEActor
+    # print(">> Actor type:", ac.actor.__class__.__name__)  # 期望看到 _MoEActor
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
     # Optional: Force commit
     try:

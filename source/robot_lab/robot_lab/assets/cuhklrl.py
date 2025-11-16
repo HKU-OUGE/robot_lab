@@ -12,7 +12,7 @@ Reference: https://github.com/ruihuang1124/quadruped_control_ros2
 """
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import DCMotorCfg
+from isaaclab.actuators import DCMotorCfg, DelayedPDActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
@@ -168,6 +168,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             friction=0.0,
         ),
     },
+    actuator_value_resolution_debug_print = True,
 )
 
 CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
@@ -251,3 +252,88 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
 )
 """Configuration of Sirius using DC motor.
 """
+CUHKLRL_SIRIUS_WHEEL_DELAY_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_ori.usd", # 初步
+        # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_pre.usd", # 调优
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=True,
+            linear_damping=0.05,
+            angular_damping=0.05,
+            max_linear_velocity=200.0,
+            max_angular_velocity=200.0,
+            max_depenetration_velocity=2.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=4
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.60),
+        joint_pos={
+            "LF_HAA": 0.00,
+            "LH_HAA": 0.00,
+            "RF_HAA": -0.00,
+            "RH_HAA": -0.00,
+            "LF_HFE": 0.95,
+            "LH_HFE": -0.95,
+            "RF_HFE": 0.95,
+            "RH_HFE": -0.95,
+            "LF_KNEE": -1.6,
+            "LH_KNEE": 1.6,
+            "RF_KNEE": -1.6,
+            "RH_KNEE": 1.6,
+            "LF_WHEEL": 0.00,
+            "LH_WHEEL": 0.00,
+            "RF_WHEEL": 0.00,
+            "RH_WHEEL": 0.00,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    actuators={
+        "legs_hip": DelayedPDActuatorCfg(
+            joint_names_expr=[".*_HAA"],
+            effort_limit=40.0,
+            velocity_limit=10.0,
+            stiffness=40.0,
+            damping=2.0,
+            friction=0.0,
+            min_delay=0,
+            max_delay=5,
+        ),
+        "legs_thigh": DelayedPDActuatorCfg(
+            joint_names_expr=[".*_HFE"],
+            effort_limit=40.0,
+            velocity_limit=10.0,
+            stiffness=40.0,
+            damping=2.0,
+            friction=0.0,
+            min_delay=0,
+            max_delay=5,
+        ),
+        "legs_calf": DelayedPDActuatorCfg(
+            joint_names_expr=[".*_KNEE"],  
+            effort_limit=100.0,
+            velocity_limit=8.0,
+            stiffness=40.0,
+            damping=2.0,
+            friction=0.0,
+            min_delay=0,
+            max_delay=5,
+        ),
+        "legs_wheel": DelayedPDActuatorCfg(
+            joint_names_expr=[".*_WHEEL"],  
+            effort_limit=40.0,
+            velocity_limit=15.0,
+            stiffness=0.0,
+            damping=3.0,
+            friction=0.0,
+            min_delay=0,
+            max_delay=5,
+        ),
+    },
+    actuator_value_resolution_debug_print = True,
+)
