@@ -127,9 +127,13 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.rewards.flat_orientation_l2.weight = -2.0
         self.rewards.thigh_contact.weight = -0.5
         self.rewards.calf_contact.weight = -0.5
-        self.rewards.hip_deviation.weight = -0.2
+        self.rewards.hip_deviation.weight = -0.4
         self.rewards.joint_deviation.weight = -0.01
 
+        # self.observations.policy.base_lin_vel.scale = 2.0
+        self.observations.policy.base_ang_vel.scale = 0.25
+        self.observations.policy.joint_pos.scale = 1.0
+        self.observations.policy.joint_vel.scale = 0.05
         self.observations.policy.joint_pos.params["asset_cfg"].joint_names = (
             self.joint_names_full_body
         )
@@ -142,7 +146,7 @@ class CUHKLRLSiriusPiperRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names_quadruped
-
+        # self.actions.arm_pose.joint_names = self.joint_names_arm
         # ------------------------------Rewards------------------------------
         # General
         # UNUESD self.rewards.is_alive.weight = 0

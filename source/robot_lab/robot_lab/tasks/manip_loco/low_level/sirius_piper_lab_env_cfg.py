@@ -223,7 +223,7 @@ class CommandsCfg:
     ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
         asset_name="robot",
         body_name="gripper_base",
-        resampling_time_range=(6.0,8.0),
+        resampling_time_range=(5.0,7.0),
         debug_vis=True,
         is_QuadrupedManipulator=True,
         curriculum_coeff = 1000,          
@@ -231,8 +231,8 @@ class CommandsCfg:
             pos_x=(0.58, 0.78),
             pos_y=(-0.35, 0.35),
             pos_z=(0.3, 0.65), # world frame not base frame
-            roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 6, 3.14 + 3.14 / 6),  # depends on end-effector axis
+            roll=(-0.5, 0.5),
+            pitch=(3.14 - 3.14 / 4, 3.14 + 3.14 / 8),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
         ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
@@ -255,7 +255,7 @@ class CommandsCfg:
 
     base_velocity = mdp.command_cfg.MLUniformVelocityCommandCfg(
         asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
+        resampling_time_range=(8.0,8.0),
         rel_standing_envs=0.1,
         debug_vis=True,
         is_QuadrupedManipulator=True,
@@ -288,29 +288,29 @@ class ActionsCfg:
                                          use_default_offset=True,
                                          preserve_order=True,
     )   
-    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-    #                                       joint_names=[
-    #                                           "joint1", "joint2", "joint3", 
-    #                                           "joint4", "joint5", "joint6"],
-    #                                        scale = {"joint1":        0.5, # 0.8
-    #                                                 "joint2":     0.5, # 0.35
-    #                                                 "joint3":        0.5, # 0.35
-    #                                                 "joint4": 0.5, # 0.35
-    #                                                 "joint5":  0.5, # 0.35
-    #                                                 "joint6": 0.5}, # 0.35
-    #                                         use_default_offset=True,
-    #                                         preserve_order=True,
-    # )
+    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+                                          joint_names=[
+                                              "joint1", "joint2", "joint3", 
+                                              "joint4", "joint5", "joint6"],
+                                           scale = {"joint1":        0.5, # 0.8
+                                                    "joint2":     0.5, # 0.35
+                                                    "joint3":        0.5, # 0.35
+                                                    "joint4": 0.5, # 0.35
+                                                    "joint5":  0.5, # 0.35
+                                                    "joint6": 0.5}, # 0.35
+                                            use_default_offset=True,
+                                            preserve_order=True,
+    )
 
 
-    arm_pose = DifferentialInverseKinematicsActionCfg(
-            asset_name="robot",
-            joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-            body_name="gripper_base",
-            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
-            scale=0.5,
-            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
-        )
+    # arm_pose = DifferentialInverseKinematicsActionCfg(
+    #         asset_name="robot",
+    #         joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+    #         body_name="gripper_base",
+    #         controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
+    #         scale=0.5,
+    #         body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
+    #     )
 
     #     self.actions.arm_action = mdp.JointPositionActionCfg(
     #         asset_name="robot", joint_names=["panda_joint.*"], scale=0.5, use_default_offset=True
