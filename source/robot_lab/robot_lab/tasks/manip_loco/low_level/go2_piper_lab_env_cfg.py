@@ -208,53 +208,59 @@ class CommandsCfg:
     """Command specifications for the MDP."""
     ## Go2ARM
     
-    ee_pose = mdp.command_cfg.UniformPoseCommandCfg(
+    ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
         asset_name="robot",
         body_name="gripper_base",
         resampling_time_range=(6.0,8.0),
         debug_vis=True,
-        is_Go2ARM=True,
+        is_QuadrupedManipulator=True,
         curriculum_coeff = 1000,          
-        ranges_final =mdp.command_cfg.UniformPoseCommandCfg.Ranges(
+        ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
             pos_x=(0.4, 0.6),
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
+            pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(- 3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
-        ranges = mdp.command_cfg.UniformPoseCommandCfg.Ranges(
+        ranges = mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
             pos_x=(0.4, 0.6),
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
+            pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(-3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
-        ranges_init=mdp.command_cfg.UniformPoseCommandCfg.Ranges(
+        ranges_init=mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
             pos_x=(0.45, 0.5), 
             pos_y=(-0.05, 0.05),
             pos_z=(0.35, 0.4), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(1.57, 1.57),  # depends on end-effector axis
+            pitch=(3.14, 3.14),  # depends on end-effector axis
+            # pitch=(1.57, 1.57),  # depends on end-effector axis
+            # pitch=(0.0, 0.0),  # depends on end-effector axis
             yaw=(-0.0, 0.0),
         ),
     )
 
-    base_velocity = mdp.command_cfg.UniformVelocityCommandCfg(
+    base_velocity = mdp.command_cfg.MLUniformVelocityCommandCfg(
         asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
+        resampling_time_range=(10.0,10.0),
         rel_standing_envs=0.1,
         debug_vis=True,
-        is_Go2ARM=True,
+        is_QuadrupedManipulator=True,
         curriculum_coeff= 1000,         
-        ranges=mdp.command_cfg.UniformVelocityCommandCfg.Ranges(
+        ranges=mdp.command_cfg.MLUniformVelocityCommandCfg.Ranges(
             lin_vel_x=(0.2, 1.0), lin_vel_y=(-0.5, 0.5), ang_vel_z=(-0.5, 0.5),heading=(-0.0, 0.0)
         ),
-        ranges_final=mdp.command_cfg.UniformVelocityCommandCfg.Ranges(
+        ranges_final=mdp.command_cfg.MLUniformVelocityCommandCfg.Ranges(
             lin_vel_x=(0.1, 0.8), lin_vel_y=(-0.5, 0.5), ang_vel_z=(-0.5, 0.5),heading=(-0.0, 0.0)
         ),
-        ranges_init=mdp.command_cfg.UniformVelocityCommandCfg.Ranges(
+        ranges_init=mdp.command_cfg.MLUniformVelocityCommandCfg.Ranges(
             lin_vel_x=(0.1, 0.35), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1),heading=(-0.0, 0.0)
         ),
     )

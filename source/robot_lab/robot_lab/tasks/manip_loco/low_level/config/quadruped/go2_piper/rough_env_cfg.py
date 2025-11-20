@@ -86,9 +86,9 @@ class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
 
         # reward weight
         # arm
-        self.rewards.end_effector_position_tracking.weight = 2.5
-        self.rewards.end_effector_orientation_tracking.weight = -1.5
-        self.rewards.end_effector_action_rate.weight = -0.005
+        self.rewards.end_effector_position_tracking.weight = 1.5
+        self.rewards.end_effector_orientation_tracking.weight = -1.0
+        self.rewards.end_effector_action_rate.weight = -0.05
         self.rewards.end_effector_action_smoothness.weight = -0.02
         # leg
         self.rewards.track_lin_vel_xy_exp.weight = 1.5
@@ -103,7 +103,7 @@ class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
         self.rewards.hip_deviation.weight = -0.4
         self.rewards.joint_deviation.weight = -0.04
         self.rewards.action_smoothness.weight = -0.02
-        self.rewards.height_reward.weight = -2.0
+        self.rewards.height_reward.weight = -3.0
         self.rewards.flat_orientation_l2.weight = -1.0
 
         # If the weight of rewards is 0, set rewards to None
@@ -112,7 +112,7 @@ class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
 
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
             self.base_link_name,
-            # self.trunk_link_name,
+            self.trunk_link_name,
             # self.abad_link_name,
             # self.knee_link_name,
             # self.hip_link_name,

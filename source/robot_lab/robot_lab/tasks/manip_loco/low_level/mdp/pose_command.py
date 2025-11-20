@@ -379,7 +379,7 @@ class MLUniformPoseCommand(CommandTerm):
                                                      self.pose_command_b[i, 1], 
                                                      self.pose_command_b[i, 2] 
                                                     ])) 
-                while((length_arm > 0.7) or (length_arm < 0.3) or (self.pose_command_b[i, 0] < 0.40)):
+                while((length_arm > 0.7) or (length_arm < 0.3) or (self.pose_command_b[i, 0] < 0.1 )):
                         self.pose_command_b[i, 0] = (r_1.uniform_(*self.cfg.ranges_init.pos_x))  * torch.clamp((1 - count), 0, 1) + \
                                                         (r_1.uniform_(*self.cfg.ranges_final.pos_x)) * torch.clamp((count), 0, 1) 
                         self.pose_command_b[i, 1] = (r_1.uniform_(*self.cfg.ranges_init.pos_y))  * torch.clamp((1 - count), 0, 1) + \
