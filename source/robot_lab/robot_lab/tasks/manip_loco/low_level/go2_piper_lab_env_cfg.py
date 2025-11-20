@@ -18,6 +18,8 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 import isaaclab.terrains as terrain_gen
+from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
+from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 
 
 import robot_lab.tasks.manip_loco.low_level.mdp as mdp
@@ -113,16 +115,16 @@ class EventCfg:
         },
     )
 
-    randomize_rigid_body_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
-            "operation": "scale",
-            "recompute_inertia": True,                # 关键：改质量后重算惯量
-        },
-    )
+    # randomize_rigid_body_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+    #         "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
+    #         "operation": "scale",
+    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
+    #     },
+    # )
 
     # base_com = EventTerm(
     #     func=mdp.randomize_rigid_body_com,
@@ -133,27 +135,27 @@ class EventCfg:
     #     },
     # )
 
-    add_ee_mass = EventTerm(
-        func=mdp.randomize_rigid_body_mass,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-            "mass_distribution_params": (-0.1, 0.8),
-            "operation": "add",
-            "recompute_inertia": True,                # 关键：改质量后重算惯量
-        },
-    )
+    # add_ee_mass = EventTerm(
+    #     func=mdp.randomize_rigid_body_mass,
+    #     mode="startup",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+    #         "mass_distribution_params": (-0.1, 0.8),
+    #         "operation": "add",
+    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
+    #     },
+    # )
 
     # reset
-    base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "force_range": (-10.0, 10.0),
-            "torque_range": (-10.0, 10.0),
-        },
-    )
+    # base_external_force_torque = EventTerm(
+    #     func=mdp.apply_external_force_torque,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+    #         "force_range": (-10.0, 10.0),
+    #         "torque_range": (-10.0, 10.0),
+    #     },
+    # )
 
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
@@ -171,16 +173,16 @@ class EventCfg:
         },
     )
     
-    actuator_gains = EventTerm(
-        func=mdp.randomize_actuator_gains,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.5, 2.0),
-            "damping_distribution_params": (0.5, 2.0),
-            "operation": "scale",
-        },
-    )
+    # actuator_gains = EventTerm(
+    #     func=mdp.randomize_actuator_gains,
+    #     mode="reset",
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+    #         "stiffness_distribution_params": (0.5, 2.0),
+    #         "damping_distribution_params": (0.5, 2.0),
+    #         "operation": "scale",
+    #     },
+    # )
 
     reset_robot_joints = EventTerm(
         func=mdp.reset_joints_by_scale,
@@ -192,12 +194,12 @@ class EventCfg:
     )
 
     # interval
-    push_robot = EventTerm(
-        func=mdp.push_by_setting_velocity,
-        mode="interval",
-        interval_range_s=(10.0, 15.0),
-        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    )
+    # push_robot = EventTerm(
+    #     func=mdp.push_by_setting_velocity,
+    #     mode="interval",
+    #     interval_range_s=(10.0, 15.0),
+    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    # )
 
 ##
 # MDP settings
@@ -282,19 +284,27 @@ class ActionsCfg:
                                          use_default_offset=True,
                                          preserve_order=True,
     )   
-    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-                                          joint_names=[
-                                              "joint1", "joint2", "joint3", 
-                                              "joint4", "joint5", "joint6"],
-                                           scale = {"joint1":        0.5, # 0.8
-                                                    "joint2":     0.5, # 0.35
-                                                    "joint3":        0.5, # 0.35
-                                                    "joint4": 0.5, # 0.35
-                                                    "joint5":  0.5, # 0.35
-                                                    "joint6": 0.5}, # 0.35
-                                            use_default_offset=True,
-                                            preserve_order=True,
-    )
+    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+    #                                       joint_names=[
+    #                                           "joint1", "joint2", "joint3", 
+    #                                           "joint4", "joint5", "joint6"],
+    #                                        scale = {"joint1":        0.5, # 0.8
+    #                                                 "joint2":     0.5, # 0.35
+    #                                                 "joint3":        0.5, # 0.35
+    #                                                 "joint4": 0.5, # 0.35
+    #                                                 "joint5":  0.5, # 0.35
+    #                                                 "joint6": 0.5}, # 0.35
+    #                                         use_default_offset=True,
+    #                                         preserve_order=True,
+    # )
+    arm_pose = DifferentialInverseKinematicsActionCfg(
+            asset_name="robot",
+            joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+            body_name="gripper_base",
+            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
+            scale=0.5,
+            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
+        )
 
 
 @configclass
@@ -359,6 +369,7 @@ class RewardsCfg:
 
     # -- ARM 
     # The name must have a prefix of "end_effector_".
+    is_terminated = RewTerm(func=mdp.is_terminated, weight=0.0)
     end_effector_position_tracking = RewTerm(
         func=mdp.position_command_error_exp,
         weight=2.5,
@@ -505,6 +516,12 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_thigh_joint", ".*_calf_joint"])},
     )
 
+    arm_joint_deviation = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.04,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"])},
+    )
+
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
@@ -531,6 +548,11 @@ class CurriculumCfg:
                                params={"term_name": "height_reward",
                                        "num_steps": 4000,
                                        "weight": -1.00})
+    
+    # flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "height_reward",
+    #                                    "num_steps": 4000,
+    #                                    "weight": -1.00})
     
 ##
 # Environment configuration
