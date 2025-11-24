@@ -13,7 +13,7 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 
 GO2PIPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/go2_piper/go2_piper.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/go2_piper_r2/go2_piper.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -42,7 +42,7 @@ GO2PIPER_CFG = ArticulationCfg(
             ".*L_hip_joint": 0.1,
             ".*R_hip_joint": -0.1,
             "F[L,R]_thigh_joint": 0.8,
-            "R[L,R]_thigh_joint": 1.0,
+            "R[L,R]_thigh_joint": 0.8,
             ".*_calf_joint": -1.5,
             # arm
             # "joint1": 0.0,
@@ -52,10 +52,10 @@ GO2PIPER_CFG = ArticulationCfg(
             # "joint5": -0.8,
             # "joint6": 0.0,
             "joint1": 0.0,
-            "joint2": 0.3,
-            "joint3": -0.4,
+            "joint2": 2.2,
+            "joint3": -1.5,
             "joint4": 0.0,
-            "joint5": 0.2,
+            "joint5": 0.7,
             "joint6": 0.0,
         },
         joint_vel={".*": 0.0},

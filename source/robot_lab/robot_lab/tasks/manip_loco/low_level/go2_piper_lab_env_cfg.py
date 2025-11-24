@@ -178,8 +178,8 @@ class EventCfg:
     #     mode="reset",
     #     params={
     #         "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-    #         "stiffness_distribution_params": (0.5, 2.0),
-    #         "damping_distribution_params": (0.5, 2.0),
+    #         "stiffness_distribution_params": (0.8, 1.5),
+    #         "damping_distribution_params": (0.8, 1.5),
     #         "operation": "scale",
     #     },
     # )
@@ -301,7 +301,7 @@ class ActionsCfg:
             asset_name="robot",
             joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
             body_name="gripper_base",
-            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=False, ik_method="dls"),
+            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=True, ik_method="dls"),
             scale=0.5,
             body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
         )
