@@ -13,6 +13,7 @@ class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
     knee_link_name = ".*_calf"
     abad_link_name = ".*_thigh"
     foot_link_name = ".*_foot"
+    arm_link_name = "link.*"
 
     # fmt: off
     # joint_names = [
@@ -146,5 +147,6 @@ class Go2PIPERRoughEnvCfg(ManipulationLocomotionEnvCfg):
             self.abad_link_name,
             # self.knee_link_name,
             self.hip_link_name,
+            self.arm_link_name
         ]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = None

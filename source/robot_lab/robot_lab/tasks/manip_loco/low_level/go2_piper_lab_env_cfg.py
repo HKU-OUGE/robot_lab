@@ -222,8 +222,8 @@ class CommandsCfg:
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
-            # pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
+            pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(- 3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
@@ -232,8 +232,8 @@ class CommandsCfg:
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
-            # pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
+            pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(-3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
@@ -242,8 +242,8 @@ class CommandsCfg:
             pos_y=(-0.05, 0.05),
             pos_z=(0.35, 0.4), # world frame not base frame
             roll=(-0.0, 0.0),
-            pitch=(3.14, 3.14),  # depends on end-effector axis
-            # pitch=(1.57, 1.57),  # depends on end-effector axis
+            # pitch=(3.14, 3.14),  # depends on end-effector axis
+            pitch=(1.57, 1.57),  # depends on end-effector axis
             # pitch=(0.0, 0.0),  # depends on end-effector axis
             yaw=(-0.0, 0.0),
         ),
@@ -539,15 +539,15 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    flat_ori_modify = CurrTerm(func=mdp.modify_reward_weight,
-                               params={"term_name": "flat_orientation_l2",
-                                       "num_steps": 2000,
-                                       "weight": -0.00})
+    # flat_ori_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "flat_orientation_l2",
+    #                                    "num_steps": 2000,
+    #                                    "weight": -0.00})
 
-    flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
-                               params={"term_name": "height_reward",
-                                       "num_steps": 4000,
-                                       "weight": -1.00})
+    # flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "height_reward",
+    #                                    "num_steps": 4000,
+    #                                    "weight": -1.00})
     
     # flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
     #                            params={"term_name": "height_reward",

@@ -32,7 +32,7 @@ class Go2PIPERFlatEnvCfg(Go2PIPERRoughEnvCfg):
         # position command 
         self.commands.ee_pose.curriculum_coeff = 4000 # 3000
         # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.5, 0.5)
+        self.commands.ee_pose.ranges_init.pos_x = (0.45, 0.45)
         self.commands.ee_pose.ranges_init.pos_y = (-0.0, 0.0)
         self.commands.ee_pose.ranges_init.pos_z = (0.50, 0.50)
         # final
@@ -44,7 +44,7 @@ class Go2PIPERFlatEnvCfg(Go2PIPERRoughEnvCfg):
         # reward weight
         # arm
         self.rewards.end_effector_position_tracking.weight = 2.5 #2.5
-        self.rewards.end_effector_orientation_tracking.weight = -2.0 #-1.5
+        self.rewards.end_effector_orientation_tracking.weight = -1.0 #-1.5
         self.rewards.end_effector_action_rate.weight = -0.05 #-0.005 
         self.rewards.end_effector_action_smoothness.weight = -0.05 #-0.02
         
