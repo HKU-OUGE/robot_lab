@@ -892,7 +892,33 @@ SAND_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.2, noise_range=(0.00, 0.05), noise_step=0.02
+            proportion=0.7, noise_range=(0.00, 0.05), noise_step=0.01
+        ),
+        "plane": terrain_gen.MeshPlaneTerrainCfg(
+            proportion=0.3,
+        ),
+
+    }
+)
+
+SAND_SLOPE_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=20.0,        # 地形边界，防止掉落
+    num_rows=12,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.2, noise_range=(0.00, 0.03), noise_step=0.01
+        ),
+        "noisy_slope": terrain_gen.HfNoisyPyramidSlopedTerrainCfg(
+            proportion=0.8,
+            slope_range=(0.1, 0.8),     # 自己调
+            platform_width=1.0,
+            noise_range=(-0.05, 0.0),    # 在高度上加最多 2cm 的波动
         ),
 
     }

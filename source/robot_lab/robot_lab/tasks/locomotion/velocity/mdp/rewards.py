@@ -179,11 +179,16 @@ def wheels_stop_without_cmd(
 
     return penalty * command
 
+def wheel_action_l2(env: ManagerBasedRLEnv, wheel_ids: list[int]) -> torch.Tensor:
+    # env.action_manager.action: (num_envs, action_dim)
+    actions = env.action_manager.action[:, wheel_ids]
+    return torch.sum(actions**2, dim=1)
+
 
 def wheel_slip_l1(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
-    wheel_radius: float = 0.09,
+    wheel_radius: float = 0.1,
     epsilon: float = 0.10,
     vel_body_frame: bool = True,
     # ---- 可选门控：与你的 wheels_stop_without_cmd 对齐 ----

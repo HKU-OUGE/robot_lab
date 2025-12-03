@@ -129,7 +129,7 @@ class CommandsCfg:
     base_velocity = mdp.UniformThresholdVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,
+        rel_standing_envs=0.1,
         rel_heading_envs=0.9,
         heading_command=True,
         heading_control_stiffness=0.5,
@@ -192,7 +192,7 @@ class ObservationsCfg:
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-1.5, n_max=1.5),
+            noise=Unoise(n_min=-0.2, n_max=0.2),
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
