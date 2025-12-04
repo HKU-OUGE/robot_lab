@@ -99,27 +99,43 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.10, 0.15),
-            step_width=0.5,
+            proportion=0.2,
+            step_height_range=(0.10, 0.5),
+            step_width=0.3,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
+            size=(12.0, 12.0),
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.10, 0.15),
-            step_width=0.5,
+            proportion=0.1,
+            step_height_range=(0.10, 0.5),
+            step_width=0.3,
             platform_width=3.0,
             border_width=1.0,
             holes=False,
+            size=(12.0, 12.0),
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
         ),
-        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
-        ),
-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
-        ),
+        # "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+        #     proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        # ),
+        # "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+        #     proportion=0.15, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25
+        # ),
     },
 )
 
