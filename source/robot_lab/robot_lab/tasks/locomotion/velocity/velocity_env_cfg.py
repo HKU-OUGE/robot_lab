@@ -448,27 +448,27 @@ class RewardsCfg:
     )
 
     # Others
-    # feet_air_time = RewTerm(
-    #     func=mdp.feet_air_time,
-    #     weight=0.0,
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-    #         "threshold": 0.5,
-    #     },
-    # )
-
     feet_air_time = RewTerm(
         func=mdp.feet_air_time,
         weight=0.0,
         params={
             "command_name": "base_velocity",
-            "mode_time": 0.3,
-            "velocity_threshold": 0.5,
-            "asset_cfg": SceneEntityCfg("robot"),
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+            "threshold": 0.5,
         },
     )
+
+    # feet_air_time = RewTerm(
+    #     func=mdp.feet_air_time,
+    #     weight=0.0,
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "mode_time": 0.3,
+    #         "velocity_threshold": 0.5,
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
+    #     },
+    # )
 
     feet_gait = RewTerm(
         func=mdp.GaitReward,
@@ -565,9 +565,10 @@ class RewardsCfg:
         func=mdp.feet_height_body_exp,
         weight=0.0,
         params={
-            "std": math.sqrt(0.25),
+            "tanh_mult": 2.0,
+            "target_height": float,
+            "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", body_names=""),
-            "target_height": -0.3,
         },
     )
 
