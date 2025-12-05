@@ -54,6 +54,26 @@ class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
 @configclass
 class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     """Reward terms for the MDP."""
+
+    joint_vel_wheel_l2 = RewTerm(
+        func=mdp.joint_vel_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
+    )
+
+    joint_acc_wheel_l2 = RewTerm(
+        func=mdp.joint_acc_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
+    )
+
+    joint_torques_wheel_l2 = RewTerm(
+        func=mdp.joint_torques_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
+    )
+    wheels_stop_without_cmd = RewTerm(
+        func=mdp.wheels_stop_without_cmd,
+        weight=0.0,   # 惩罚系数，可调
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot", joint_names=""),
+        },
+    )
     joint_pos_penalty = RewTerm(
         func=mdp.joint_pos_penalty,
         weight=0.0,
@@ -65,18 +85,6 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_threshold": 0.3,
         },
     )
-    wheel_action_l2 = RewTerm(
-        func=mdp.wheel_action_l2,
-        weight=0.0,   #前2500
-        # weight=0.0,
-        params={"wheel_ids": [12, 13, 14, 15]},
-    )
-    leg_action_l2 = RewTerm(
-        func=mdp.wheel_action_l2,
-        weight=0.0,   #前2500
-        # weight=0.0,
-        params={"wheel_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]},
-    )
     abad_pos_penalty = RewTerm(
         func=mdp.joint_pos_penalty,
         weight=0.0,
@@ -84,8 +92,16 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
             "stand_still_scale": 5.0,
-            "velocity_threshold": 1.1,
-            "command_threshold": 1.1,
+            "velocity_threshold": 0.3,
+            "command_threshold": 0.3,
+        },
+    )
+    wheel_mirror = RewTerm(
+        func=mdp.wheel_mirror,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "mirror_joints": [["LF_WHEEL", "RF_WHEEL"], ["LH_WHEEL", "RH_WHEEL"]],
         },
     )
     knee_undesired_contacts = RewTerm(
@@ -93,116 +109,19 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
         weight=0.0,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=""), "threshold": 1.0},
     )
-    joint_deviation_hip_roll = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names="")},
-    )
-    joint_deviation_knee = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names="")},
-    )
-    feet_air_time_wheel = RewTerm(
-        func=mdp.feet_air_time,
-        weight=0.0,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_FOOT_link"),
-            "command_name": "base_velocity",
-            "threshold": 0.75,
-        },
-    )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
-        # # ... 你已有的观测项
-        # front_scan = ObsTerm(
-        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
-        #             params={"sensor_cfg": SceneEntityCfg("front_height")},
-        #             # 根据需要保留噪声，或设为 0
-        #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(-2.0, 2.0),
-        #             scale=1.0,
-        #         )
-        # back_scan = ObsTerm(
-        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
-        #             params={"sensor_cfg": SceneEntityCfg("back_height")},
-        #             # 根据需要保留噪声，或设为 0
-        #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(-2.0, 2.0),
-        #             scale=1.0,
-        #         )
-        wheel_joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-0.2, n_max=0.2),
-            clip=(-100.0, 100.0),
-            scale=1.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-        )
-        joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-0.2, n_max=0.2),
-            clip=(-100.0, 100.0),
-            scale=1.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-        )
-        base_lin_vel = None
         obs_scan = None
-    @configclass
-    class CUHKLRLSiriusWStudentPolicyCfg(ObservationsCfg.PolicyCfg):
-        # # ... 你已有的观测项
-        height_scan = None
         base_lin_vel = None
     @configclass
     class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
-        wheel_joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-0.0, n_max=0.0),
-            clip=(-100.0, 100.0),
-            scale=1.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-        )
-        joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-0.0, n_max=0.0),
-            clip=(-100.0, 100.0),
-            scale=1.0,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-        )
-        # img_feat = ObsTerm(
-        #             func=mdp.observations.image_features,                      # 调用离散化后的扫描函数
-        #             params={
-        #                 "sensor_cfg": SceneEntityCfg("main_camera"),  # 关键：相机名
-        #                 "data_type": "rgb",                           # 也可 "distance_to_camera"
-        #                 "model_name": "resnet18",                     # 默认即 resnet18
-        #                 # "model_device": "cuda:0",                     # 可把特征提取放到独立设备
-        #             },
-        #             clip=None,
-        #             scale=1.0,
-        #         )
-        # front_scan = ObsTerm(
-        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
-        #             params={"sensor_cfg": SceneEntityCfg("front_height")},
-        #             # 根据需要保留噪声，或设为 0
-        #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(-2.0, 2.0),
-        #             scale=1.0,
-        #         )
-        # back_scan = ObsTerm(
-        #             func=mdp.height_scan,                      # 调用离散化后的扫描函数
-        #             params={"sensor_cfg": SceneEntityCfg("back_height")},
-        #             # 根据需要保留噪声，或设为 0
-        #             noise=Unoise(n_min=0.0, n_max=0.0),
-        #             clip=(-2.0, 2.0),
-        #             scale=1.0,
-        #         )
         obs_scan = None
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
     critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
-    # student_policy: CUHKLRLSiriusWStudentPolicyCfg = CUHKLRLSiriusWStudentPolicyCfg()
 
 
 
@@ -234,29 +153,19 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         super().__post_init__()
         # self.only_positive_rewards = True
         CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.init_state.pos=(0.0, 0.0, 0.55)
-        # legs_hip = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.actuators["legs_hip"]
-        # legs_thigh = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.actuators["legs_thigh"]
-        # legs_calf = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.actuators["legs_calf"]
-        # legs_hip.friction   = 1000.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬 前1500轮次
-        # legs_thigh.friction   = 1000.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬 前1500轮次
-        # legs_calf.friction   = 1000.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬 前1500轮次
-        # leg_joint.friction   = 10.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
-        # leg_joint.friction   = 5.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
-        # leg_joint.friction   = 2.5        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
-        # wheel.velocity_limit_sim = 0.1
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
         #     "LH_HAA": 0.00,
         #     "RF_HAA": -0.00,
         #     "RH_HAA": -0.00,
-        #     "LF_HFE": 0.2,
-        #     "LH_HFE": -0.2,
-        #     "RF_HFE": 0.2,
-        #     "RH_HFE": -0.2,
-        #     "LF_KNEE": -1.2,
-        #     "LH_KNEE": 1.2,
-        #     "RF_KNEE": -1.2,
-        #     "RH_KNEE": 1.2,
+        #     "LF_HFE": 0.52,
+        #     "LH_HFE": -0.52,
+        #     "RF_HFE": 0.52,
+        #     "RH_HFE": -0.52,
+        #     "LF_KNEE": -1.6,
+        #     "LH_KNEE": 1.6,
+        #     "RF_KNEE": -1.6,
+        #     "RH_KNEE": 1.6,
         #     "LF_WHEEL": 0.00,
         #     "LH_WHEEL": 0.00,
         #     "RF_WHEEL": 0.00,
@@ -266,35 +175,17 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         # switch robot to unitree b2w
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.ray_caster = None
-        # self.scene.front_height = RayCasterCfg(
-        #     prim_path="{ENV_REGEX_NS}/Robot/base",
-        #     offset=RayCasterCfg.OffsetCfg(pos=(0.75, 0.0, 20.0)),
-        #     ray_alignment='yaw',
-        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.5, 0.5]),
-        #     debug_vis=True,
-        #     mesh_prim_paths=["/World/ground"],
-        # )
-        # self.scene.back_height = RayCasterCfg(
-        #     prim_path="{ENV_REGEX_NS}/Robot/base",
-        #     offset=RayCasterCfg.OffsetCfg(pos=(-0.65, 0.0, 20.0)),
-        #     ray_alignment='yaw',
-        #     pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[0.5, 0.5]),
-        #     debug_vis=True,
-        #     mesh_prim_paths=["/World/ground"],
-        # )
-        # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        # self.scene.front_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        # self.scene.back_height.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator=EASY_ROUGH_TERRAINS_CFG
+        self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
+        # self.observations.policy.height_scan = None
         self.observations.policy.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
         )
         self.observations.critic.height_scan = ObsTerm(
             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
         )
+        # self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=self.leg_joint_names, preserve_order=True
@@ -308,114 +199,139 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel_rel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.leg_joint_names, preserve_order=True
+            "robot", joint_names=self.joint_names, preserve_order=True
         )
-        self.observations.policy.wheel_joint_vel.func = mdp.joint_vel_rel
-        self.observations.policy.wheel_joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
-        )
-
-        self.observations.critic.joint_vel.func = mdp.joint_vel_rel
-        self.observations.critic.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.leg_joint_names, preserve_order=True
-        )
-        self.observations.critic.wheel_joint_vel.func = mdp.joint_vel_rel
-        self.observations.critic.wheel_joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
-        )
-
-
-        self.observations.policy.joint_vel.scale = 1.5
-        self.observations.policy.wheel_joint_vel.scale = 1.0
-
+        self.observations.policy.joint_vel.scale = 0.5
         self.observations.critic.joint_vel.scale = 0.5
-        self.observations.policy.wheel_joint_vel.scale = 1.0
-
-        # self.observations.student_policy.joint_pos.func = mdp.joint_pos_rel
-        # self.observations.student_policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
-        #     "robot", joint_names=self.leg_joint_names, preserve_order=True
-        # )
-        # self.observations.student_policy.base_ang_vel.scale = 0.25
-        # self.observations.student_policy.joint_pos.scale = 1.0
-        # self.observations.student_policy.joint_vel.func = mdp.joint_vel_rel
-        # self.observations.student_policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-        #     "robot", joint_names=self.leg_joint_names, preserve_order=True
-        # )
-        # self.observations.student_policy.joint_vel.scale = 0.5
         # self.observations.policy.base_lin_vel = None
-        # self.observations.policy.height_scan = None
-        # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
-        # self.observations.policy.joint_vel.params["asset_cfg"].joint_names = self.joint_names
-        # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names[:-4]
 
         # ------------------------------Actions------------------------------
         # reduce action scale
         self.actions.joint_pos.scale = 0.25
-        self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
-        self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.scale = 1.5
+        self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
+        self.actions.joint_pos.joint_names = self.joint_names[:-4]
         self.actions.joint_vel.joint_names = self.joint_names[-4:]
 
         # ------------------------------Events------------------------------
         self.events.randomize_reset_base.params = {
             "pose_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (0.0, 0.2),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
                 "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
+                "x": (-0.5, 0.5),
+                "y": (-0.5, 0.5),
+                "z": (-0.5, 0.5),
+                "roll": (-0.5, 0.5),
+                "pitch": (-0.5, 0.5),
+                "yaw": (-0.5, 0.5),
             },
         }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
-        # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.85, 1.0)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.75, 1.0)
-        self.events.randomize_push_robot = None
-        self.events.randomize_apply_external_force_torque = None
-        # self.events.randomize_apply_external_force_torque.params["force_range"] = (-30.0, 30.0)
-        # self.events.randomize_apply_external_force_torque.params["torque_range"] = (-10.0, 10.0)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.0)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
 
         # ------------------------------Rewards------------------------------
         # General
-        self.rewards.is_terminated.weight = -200.0
+        self.rewards.is_terminated.weight = 0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -2.0
+        self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = 0.0
+        self.rewards.flat_orientation_l2.weight = -1.0
+        self.rewards.base_height_l2.weight = 0
+        self.rewards.base_height_l2.params["target_height"] = 0.40
+        self.rewards.base_height_l2.params["asset_cfg"].body_names = [self.base_link_name]
+        self.rewards.body_lin_acc_l2.weight = 0
+        self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [self.base_link_name]
+
         # Joint penalties
-        self.rewards.joint_deviation_hip_roll.weight = -0.5
-        self.rewards.joint_deviation_hip_roll.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_deviation_knee.weight = 0.0
-        self.rewards.joint_deviation_knee.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_torques_l2.weight = -2.5e-5
+        self.rewards.joint_torques_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_torques_wheel_l2.weight = 0
+        self.rewards.joint_torques_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_vel_l2.weight = -2.5e-6
+        self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_vel_wheel_l2.weight = -2.5e-8
+        self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_acc_l2.weight = -2.5e-7
+        self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_acc_wheel_l2.weight = -2.5e-9
+        self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
+        # self.rewards.create_joint_deviation_l1_rewterm("joint_deviation_hip_l1", -0.2, [".*_hip_joint"])
+        self.rewards.joint_pos_limits.weight = -5.0
+        self.rewards.joint_pos_limits.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_vel_limits.weight = 0
+        self.rewards.joint_vel_limits.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.joint_power.weight = -1e-5
+        self.rewards.joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
+        # self.rewards.stand_still_without_cmd.weight = -6.0
+        # self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_pos_penalty.weight = -0.2
+        self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.abad_pos_penalty.weight = -0.1
+        self.rewards.abad_pos_penalty.params["asset_cfg"].joint_names = [
+            "LF_HAA", 
+            "RF_HAA", 
+            "LH_HAA", 
+            "RH_HAA", 
+            "LF_HFE", 
+            "RF_HFE", 
+            "LH_HFE", 
+            "RH_HFE", 
+        ]
+        self.rewards.wheel_vel_penalty.weight = 0
+        self.rewards.wheel_vel_penalty.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.wheel_vel_penalty.params["asset_cfg"].joint_names = self.wheel_joint_names
+        self.rewards.feet_continue_contact.weight = 0.0
+        self.rewards.feet_continue_contact.params["expect_contact_num"] = 4
+        self.rewards.feet_continue_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
         # Velocity-tracking rewards
         # Action penalties
         self.rewards.action_rate_l2.weight = -0.01
+
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -1.0
+        self.rewards.undesired_contacts.weight = -2.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            f"^(?!.*({self.foot_link_name})).*"
+            f"^(?!.*({self.foot_link_name}|{self.calf_link_name})).*"
         ]
+        # self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
+        #     f"^(?!.*({self.foot_link_name})).*"
+        # ]
+        self.rewards.knee_undesired_contacts.weight = 0.0
+        self.rewards.knee_undesired_contacts.params["sensor_cfg"].body_names = self.calf_link_name
+        self.rewards.contact_forces.weight = -1.5e-4
+        self.rewards.contact_forces.params["sensor_cfg"].body_names = [self.foot_link_name]
 
         # Velocity-tracking rewards
+        self.rewards.track_lin_vel_xy_exp.weight = 5.0
+        self.rewards.track_ang_vel_z_exp.weight = 3.0
         self.rewards.track_lin_vel_xy_exp = RewTerm(
-            func=mdp.track_lin_vel_xy_exp, weight=4.0, params={"command_name": "base_velocity", "std": 0.1}
+            func=mdp.track_lin_vel_xy_exp, weight=3.0, params={"command_name": "base_velocity", "std": 0.5}
         )
         self.rewards.track_ang_vel_z_exp = RewTerm(
-            func=mdp.track_ang_vel_z_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.1}
+            func=mdp.track_ang_vel_z_exp, weight=1.5, params={"command_name": "base_velocity", "std": 0.5}
         )
         # Others
+        self.rewards.feet_air_time.weight = 0
+        self.rewards.feet_air_time.params["threshold"] = 0.5
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_contact.weight = 0
+        self.rewards.feet_contact.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_contact_without_cmd.weight = 0.1
+        self.rewards.feet_contact_without_cmd.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_stumble.weight = 0
+        self.rewards.feet_stumble.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_slide.weight = 0.0
+        self.rewards.feet_slide.params["sensor_cfg"].body_names = [self.foot_link_name]
+        self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_gait.weight = 0.0
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (("LF_FOOT_link", "RF_FOOT_link"), ("LH_FOOT_link", "RH_FOOT_link"))
         self.rewards.upward.weight = 0.0
@@ -424,8 +340,6 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
             ["RF_(HAA|HFE|KNEE).*", "LH_(HAA|HFE|KNEE).*"],
             ["LF_(HAA|HFE|KNEE).*", "RH_(HAA|HFE|KNEE).*"],
         ]
-        self.rewards.stand_still_without_cmd.weight = 0.0
-        self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.joint_names
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWWheelEXPEnvCfg":
@@ -433,7 +347,6 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_abad_link"]
-        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
@@ -467,7 +380,7 @@ class CUHKLRLSiriusWWheelEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.height_scan = None
         self.observations.critic.height_scan = None
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.ang_vel_z = (-0.6, 0.6)
         self.commands.base_velocity.ranges.heading = (3.14, 3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)
