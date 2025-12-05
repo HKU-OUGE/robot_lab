@@ -657,45 +657,45 @@ def main():
             joint_names = asset_print.joint_names
             # default_joint_pose = env.unwrapped.cfg.scene[SceneEntityCfg("robot", joint_names=".*", preserve_order=True)].data.default_joint_pos[:, asset_cfg.joint_ids]
             for group_name, term_names in obs_mgr._group_obs_term_names.items():
-                # if group_name == "policy":
-                #     group_data = obs_mgr._obs_buffer[group_name].data
-                #     if isinstance(group_data, torch.Tensor):
-                #         joint_pos_rel_values = group_data.flatten()[9:21]
-                #         # 如果组数据是张量
-                #         print(f"  Type: Tensor")
-                #         print(f"  Shape: {group_data.shape}")
-                #         # 打印部分值（避免打印过大张量）
-                #         print(f"  base_ang_vel: {group_data.flatten()[0:3].tolist()}")
-                #         print(f"  projected_gravity: {group_data.flatten()[3:6].tolist()}")
-                #         print(f"  vel_command_obs: {group_data.flatten()[6:9].tolist()}")
-                #         print(f"  joint_pos_rel: {group_data.flatten()[9:21].tolist()}")
-                #         print(f"  joint_vel: {group_data.flatten()[21:33].tolist()}")
-                #         print(f"  actions: {group_data.flatten()[33:45].tolist()}")
-                #         for i, name in enumerate(joint_names):
-                #             default_joint_pose_val = default_joint_pose[0, i].item()
-                #             current_val = default_joint_pose_val + joint_pos_rel_values[i]
-                #             print(f"  {name:<25} | {current_val:10.6f}")
-
                 if group_name == "policy":
                     group_data = obs_mgr._obs_buffer[group_name].data
                     if isinstance(group_data, torch.Tensor):
                         joint_pos_rel_values = group_data.flatten()[9:27]
                         # 如果组数据是张量
-                        print(f"  Type: Tensor")
-                        print(f"  Shape: {group_data.shape}")
-                        # 打印部分值（避免打印过大张量）
+                        # print(f"  Type: Tensor")
+                        # print(f"  Shape: {group_data.shape}")
+                        # # 打印部分值（避免打印过大张量）
+                        # print(f"  base_ang_vel: {group_data.flatten()[0:3].tolist()}")
+                        # print(f"  projected_gravity: {group_data.flatten()[3:6].tolist()}")
+                        # print(f"  vel_command_obs: {group_data.flatten()[6:9].tolist()}")
+                        # print(f"  joint_pos_rel: {group_data.flatten()[9:27].tolist()}")
+                        # print(f"  joint_vel: {group_data.flatten()[27:45].tolist()}")
+                        # print(f"  actions: {group_data.flatten()[45:63].tolist()}")
+                        # print(f"  pose_command: {group_data.flatten()[63:70].tolist()}")
+                        # for i, name in enumerate(joint_names):
+                        #     default_joint_pose_val = default_joint_pose[0, i].item()
+                        #     current_val = default_joint_pose_val + joint_pos_rel_values[i]
+                        #     print(f"  {name:<25} | {current_val:10.6f}")
+
                         print(f"  base_ang_vel: {group_data.flatten()[0:3].tolist()}")
                         print(f"  projected_gravity: {group_data.flatten()[3:6].tolist()}")
                         print(f"  vel_command_obs: {group_data.flatten()[6:9].tolist()}")
                         print(f"  joint_pos_rel: {group_data.flatten()[9:27].tolist()}")
                         print(f"  joint_vel: {group_data.flatten()[27:45].tolist()}")
-                        print(f"  actions: {group_data.flatten()[45:63].tolist()}")
-                        print(f"  pose_command: {group_data.flatten()[63:70].tolist()}")
-                        for i, name in enumerate(joint_names):
-                            default_joint_pose_val = default_joint_pose[0, i].item()
-                            current_val = default_joint_pose_val + joint_pos_rel_values[i]
-                            print(f"  {name:<25} | {current_val:10.6f}")
-
+                        print(f"  actions: {group_data.flatten()[45:57].tolist()}")
+                        print(f"  pose_command: {group_data.flatten()[57:64].tolist()}")
+                    # if term_names == "action":
+            # act_mgr = env.unwrapped.action_manager
+            # act_data = act_mgr[]
+            for group_name, term in env.unwrapped.action_manager._terms.items():
+                print(f"[ACTION GROUP] {group_name}", flush=True)
+                joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+                term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+                for i, val in enumerate(term_actions):
+                    joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                idx += term.action_dim
+            print("=====================================\n", flush=True)
 
         start_time = time.time()
         # run everything in inference mode
