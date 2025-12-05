@@ -78,7 +78,7 @@ class MySceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment='yaw',
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.8, 0.8]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 0.5]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
@@ -129,8 +129,8 @@ class CommandsCfg:
     base_velocity = mdp.UniformThresholdVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.02,
-        rel_heading_envs=1.0,
+        rel_standing_envs=0.1,
+        rel_heading_envs=0.9,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
@@ -192,7 +192,7 @@ class ObservationsCfg:
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-1.5, n_max=1.5),
+            noise=Unoise(n_min=-0.2, n_max=0.2),
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},

@@ -489,7 +489,7 @@ def main():
     # 对策略网络做去参数化
     _deparametrize_all(policy_nn)
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx", verbose=True)
 
     dt = env.unwrapped.step_dt
 
@@ -710,8 +710,8 @@ def main():
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-        # if args_cli.keyboard:
-        #     rsl_rl_utils.camera_follow(env)
+        if args_cli.keyboard:
+            rsl_rl_utils.camera_follow(env)
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)

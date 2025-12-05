@@ -65,31 +65,8 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_threshold": 0.3,
         },
     )
-    wheels_stop_without_cmd = RewTerm(
-        func=mdp.wheels_stop_without_cmd,
-        weight=-0.1,   # 惩罚系数，可调
-        params={
-            "command_name": "base_velocity",
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_WHEEL"),
-        },
-    )
-    wheel_slip = RewTerm(
-        func=mdp.wheel_slip_l1,
-        # weight=-0.1,   # 前2500
-        weight=0.0, 
-        params={
-            "command_name": "base_velocity",
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_WHEEL"),
-        },
-    )
     joint_vel_wheel_l2 = RewTerm(
         func=mdp.joint_vel_l2, weight=0.0, params={"asset_cfg": SceneEntityCfg("robot", joint_names="")}
-    )
-    wheel_action_l2 = RewTerm(
-        func=mdp.wheel_action_l2,
-        weight=-3.5,   #前2500
-        # weight=0.0,
-        params={"wheel_ids": [12, 13, 14, 15]},
     )
     abad_pos_penalty = RewTerm(
         func=mdp.joint_pos_penalty,
@@ -125,6 +102,12 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
             "command_name": "base_velocity",
             "threshold": 0.75,
         },
+    )
+    wheel_action_l2 = RewTerm(
+        func=mdp.wheel_action_l2,
+        weight=-3.5,   #前2500
+        # weight=0.0,
+        params={"wheel_ids": [12, 13, 14, 15]},
     )
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
@@ -193,7 +176,7 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
 
 
 @configclass
-class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
+class CUHKLRLSiriusWSlopeLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
     actions: CUHKLRLSiriusWActionsCfg = CUHKLRLSiriusWActionsCfg()
     rewards: CUHKLRLSiriusWRewardsCfg = CUHKLRLSiriusWRewardsCfg()
     commands: CUHKLRLSiriusWCommandsCfg = CUHKLRLSiriusWCommandsCfg()
@@ -216,6 +199,12 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         "RF_HAA", "RF_HFE",
         "RH_HAA", "RH_HFE",
     ]
+    abad_joint_names = [
+        "LF_HAA",
+        "LH_HAA",
+        "RF_HAA",
+        "RH_HAA",
+    ]
     knee_joint_names = [
         "LF_KNEE",
         "LH_KNEE",
@@ -234,11 +223,11 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.init_state.pos=(0.0, 0.0, 0.55)
         wheel = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.actuators["legs_wheel"]
         wheel.friction   = 50.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬 前1500轮次
+        wheel.friction   = 25.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
         wheel.friction   = 10.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
         wheel.friction   = 5.0        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
-        wheel.friction   = 2.5        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
         # wheel.friction   = 2.5        # 阻尼给大点（100~500都行），过大可能会让求解器更硬
-        wheel.damping = 3.0
+        # wheel.velocity_limit_sim = 0.1
         # CUHKLRL_SIRIUS_WHEEL_CFG.init_state.joint_pos={
         #     "LF_HAA": 0.00,
         #     "LH_HAA": 0.00,
@@ -303,7 +292,7 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel_rel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
+            "robot", joint_names=self.joint_names, preserve_order=True
         )
         self.observations.policy.joint_vel.scale = 0.5
         self.observations.critic.joint_vel.scale = 0.5
@@ -356,8 +345,8 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
         # self.events.randomize_com_positions.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
-        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.55, 1.0)
-        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.45, 0.9)
+        self.events.randomize_rigid_body_material.params["static_friction_range"] = (0.55, 0.95)
+        self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (0.45, 0.85)
         # self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.0)
         # self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
         self.events.randomize_push_robot = None
@@ -368,27 +357,26 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Rewards------------------------------
         # General
         self.rewards.is_terminated.weight = 0.0  # 前1500轮
-        self.rewards.is_terminated.weight = -200.0
+        # self.rewards.is_terminated.weight = -200.0
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -1.0 # 前1500轮
-        # self.rewards.lin_vel_z_l2.weight = -2.0
+        self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
         self.rewards.flat_orientation_l2.weight = 0
         # Joint penalties
         self.rewards.joint_deviation_hip_roll.weight = -0.2
-        self.rewards.joint_deviation_hip_roll.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_deviation_knee.weight = 0.0
+        self.rewards.joint_deviation_hip_roll.params["asset_cfg"].joint_names = self.abad_joint_names
+        self.rewards.joint_deviation_knee.weight = -0.2
         self.rewards.joint_deviation_knee.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.joint_vel_wheel_l2.weight = -2.5e-2
         self.rewards.joint_vel_wheel_l2.weight = -2.5e-3
         # self.rewards.joint_vel_wheel_l2.weight = -2.5e-4
         self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.stand_still_without_cmd.weight = -1.0
+        self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = self.leg_joint_names
         # Velocity-tracking rewards
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.02
         # Contact sensor
         self.rewards.undesired_contacts.weight = -1.0
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
@@ -397,10 +385,10 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp = RewTerm(
-            func=mdp.track_lin_vel_xy_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.5}
+            func=mdp.track_lin_vel_xy_exp, weight=4.0, params={"command_name": "base_velocity", "std": 0.5}
         )
         self.rewards.track_ang_vel_z_exp = RewTerm(
-            func=mdp.track_ang_vel_z_exp, weight=1.0, params={"command_name": "base_velocity", "std": 0.5}
+            func=mdp.track_ang_vel_z_exp, weight=4.0, params={"command_name": "base_velocity", "std": 0.5}
         )
         # Others
         self.rewards.feet_gait.weight = 0.0
@@ -413,7 +401,7 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         ]
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
-        if self.__class__.__name__ == "CUHKLRLSiriusWLegEXPEnvCfg":
+        if self.__class__.__name__ == "CUHKLRLSiriusWSlopeLegEXPEnvCfg":
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
@@ -427,7 +415,7 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.terrain = TerrainImporterCfg(
             prim_path="/World/ground",
             terrain_type="generator",                     # 用平面替代阶梯/噪声等生成器
-            terrain_generator=SAND_TERRAINS_CFG,                   # plane 不需要生成器
+            terrain_generator=SAND_SLOPE_CFG,                   # plane 不需要生成器
             max_init_terrain_level=10,
             collision_group=-1,
             physics_material=sim_utils.RigidBodyMaterialCfg(

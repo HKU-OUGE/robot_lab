@@ -148,7 +148,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
-        self.scene.terrain.terrain_generator=FLOATING_RING_TERRAINS_CFG
+        self.scene.terrain.terrain_generator=AVOID1_TERRAINS_CFG
         # self.scene.main_camera = CameraCfg(
         #     prim_path="{ENV_REGEX_NS}/Robot/" + self.base_link_name + "/main_camera",
         #     update_period=1.0 / 30.0,          # 30 Hz
@@ -233,7 +233,7 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
             "robot", joint_names=self.wheel_joint_names, preserve_order=True
         )
         self.observations.policy.joint_vel.scale = 0.05
-        self.observations.policy.base_lin_vel = None
+        # self.observations.policy.base_lin_vel = None
         # self.observations.policy.base_lin_vel = None
         # self.observations.policy.height_scan = None
         # self.observations.policy.joint_pos.params["asset_cfg"].joint_names = self.joint_names
@@ -369,11 +369,11 @@ class CUHKLRLSiriusWRingEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        # self.terminations.illegal_contact = None
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 0.6)
-        self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.6, 0.6)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.4, 0.4)
         self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
-        self.commands.base_velocity.ranges.heading = (3.14,3.14)
+        self.commands.base_velocity.ranges.heading = (3.14, 3.14)
         self.curriculum.command_levels.params["range_multiplier"] = (1.0, 1.0)

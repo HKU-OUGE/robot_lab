@@ -104,3 +104,38 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWLegEXPPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-SlopeLegEXP-CUHKLRL-SiriusW-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.slope_leg_exp_env_cfg:CUHKLRLSiriusWSlopeLegEXPEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWSlopeLegEXPPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-CMPLegEXP-CUHKLRL-SiriusW-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.compare_legexp_env_cfg:CUHKLRLSiriusWCMPLegEXPEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWCMPLegEXPPPORunnerCfg",
+    },
+)
+
+###############################
+# Teacher-Student Distillation #
+###############################
+
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-LegEXP-CUHKLRL-SiriusW-Distill-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.leg_exp_env_cfg:CUHKLRLSiriusWLegEXPEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWLegEXPDistillationRunnerCfg",
+    },
+)
