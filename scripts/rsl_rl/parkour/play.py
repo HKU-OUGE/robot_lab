@@ -58,6 +58,7 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 # from parkour_tasks.extreme_parkour_task.config.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 from robot_lab.tasks.extreme_parkour_task.velocity.config.quadruped.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
+# from robot_lab.tasks.extreme_parkour_task.velocity.config.quadruped.arcdog.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 
 # from scripts.rsl_rl.exporter import (
 # export_teacher_policy_as_jit, 

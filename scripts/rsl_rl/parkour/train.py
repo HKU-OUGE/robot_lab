@@ -91,6 +91,7 @@ from isaaclab.utils.io import dump_yaml
 # from parkour_tasks.extreme_parkour_task.config.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 # from scripts.rsl_rl.vecenv_wrapper import ParkourRslRlVecEnvWrapper
 from robot_lab.tasks.extreme_parkour_task.velocity.config.quadruped.go2.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
+# from robot_lab.tasks.extreme_parkour_task.velocity.config.quadruped.arcdog.agents.parkour_rl_cfg import ParkourRslRlOnPolicyRunnerCfg
 from vecenv_wrapper import ParkourRslRlVecEnvWrapper
 # import isaaclab_tasks  # noqa: F401
 # import parkour_tasks  # noqa: F401

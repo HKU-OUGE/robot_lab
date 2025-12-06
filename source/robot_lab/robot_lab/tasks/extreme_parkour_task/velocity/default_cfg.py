@@ -1,6 +1,7 @@
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG  # isort:skip
+# from robot_lab.assets.arclab import ARCLAB_ARCDOG_NEW_CFG
 import isaaclab.sim as sim_utils
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.terrains import TerrainImporterCfg
@@ -35,6 +36,7 @@ def quat_from_euler_xyz_tuple(roll: torch.Tensor, pitch: torch.Tensor, yaw: torc
 @configclass
 class ParkourDefaultSceneCfg(InteractiveSceneCfg):
     robot: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    # robot: ArticulationCfg = ARCLAB_ARCDOG_NEW_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
