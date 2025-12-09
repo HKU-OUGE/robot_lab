@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -9,9 +8,8 @@ from collections import deque
 
 import rsl_rl
 from rsl_rl.env import VecEnv
-from rsl_rl.modules import (
-    EmpiricalNormalization,
-)
+# 移除 EmpiricalNormalization，因为现在的 runner 不再直接管理它
+# from rsl_rl.modules import EmpiricalNormalization 
 from .actor_critic_with_encoder import ActorCriticRMA
 from rsl_rl.utils import store_code_state
 from rsl_rl.runners.on_policy_runner import OnPolicyRunner
@@ -58,6 +56,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             num_privileged_obs = extras["observations"][self.privileged_obs_type].shape[1]
         else:
             num_privileged_obs = num_obs
+            
         estimator_class = eval(self.estimator_cfg.pop("class_name"))
         estimator: DefaultEstimator = estimator_class(**self.estimator_cfg).to(self.device)
         policy_class = eval(self.policy_cfg.pop("class_name"))
@@ -112,16 +111,11 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
 
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
+        
+        # 移除了 EmpiricalNormalization 的手动初始化
+        # 在新的 rsl_rl API 中，归一化集成在 Policy/Algorithm 内部
         self.empirical_normalization = self.cfg["empirical_normalization"]
 
-        if self.empirical_normalization:
-            self.obs_normalizer = EmpiricalNormalization(shape=[num_obs], until=1.0e8).to(self.device)
-            self.privileged_obs_normalizer = EmpiricalNormalization(shape=[num_privileged_obs], until=1.0e8).to(
-                self.device
-            )
-        else:
-            self.obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
-            self.privileged_obs_normalizer = torch.nn.Identity().to(self.device)  # no normalization
         # --- 核心修改部分 ---
         if self.depth_encoder_cfg is None:
             # 🟢 修改：在字典中同时添加 privileged_observations
@@ -203,8 +197,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         if self.is_distributed:
             print(f"Synchronizing parameters for rank {self.gpu_global_rank}...")
             self.alg.broadcast_parameters()
-            # TODO: Do we need to synchronize empirical normalizers?
-            #   Right now: No, because they all should converge to the same values "asymptotically".
+            # 移除了对 normalizer 的同步检查，因为它们现在应该在 policy 内部
 
         # Start training
         start_iter = self.current_learning_iteration
@@ -216,6 +209,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             # Rollout
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
+                    # 直接传递 obs, 不再在 runner 层做 normalizer
                     # Sample actions
                     actions = self.alg.act(obs, privileged_obs, hist_encoding)
 
@@ -228,16 +222,18 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                     obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
                     # Move to device
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
-                    # perform normalization
-                    obs = self.obs_normalizer(obs)
+                    
+                    # 移除了手动 normalizer 调用:
+                    # obs = self.obs_normalizer(obs)
+                    
                     if self.privileged_obs_type is not None:
-                        privileged_obs = self.privileged_obs_normalizer(
-                            infos["observations"][self.privileged_obs_type].to(self.device)
-                        )
+                        # privileged_obs 也不再手动 normalize，假设算法/策略内部处理
+                        privileged_obs = infos["observations"][self.privileged_obs_type].to(self.device)
                     else:
                         privileged_obs = obs
 
                     # process the step
+                    # rsl_rl 新版中 process_env_step 通常接收 raw obs，并在 Algorithm 内部处理
                     self.alg.process_env_step(obs, rewards, dones, infos)
 
                     # Extract intrinsic rewards (only for logging)
@@ -367,6 +363,7 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
             delta_yaw_ok_buffer = []
             yaws_buffer = []
             for _ in range(self.depth_encoder_cfg['num_steps_per_env']):
+                # 移除了 obs = self.obs_normalizer(obs)
                 if self.env.unwrapped.common_step_counter %5 == 0:
                     obs_prop_depth = obs[:, :self.depth_encoder_cfg['num_prop']].clone()
                     obs_prop_depth[:, 6:8] = 0
@@ -393,8 +390,9 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
                     obs, dones = (obs.to(self.device), dones.to(self.device))
                 additional_obs['delta_yaw_ok'] = infos["observations"]['delta_yaw_ok']
                 additional_obs['depth_camera'] = infos["observations"]['depth_camera']
-                # perform normalization
-                obs = self.obs_normalizer(obs)
+                
+                # 移除了手动 normalizer: obs = self.obs_normalizer(obs)
+
                 if self.log_dir is not None:
                     if "episode" in infos:
                         ep_infos.append(infos["episode"])
@@ -542,10 +540,9 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         if self.alg.rnd:
             saved_dict["rnd_state_dict"] = self.alg.rnd.state_dict()
             saved_dict["rnd_optimizer_state_dict"] = self.alg.rnd_optimizer.state_dict()
-        # -- Save observation normalizer if used
-        if self.empirical_normalization:
-            saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()
-            saved_dict["privileged_obs_norm_state_dict"] = self.privileged_obs_normalizer.state_dict()
+        
+        # 移除了 obs_norm_state_dict 的单独保存
+
         if self.depth_encoder_cfg is not None :
             saved_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             saved_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
@@ -562,12 +559,10 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])
-        if self.empirical_normalization:
-            if resumed_training:
-                self.obs_normalizer.load_state_dict(loaded_dict["obs_norm_state_dict"])
-                self.privileged_obs_normalizer.load_state_dict(loaded_dict["privileged_obs_norm_state_dict"])
-            else:
-                self.privileged_obs_normalizer.load_state_dict(loaded_dict["obs_norm_state_dict"])
+        
+        # 移除了对 obs_normalizer 和 privileged_obs_normalizer 的手动加载
+        # 依赖于 self.alg.policy.load_state_dict 恢复归一化参数
+
         if self.depth_encoder_cfg is not None:
             if 'depth_encoder_state_dict' not in loaded_dict:
                 warnings.warn("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
@@ -609,20 +604,16 @@ class OnPolicyRunnerWithExtractor(OnPolicyRunner):
         self.eval_mode()  # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.policy.to(device)
+        # 直接返回 policy.act_inference
+        # 假设 Policy 模块内部已经包含了必要的归一化逻辑 (如 self.obs_normalizer)
         policy = self.alg.policy.act_inference
-        if self.cfg["empirical_normalization"]:
-            if device is not None:
-                self.obs_normalizer.to(device)
-            policy = lambda x: self.alg.policy.act_inference(self.obs_normalizer(x))  # noqa: E731
+        # 删除了 lambda 包装器
         return policy
 
     def get_inference_depth_policy(self, device=None):
         self.eval_mode()  # switch to evaluation mode (dropout for example)
         if device is not None:
             self.alg.depth_actor.to(device)
+        # 同上，直接返回 policy
         policy = self.alg.depth_actor
-        if self.cfg["empirical_normalization"]:
-            if device is not None:
-                self.obs_normalizer.to(device)
-            policy = lambda x: self.alg.depth_actor(self.obs_normalizer(x))  # noqa: E731
         return policy
