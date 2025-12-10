@@ -99,9 +99,24 @@ class StudentObservationsCfg:
             'threshold': 0.6
             },
         )
+
+    @configclass
+    class CriticCfg(ObsGroup):
+        """Observations for policy group."""
+        extreme_parkour_observations = ObsTerm(
+            func=observations.ExtremeParkourObservations,
+            params={            
+            "asset_cfg":SceneEntityCfg("robot"),
+            "sensor_cfg":SceneEntityCfg("contact_forces", body_names=".*_foot"),
+            "parkour_name":'base_parkour',
+            "history_length": 10,
+            },
+            clip= (-100,100)
+        )
     policy: PolicyCfg = PolicyCfg()
     depth_camera: DepthCameraPolicyCfg = DepthCameraPolicyCfg()
     delta_yaw_ok: DeltaYawOkPolicyCfg = DeltaYawOkPolicyCfg()
+    critic: CriticCfg = CriticCfg()
 
 
 @configclass

@@ -192,8 +192,8 @@ class image_features(ManagerTermBase):
                 rows.append(row)
 
             grid_img = np.vstack(rows)   
-            cv2.imshow("depth_images_grid", grid_img)
-            cv2.waitKey(1)
+            # cv2.imshow("depth_images_grid", grid_img)
+            # cv2.waitKey(1)
         return self.depth_buffer[:, -2].to(env.device)
 
     def _process_depth_image(self, depth_image):
@@ -229,4 +229,5 @@ class obervation_delta_yaw_ok(ManagerTermBase):
             asset: Articulation = env.scene[asset_cfg.name]
             _, _, yaw = euler_xyz_from_quat(asset.data.root_quat_w)
             self.delta_yaw = parkour_event.target_yaw - wrap_to_pi(yaw)
-        return self.delta_yaw < threshold
+        result = (self.delta_yaw < threshold).float()  # 转为 0.0/1.0
+        return result.unsqueeze(-1)                    # Shape: (N, 1) Float
