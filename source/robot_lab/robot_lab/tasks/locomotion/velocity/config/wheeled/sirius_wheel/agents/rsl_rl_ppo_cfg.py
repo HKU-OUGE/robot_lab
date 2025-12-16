@@ -254,23 +254,51 @@ class CUHKLRLSiriusWStandPPORunnerWithSymmetryCfg(CUHKLRLSiriusWStandPPORunnerCf
         ),
     )
 
+# @configclass
+# class CUHKLRLSiriusWWheelEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+#     num_steps_per_env = 24
+#     max_iterations = 2500
+#     save_interval = 100
+#     experiment_name = "cuhkrl_siriusw_wheel_exp"
+#     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
+#     policy = RslRlPpoActorCriticRecurrentCfg(
+#         init_noise_std=1.0,
+#         actor_obs_normalization=True,
+#         critic_obs_normalization=True,
+#         actor_hidden_dims=[512, 256, 128],
+#         critic_hidden_dims=[512, 256, 128],
+#         activation="elu",
+#         rnn_type="gru",          # 或 "gru"/"lstm"
+#         rnn_hidden_dim=256,
+#         rnn_num_layers=1,
+#     )
+#     algorithm = RslRlPpoAlgorithmCfg(
+#         value_loss_coef=1.0,
+#         use_clipped_value_loss=True,
+#         clip_param=0.2,
+#         entropy_coef=0.01,
+#         num_learning_epochs=5,
+#         num_mini_batches=4,
+#         learning_rate=1.0e-3,
+#         schedule="adaptive",
+#         gamma=0.99,
+#         lam=0.95,
+#         desired_kl=0.01,
+#         max_grad_norm=1.0,
+#     )
+
 @configclass
 class CUHKLRLSiriusWWheelEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 2500
+    max_iterations = 3000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_wheel_exp"
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
-    policy = RslRlPpoActorCriticRecurrentCfg(
+    policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
-        rnn_type="gru",          # 或 "gru"/"lstm"
-        rnn_hidden_dim=256,
-        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -287,23 +315,51 @@ class CUHKLRLSiriusWWheelEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         max_grad_norm=1.0,
     )
 
+# @configclass
+# class CUHKLRLSiriusWLegEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
+#     num_steps_per_env = 24
+#     max_iterations = 2500
+#     save_interval = 100
+#     experiment_name = "cuhkrl_siriusw_leg_exp"
+#     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
+#     policy = RslRlPpoActorCriticRecurrentCfg(
+#         init_noise_std=1.0,
+#         actor_obs_normalization=True,
+#         critic_obs_normalization=True,
+#         actor_hidden_dims=[512, 256, 128],
+#         critic_hidden_dims=[512, 256, 128],
+#         activation="elu",
+#         rnn_type="gru",          # 或 "gru"/"lstm"
+#         rnn_hidden_dim=256,
+#         rnn_num_layers=1,
+#     )
+#     algorithm = RslRlPpoAlgorithmCfg(
+#         value_loss_coef=1.0,
+#         use_clipped_value_loss=True,
+#         clip_param=0.2,
+#         entropy_coef=0.01,
+#         num_learning_epochs=5,
+#         num_mini_batches=4,
+#         learning_rate=1.0e-3,
+#         schedule="adaptive",
+#         gamma=0.99,
+#         lam=0.95,
+#         desired_kl=0.01,
+#         max_grad_norm=1.0,
+#     )
+
 @configclass
 class CUHKLRLSiriusWLegEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 2500
+    max_iterations = 3000
     save_interval = 100
     experiment_name = "cuhkrl_siriusw_leg_exp"
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
-    policy = RslRlPpoActorCriticRecurrentCfg(
+    policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        actor_obs_normalization=True,
-        critic_obs_normalization=True,
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
-        rnn_type="gru",          # 或 "gru"/"lstm"
-        rnn_hidden_dim=256,
-        rnn_num_layers=1,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
@@ -319,6 +375,7 @@ class CUHKLRLSiriusWLegEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
 
 @configclass
 class CUHKLRLSiriusWCMPLegEXPPPORunnerCfg(RslRlOnPolicyRunnerCfg):

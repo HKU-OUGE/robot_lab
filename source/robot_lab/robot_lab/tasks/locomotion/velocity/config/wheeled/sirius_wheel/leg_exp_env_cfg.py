@@ -303,7 +303,7 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos.scale = 1.0
         self.observations.policy.joint_vel.func = mdp.joint_vel_rel
         self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
+            "robot", joint_names=self.joint_names, preserve_order=True
         )
         self.observations.policy.joint_vel.scale = 0.5
         self.observations.critic.joint_vel.scale = 0.5
@@ -419,7 +419,7 @@ class CUHKLRLSiriusWLegEXPEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name, ".*_abad_link"]
         # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [self.base_link_name]
-        # self.terminations.illegal_contact = None
+        self.terminations.illegal_contact = None
         # ------------------------------Commands------------------------------
         # ------------------------------Commands------------------------------
         self.scene.terrain.terrain_type = "plane"

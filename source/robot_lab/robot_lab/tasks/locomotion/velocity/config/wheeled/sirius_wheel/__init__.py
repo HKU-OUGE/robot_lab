@@ -139,3 +139,19 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CUHKLRLSiriusWLegEXPDistillationRunnerCfg",
     },
 )
+
+
+
+###############################
+# MoE #
+###############################
+gym.register(
+    id="RobotLab-Isaac-Velocity-SiriusW-MoE-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        # "env_cfg_entry_point": f"{__name__}.siriusw_moe_env_cfg:CUHKLRLSiriusWMoeEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.leg_exp_env_cfg:CUHKLRLSiriusWLegEXPEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.moe_terrain:SiriusMoEPPOCfg", # 指向我们刚才定义的 MoE 算法配置
+    },
+)
