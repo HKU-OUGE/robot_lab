@@ -261,7 +261,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "static_friction_range": (0.3, 1.0),
+            "static_friction_range": (0.4, 1.0),
             "dynamic_friction_range": (0.3, 0.8),
             "restitution_range": (0.0, 0.0),
             "num_buckets": 64,
@@ -274,20 +274,20 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
+            "mass_distribution_params": (0.85, 1.15),   # 先收窄，之后再放宽
             "operation": "scale",
             "recompute_inertia": True,                # 关键：改质量后重算惯量
         },
     )
 
-    # randomize_com_positions = EventTerm(
-    #     func=mdp.randomize_rigid_body_com,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-    #         "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.05, 0.05)},
-    #     },
-    # )
+    randomize_com_positions = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "com_range": {"x": (-0.02, 0.02), "y": (-0.02, 0.02), "z": (-0.02, 0.02)},
+        },
+    )
 
     # reset
     randomize_apply_external_force_torque = EventTerm(
@@ -296,7 +296,7 @@ class EventCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=""),
             "force_range": (-10.0, 10.0),
-            "torque_range": (-10.0, 10.0),
+            "torque_range": (-5.0, 5.0),
         },
     )
 
@@ -305,8 +305,8 @@ class EventCfg:
         func=mdp.reset_joints_by_offset,
         mode="reset",
         params={
-            "position_range": (-0.2, 0.2),
-            "velocity_range": (-2.5, 2.5),
+            "position_range": (-0.1, 0.1),
+            "velocity_range": (-0.5, 0.5),
         },
     )
 
@@ -315,10 +315,21 @@ class EventCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            "stiffness_distribution_params": (0.5, 2.0),
-            "damping_distribution_params": (0.5, 2.0),
+            "stiffness_distribution_params": (0.8, 1.2),
+            "damping_distribution_params": (0.8, 1.2),
             "operation": "scale",
             "distribution": "log_uniform",
+        },
+    )
+
+    randomize_joint_friction = EventTerm(
+        func=mdp.randomize_joint_parameters,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "friction_distribution_params": (0.05, 0.2), # 增加 0.05~0.2 Nm 的摩擦力
+            "operation": "add",
+            "distribution": "uniform",
         },
     )
 

@@ -62,7 +62,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names
 
@@ -73,6 +73,11 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_apply_external_force_torque.params[
             "asset_cfg"
         ].body_names = [self.base_link_name]
+        self.events.randomize_actuator_gains.params["asset_cfg"].joint_names = [".*"]
+        self.events.randomize_joint_friction.params["asset_cfg"].joint_names = [".*"]
+        self.events.randomize_com_positions.params["asset_cfg"].body_names = [
+            self.base_link_name
+        ]
 
         # ------------------------------Rewards------------------------------
         # General
@@ -82,7 +87,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.5
         self.rewards.flat_orientation_l2.weight = -2.0
-        self.rewards.base_height_l2.weight = -3.5
+        self.rewards.base_height_l2.weight = -4.5
         self.rewards.base_height_l2.params["target_height"] = 0.35
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
@@ -96,13 +101,13 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_torques_l2.weight = -2.5e-6
         # 测试 暂时取消此惩罚
         self.rewards.joint_vel_l2.weight = -0.005
-        # self.rewards.joint_acc_l2.weight = -3.0e-8
+        self.rewards.joint_acc_l2.weight = -1.0e-7
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
         self.rewards.joint_vel_limits.weight = -0.05
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.07
+        self.rewards.action_rate_l2.weight = -0.04
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
@@ -117,11 +122,11 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5.5
-        self.rewards.track_ang_vel_z_exp.weight = 4.0
+        self.rewards.track_lin_vel_xy_exp.weight = 2.5
+        self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
-        self.rewards.feet_air_time.weight = 4.0
+        self.rewards.feet_air_time.weight = 3.0
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact.weight = -0.005
@@ -137,22 +142,22 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         # self.rewards.joint_power.weight = -2e-5
         # 测试 暂时取消
-        self.rewards.joint_power.weight = -2e-7
+        self.rewards.joint_power.weight = -2e-6
         self.rewards.stand_still_without_cmd.weight = -3.5
-        self.rewards.joint_position_penalty.weight = -0.5
+        self.rewards.joint_position_penalty.weight = -0.4
         self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.8
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.feet_height_exp.weight = 1.0
+        self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.12
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]  
         self.rewards.feet_height_body_exp.weight = -0.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.20
+        self.rewards.feet_height_body_exp.params["target_height"] = -0.23
         self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
-        self.rewards.feet_gait.weight = 5.0
+        self.rewards.feet_gait.weight = 4.0
         self.rewards.feet_gait.params["velocity_threshold"] = 0.5
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (

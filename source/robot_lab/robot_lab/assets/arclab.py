@@ -98,7 +98,7 @@ ARCLAB_ARCDOG_CFG = ArticulationCfg(
 
 ARCLAB_ARCDOG_NEW_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/arcdog/arcdog.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_new/arcdog.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -107,7 +107,7 @@ ARCLAB_ARCDOG_NEW_CFG = ArticulationCfg(
             angular_damping=0.05,
             max_linear_velocity=1000.0,
             max_angular_velocity=1000.0,
-            max_depenetration_velocity=2.0,
+            max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
@@ -138,27 +138,27 @@ ARCLAB_ARCDOG_NEW_CFG = ArticulationCfg(
             effort_limit=35.0,
             saturation_effort=50.0,
             velocity_limit=45.0,
-            stiffness=30.0,
-            damping=2.0,
-            friction=0.0,
+            stiffness=45.0,
+            damping=1.5,
+            friction=0.1,
         ),
         "legs_thigh": DCMotorCfg(
             joint_names_expr=[".*thigh_joint"],
             effort_limit=35.0,
             saturation_effort=50.0,
             velocity_limit=45.0,
-            stiffness=30.0,
-            damping=2.0,
-            friction=0.0,
+            stiffness=50.0,
+            damping=1.5,
+            friction=0.1,
         ),
         "legs_calf": DCMotorCfg(
             joint_names_expr=[".*calf_joint"],  
             effort_limit=80.0,
             saturation_effort=100.0,
             velocity_limit=45.0,
-            stiffness=30.0,
+            stiffness=60.0,
             damping=2.0,
-            friction=0.0,
+            friction=0.1,
         ),
     },
 )
