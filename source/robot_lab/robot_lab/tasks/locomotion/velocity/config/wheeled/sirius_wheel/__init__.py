@@ -151,7 +151,7 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         # "env_cfg_entry_point": f"{__name__}.siriusw_moe_env_cfg:CUHKLRLSiriusWMoeEnvCfg",
-        "env_cfg_entry_point": f"{__name__}.leg_exp_env_cfg:CUHKLRLSiriusWLegEXPEnvCfg",
-        "rsl_rl_cfg_entry_point": f"{agents.__name__}.moe_terrain:SiriusMoEPPOCfg", # 指向我们刚才定义的 MoE 算法配置
+        "env_cfg_entry_point": f"{__name__}.siriusw_moe_env_cfg:CUHKLRLSiriusWMoEEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.moe_terrain:SiriusSharedMoEPPOCfg", 
     },
 )
