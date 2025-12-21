@@ -1098,4 +1098,339 @@ def climb_progress_dyn_pbrs(env, asset_cfg=SceneEntityCfg("robot"),
     env._phi_prev = phi
     return rew
 
+# ==============================================================================
+# Helper
+# ==============================================================================
+def _get_gait(env: ManagerBasedRLEnv) -> torch.Tensor:
+    if not hasattr(env, "gait_mode"):
+        return torch.zeros(env.num_envs, 1, device=env.device)
+    return env.gait_mode
 
+def _get_gait_mask(env: ManagerBasedRLEnv, gait_mode: int) -> torch.Tensor:
+    """gait_mode: 0 (Quad) or 1 (Biped)"""
+    g = _get_gait(env).squeeze(-1)
+    # g=1 (Biped), g=0 (Quad)
+    return g if gait_mode == 1 else (1.0 - g)
+
+# ==============================================================================
+# 1. Global Rewards
+# ==============================================================================
+def is_alive_gated(env: ManagerBasedRLEnv) -> torch.Tensor:
+    return torch.ones(env.num_envs, device=env.device)
+
+# ==============================================================================
+# 2. Tracking (Gated)
+# ==============================================================================
+def track_lin_vel_xy_gated(env: ManagerBasedRLEnv, std: float, command_name: str, gait_mode: int) -> torch.Tensor:
+    vel_cmd = env.command_manager.get_command(command_name)[:, :2]
+    lin_vel = env.scene["robot"].data.root_lin_vel_b[:, :2]
+    lin_vel_error = torch.sum(torch.square(vel_cmd - lin_vel), dim=1)
+    return torch.exp(-lin_vel_error / (std**2)) * _get_gait_mask(env, gait_mode)
+
+def track_ang_vel_z_gated(env: ManagerBasedRLEnv, std: float, command_name: str, gait_mode: int) -> torch.Tensor:
+    vel_cmd = env.command_manager.get_command(command_name)[:, 2]
+    ang_vel = env.scene["robot"].data.root_ang_vel_b[:, 2]
+    ang_vel_error = torch.square(vel_cmd - ang_vel)
+    return torch.exp(-ang_vel_error / (std**2)) * _get_gait_mask(env, gait_mode)
+
+# ==============================================================================
+# 3. Quadrupedal Regularization (Gait 0)
+# ==============================================================================
+
+# Joint Pos Penalty (Gated): 只惩罚腿，轮子不惩罚
+def joint_pos_penalty_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+    # (q - q_default)^2
+    robot = env.scene["robot"]
+    # 注意：asset_cfg 必须配置为只包含 Leg joints
+    diff = robot.data.joint_pos[:, asset_cfg.joint_ids] - robot.data.default_joint_pos[:, asset_cfg.joint_ids]
+    reward = torch.sum(torch.square(diff), dim=1)
+    return reward * _get_gait_mask(env, gait_mode)
+
+# Joint Vel Penalty (Gated): 只惩罚腿
+def joint_vel_penalty_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+    # |dq|
+    robot = env.scene["robot"]
+    vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+    reward = torch.norm(vel, dim=1)
+    return reward * _get_gait_mask(env, gait_mode)
+
+# Feet in Air (Quad): 所有脚都在空中(飞起来了)，或者脚在空中但膝盖着地(跪了)
+def feet_in_air_quad(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    # sensor_cfg 需要包含 4个脚 + 4个膝盖 (或小腿)
+    # 假设 body_ids 前4个是脚，后4个是膝盖
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    forces = contact_sensor.data.net_forces_w_history[:, 0, sensor_cfg.body_ids, 2] # Z-force
+    
+    # 阈值判断接触
+    in_contact = torch.abs(forces) > 1.0
+    
+    # 分离脚和膝盖 (假设顺序: LF_FOOT, LH_FOOT, RF_FOOT, RH_FOOT, LF_KNEE, ...)
+    # 这里的索引依赖于 sensor_cfg.body_names 的顺序，务必在 config 里对齐
+    feet_contact = in_contact[:, :4]
+    knee_contact = in_contact[:, 4:]
+    
+    feet_in_air = ~feet_contact
+    
+    # Term 1: All feet in air (flying) -> prod(I(F_foot < 1))
+    all_feet_air = torch.all(feet_in_air, dim=1).float()
+    
+    # Term 2: Feet in air BUT Knee touching -> sum(I(F_foot < 1) * I(F_knee >= 1))
+    # 对应腿：脚悬空但膝盖着地
+    kneeling = torch.sum(feet_in_air.float() * knee_contact.float(), dim=1)
+    
+    reward = all_feet_air + kneeling
+    return reward * _get_gait_mask(env, 0)
+
+# Hip Position Penalty
+def joint_deviation_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+    robot = env.scene["robot"]
+    diff = robot.data.joint_pos[:, asset_cfg.joint_ids] - robot.data.default_joint_pos[:, asset_cfg.joint_ids]
+    return torch.sum(torch.square(diff), dim=1) * _get_gait_mask(env, gait_mode)
+
+# Base Height (Quad) - [Updated] Support Sensor for Terrain-Adaptive Height
+def base_height_quad(
+    env: ManagerBasedRLEnv, 
+    target_height: float, 
+    asset_cfg: SceneEntityCfg, 
+    sensor_cfg: SceneEntityCfg | None = None
+) -> torch.Tensor:
+    """
+    Penalize deviation from target height.
+    If sensor_cfg is provided (RayCaster), target height is relative to the ground below.
+    Otherwise, it's absolute world height (suitable for flat plane).
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    if sensor_cfg is not None:
+        sensor: RayCaster = env.scene[sensor_cfg.name]
+        # RayCaster returns hit positions in world frame
+        # We average the Z height of hits to estimate ground height
+        # ray_hits_w: [num_envs, num_rays, 3]
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        
+        # Check for invalid hits (NaN, Inf, or too far - e.g. holes)
+        # If invalid, fallback to current robot height (no penalty) or 0.0
+        # Usually IsaacLab raycaster returns huge value for no hit or -inf
+        # Assuming we handle reasonable terrain:
+        ground_height = torch.mean(ray_hits_z, dim=1)
+        
+        # Calculate current height relative to ground
+        current_height = robot.data.root_pos_w[:, 2] - ground_height
+    else:
+        # Flat terrain assumption
+        current_height = robot.data.root_pos_w[:, 2]
+
+    # Error
+    error = torch.square(current_height - target_height)
+    return error * _get_gait_mask(env, 0)
+
+# Balance (Quad): Diagonal force difference
+def balance_quad(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    # |F_LF + F_RH - F_RF - F_LH|
+    # body_names 顺序必须是 LF, LH, RF, RH (0, 1, 2, 3)
+    sensor = env.scene.sensors[sensor_cfg.name]
+    forces = torch.norm(sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1) # magnitude
+    
+    diagonal_1 = forces[:, 0] + forces[:, 3] # LF + RH
+    diagonal_2 = forces[:, 2] + forces[:, 1] # RF + LH
+    
+    return torch.abs(diagonal_1 - diagonal_2) * _get_gait_mask(env, 0)
+
+# Joint Limit (Gated)
+def joint_limit_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+    robot = env.scene[asset_cfg.name]
+    joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
+    limits = robot.data.soft_joint_pos_limits[:, asset_cfg.joint_ids, :] # [N, num_joints, 2]
+    
+    out_of_limits = (joint_pos < limits[..., 0]) | (joint_pos > limits[..., 1])
+    return torch.sum(out_of_limits.float(), dim=1) * _get_gait_mask(env, gait_mode)
+
+# ==============================================================================
+# 4. Bipedal Regularization (Gait 1)
+# ==============================================================================
+
+# Rear Air (Biped): 后脚悬空
+def rear_air_biped(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    # 类似 feet_in_air_quad，但只针对 Rear Feet
+    # 顺序：LH_FOOT, RH_FOOT, LH_KNEE, RH_KNEE
+    sensor = env.scene.sensors[sensor_cfg.name]
+    forces = sensor.data.net_forces_w_history[:, 0, sensor_cfg.body_ids, 2]
+    in_contact = torch.abs(forces) > 1.0
+    
+    rear_feet_air = ~in_contact[:, :2] # LH, RH
+    rear_knee_contact = in_contact[:, 2:]
+    
+    # 1. Both rear feet in air
+    all_air = torch.all(rear_feet_air, dim=1).float()
+    
+    # 2. Rear foot air BUT Rear knee contact
+    kneeling = torch.sum(rear_feet_air.float() * rear_knee_contact.float(), dim=1)
+    
+    return (all_air + kneeling) * _get_gait_mask(env, 1)
+
+# Rear Pos Balance (Biped): 左右后腿对称性
+def rear_pos_balance_biped(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    # |q_left - q_right| for rear legs
+    robot = env.scene["robot"]
+    # asset_cfg.joint_ids 应包含 [LH_HAA, LH_HFE, LH_KNEE, RH_HAA, RH_HFE, RH_KNEE]
+    # 假设前半部分是左，后半部分是右
+    n = len(asset_cfg.joint_ids) // 2
+    left = robot.data.joint_pos[:, asset_cfg.joint_ids[:n]]
+    right = robot.data.joint_pos[:, asset_cfg.joint_ids[n:]]
+    
+    return torch.norm(left - right, dim=1) * _get_gait_mask(env, 1)
+
+# Energy (Power)
+def joint_power_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+    robot = env.scene[asset_cfg.name]
+    power = torch.abs(robot.data.joint_vel[:, asset_cfg.joint_ids] * robot.data.applied_torque[:, asset_cfg.joint_ids])
+    return torch.sum(power, dim=1) * _get_gait_mask(env, gait_mode)
+
+# Action Rate (Global or Gated)
+# Use mdp.action_rate_l2 directly
+
+# ==============================================================================
+# Biped Stand Specifics
+# ==============================================================================
+def biped_stand_orientation(env: ManagerBasedRLEnv) -> torch.Tensor:
+    robot = env.scene["robot"]
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    projected_gravity = quat_apply_inverse(robot.data.root_quat_w, gravity_vec)
+    # (0.5 * cos + 0.5)^2
+    cos_theta = -projected_gravity[:, 2] # z component
+    r = torch.square(0.5 * cos_theta + 0.5)
+    return r * _get_gait_mask(env, 1)
+
+# [Updated] Support Sensor for Terrain-Adaptive Height
+def biped_stand_height_linear(
+    env: ManagerBasedRLEnv, 
+    target_height: float = 0.55, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg | None = None
+) -> torch.Tensor:
+    robot = env.scene[asset_cfg.name]
+    
+    if sensor_cfg is not None:
+        sensor: RayCaster = env.scene[sensor_cfg.name]
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        ground_height = torch.mean(ray_hits_z, dim=1)
+        current_height = robot.data.root_pos_w[:, 2] - ground_height
+    else:
+        current_height = robot.data.root_pos_w[:, 2]
+
+    # min(max( (z - z_min)/(z_max - z_min), 0), 1)
+    # Assume bounds around target
+    z_min = target_height - 0.15
+    z_max = target_height + 0.05
+    r = (current_height - z_min) / (z_max - z_min)
+    r = torch.clamp(r, 0.0, 1.0)
+    return r * _get_gait_mask(env, 1)
+
+def biped_front_legs_lift(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    robot = env.scene["robot"]
+    joint_pos = robot.data.joint_pos[:, asset_cfg.joint_ids]
+    target_pos = robot.data.default_joint_pos[:, asset_cfg.joint_ids]
+    # Indicator: t > T_allow (assume always active for now or rely on gait)
+    return torch.sum(torch.square(joint_pos - target_pos), dim=1) * _get_gait_mask(env, 1)
+
+def track_lin_vel_xy_biped_gated(
+    env: ManagerBasedRLEnv, 
+    std: float, 
+    command_name: str, 
+    target_height: float = 0.55
+) -> torch.Tensor:
+    # 1. 基础速度追踪
+    vel_cmd = env.command_manager.get_command(command_name)[:, :2]
+    lin_vel = env.scene["robot"].data.root_lin_vel_b[:, :2]
+    lin_vel_error = torch.sum(torch.square(vel_cmd - lin_vel), dim=1)
+    base_reward = torch.exp(-lin_vel_error / (std**2))
+    
+    # 2. 姿态门控 (cos_theta > 0.95)
+    # 0.95 约等于 18度
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    proj_g = quat_apply_inverse(env.scene["robot"].data.root_quat_w, gravity_vec)
+    upright = -proj_g[:, 2] # z component
+    posture_gate = (upright > 0.95).float()
+    
+    # 3. 高度线性系数 (z - s_low)/(s_high - s_low)
+    # 假设 s_low = z_min, s_high = z_max
+    root_z = env.scene["robot"].data.root_pos_w[:, 2]
+    z_min = target_height - 0.15 # 示例范围，需根据实际情况调整
+    z_max = target_height + 0.05
+    height_coef = (root_z - z_min) / (z_max - z_min)
+    height_coef = torch.clamp(height_coef, 0.0, 1.0)
+    
+    # 4. 组合 (仅在双足模式生效)
+    return base_reward * posture_gate * height_coef * _get_gait_mask(env, 1)
+
+# ==============================================================================
+# Common / Others
+# ==============================================================================
+def torque_exceed_limit(env: ManagerBasedRLEnv, limit_ratio: float = 0.9) -> torch.Tensor:
+    """
+    Penalty if torque exceeds a percentage of the max torque.
+    Adapts to Sirius Wheel robot limits:
+    - HAA/HFE/WHEEL: 40.0 Nm
+    - KNEE: 100.0 Nm
+    """
+    robot = env.scene["robot"]
+    torques = torch.abs(robot.data.applied_torque)
+    
+    # Construct max_torque tensor matching the robot's joint order
+    # Your joint order provided:
+    # 0-2: LF_HAA, LF_HFE, LF_KNEE
+    # 3-5: LH_HAA, LH_HFE, LH_KNEE
+    # 6-8: RF_HAA, RF_HFE, RF_KNEE
+    # 9-11: RH_HAA, RH_HFE, RH_KNEE
+    # 12-15: LF_WHEEL, LH_WHEEL, RF_WHEEL, RH_WHEEL
+    
+    # Check if max_torque tensor is already cached (optimization)
+    if not hasattr(env, "_max_torque_tensor"):
+        # Default to 40
+        max_limits = torch.full((16,), 40.0, device=env.device)
+        
+        # Knee indices: LF(2), LH(5), RF(8), RH(11)
+        knee_indices = [2, 5, 8, 11]
+        max_limits[knee_indices] = 100.0
+        
+        env._max_torque_tensor = max_limits
+
+    # Calculate excess
+    # torques: [num_envs, 16]
+    # max_limits: [16] -> broadcast to [num_envs, 16]
+    threshold = env._max_torque_tensor * limit_ratio
+    excess = torch.relu(torques - threshold)
+    return torch.sum(excess, dim=1)
+
+def ang_vel_xy_stability(env: ManagerBasedRLEnv) -> torch.Tensor:
+    ang_vel = env.scene["robot"].data.root_ang_vel_b
+    return (torch.abs(ang_vel[:, 0]) + torch.abs(ang_vel[:, 1])) # L1 norm sum
+
+# Gait Events
+def set_gait_mode_fixed(env: ManagerBasedRLEnv, env_ids: torch.Tensor, mode_val: float = 0.0):
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    env.gait_mode[env_ids] = mode_val
+
+def set_gait_mode_random(env: ManagerBasedRLEnv, env_ids: torch.Tensor):
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    num_selected = env_ids.shape[0]
+    mode = torch.randint(0, 2, (num_selected, 1), device=env.device).float()
+    env.gait_mode[env_ids] = mode
+
+def set_gait_mode_flip(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None):
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    env.gait_mode[env_ids] = 1.0 - env.gait_mode[env_ids]
+
+def gait_mode_obs(env: ManagerBasedRLEnv) -> torch.Tensor:
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    return env.gait_mode

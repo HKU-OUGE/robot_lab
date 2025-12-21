@@ -348,3 +348,61 @@ def set_discrete_basevel_ranges(
     if idx_back.numel() > 0:
         cfg.ranges.lin_vel_x = (-float(speed_abs), -float(speed_abs))  # 离散 -speed_abs
         term.reset(idx_back.tolist())
+
+def set_gait_mode_fixed(env: ManagerBasedRLEnv, env_ids: torch.Tensor, mode_val: float = 0.0):
+    """
+    Event Function: 将 Gait Mode 强制设为固定值 (默认 0.0 Quadruped)。
+    用于 Reset 时确保安全。
+    """
+    # 初始化 (如果尚未创建)
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    
+    # 处理 env_ids (None 表示作用于所有环境)
+    # 关键修改：保持在 env.device 上，不要转到 CPU
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    
+    # 强制赋值
+    # PyTorch 支持 scalar 到 tensor slice 的广播，直接赋值即可
+    env.gait_mode[env_ids] = mode_val
+
+def set_gait_mode_random(env: ManagerBasedRLEnv, env_ids: torch.Tensor):
+    """
+    Event Function: 随机采样 Gait Mode (0.0 或 1.0)。
+    用于 Interval 事件，模拟运行中切换指令。
+    """
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    
+    # 处理 env_ids
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    
+    # 随机采样 0 或 1
+    # 这里的 shape 需要匹配 env.gait_mode[env_ids] 的 shape: (num_selected_envs, 1)
+    num_selected = env_ids.shape[0]
+    mode = torch.randint(0, 2, (num_selected, 1), device=env.device).float()
+    
+    env.gait_mode[env_ids] = mode
+
+def set_gait_mode_flip(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None):
+    """
+    Event Function: 翻转 Gait Mode (0->1, 1->0)。
+    用于 Interval 事件，强制切换，避免随机采样的不确定性。
+    """
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    
+    # 逻辑：1 - current_val
+    # 0 -> 1, 1 -> 0
+    env.gait_mode[env_ids] = 1.0 - env.gait_mode[env_ids]
+
+def gait_mode_obs(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Observation Function: 获取当前的 Gait Mode"""
+    if not hasattr(env, "gait_mode"):
+        env.gait_mode = torch.zeros(env.num_envs, 1, device=env.device)
+    return env.gait_mode
