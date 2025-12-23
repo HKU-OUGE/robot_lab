@@ -19,26 +19,35 @@ class Go2PIPERFlatEnvCfg(Go2PIPERRoughEnvCfg):
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
         # velocity command
-        self.commands.base_velocity.curriculum_coeff = 5000 # 4096
+        self.commands.base_velocity.curriculum_coeff = 20 # 4096
         # init
         self.commands.base_velocity.ranges_init.lin_vel_x  = (0.0, 0.0)
         self.commands.base_velocity.ranges_init.lin_vel_y  = (-0.0, 0.0)
         self.commands.base_velocity.ranges_init.ang_vel_z  = (-0.0, 0.0)
         # final
-        self.commands.base_velocity.ranges_final.lin_vel_x = (0.0, 1.0)
-        self.commands.base_velocity.ranges_final.lin_vel_y = (-0.0, 0.0)
-        self.commands.base_velocity.ranges_final.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges_final.lin_vel_x = (-1.0, 1.0)
+        self.commands.base_velocity.ranges_final.lin_vel_y = (-0.7, 0.7)
+        self.commands.base_velocity.ranges_final.ang_vel_z = (-1.0, 1.0)
   
         # position command 
-        self.commands.ee_pose.curriculum_coeff = 4000 # 3000
+        self.commands.ee_pose.curriculum_coeff = 20 # 3000
         # init
-        self.commands.ee_pose.ranges_init.pos_x = (0.45, 0.45)
+        self.commands.ee_pose.ranges_init.pos_x = (0.1, 0.1)
         self.commands.ee_pose.ranges_init.pos_y = (-0.0, 0.0)
-        self.commands.ee_pose.ranges_init.pos_z = (0.50, 0.50)
+        self.commands.ee_pose.ranges_init.pos_z = (0.7, 0.7)
         # final
-        self.commands.ee_pose.ranges_final.pos_x = (0.2, 0.5)
-        self.commands.ee_pose.ranges_final.pos_y = (-0.35, 0.35)
-        self.commands.ee_pose.ranges_final.pos_z = (0.30, 0.7)
+        self.commands.ee_pose.ranges_final.pos_x = (0.0, 0.6)
+        self.commands.ee_pose.ranges_final.pos_y = (-0.55, 0.55)
+        self.commands.ee_pose.ranges_final.pos_z = (0.10, 0.7)
+        # roll=(-0.0, 0.0),
+        # pitch=(3.3 - 3.14 / 9,3.3 + 3.14 / 9),  # depends on end-effector axis
+        # # pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
+        # # pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
+        # # pitch=(- 3.14 / 9, 3.14 / 9),  # depends on end-effector axis
+        # yaw=(-3.14 / 9, 3.14 / 9),
+        self.commands.ee_pose.ranges_final.roll = (-0.7,0.7)
+        self.commands.ee_pose.ranges_final.pitch=(3.3 - 3.14 / 4,3.3 + 3.14 / 4)
+        self.commands.ee_pose.ranges_final.yaw=(-3.14 / 4, 3.14 / 4)
 
 
         # reward weight
@@ -47,6 +56,11 @@ class Go2PIPERFlatEnvCfg(Go2PIPERRoughEnvCfg):
         self.rewards.end_effector_orientation_tracking.weight = -1.0 #-1.5
         self.rewards.end_effector_action_rate.weight = -0.05 #-0.005 
         self.rewards.end_effector_action_smoothness.weight = -0.05 #-0.02
+
+        # self.rewards.end_effector_position_tracking.weight = 2.5 #2.5
+        # self.rewards.end_effector_orientation_tracking.weight = -0.5 #-1.5
+        # self.rewards.end_effector_action_rate.weight = -0.00 #-0.005 
+        # self.rewards.end_effector_action_smoothness.weight = -0.00 #-0.02
         
         # leg
 
@@ -74,13 +88,22 @@ class Go2PIPERFlatEnvCfg(Go2PIPERRoughEnvCfg):
         self.rewards.action_smoothness.weight = -0.02
         self.rewards.height_reward.weight = -2.5
         self.rewards.flat_orientation_l2.weight = -2.0
-        self.rewards.thigh_contact.weight = -0.5
-        self.rewards.calf_contact.weight = -0.5
+        self.rewards.thigh_contact.weight = -1.5
+        self.rewards.calf_contact.weight = -1.5
         self.rewards.hip_deviation.weight = -0.3
         self.rewards.joint_deviation.weight = -0.3
-        self.rewards.arm_joint_deviation.weight = -0.1
-        self.rewards.is_terminated.weight = -200
-
+        self.rewards.arm_joint_deviation.weight = -0.01
+        self.rewards.is_terminated.weight = 0.0
+        # self.rewards.arm_joint_deviation.weight = -0.0
+        # self.rewards.is_terminated.weight = -300
+        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
+            self.base_link_name,
+            self.trunk_link_name,
+            self.abad_link_name,
+            # self.knee_link_name,
+            # self.hip_link_name,
+            self.arm_link_name
+        ]
 
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "Go2PIPERFlatEnvCfg":

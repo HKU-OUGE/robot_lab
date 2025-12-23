@@ -23,3 +23,4 @@ from .observations import *
 from .pose_command import UniformPoseCommand 
 from .velocity_command import UniformVelocityCommand 
 from .curriculums import *  # noqa: F401, F403
+from .custom_action import *

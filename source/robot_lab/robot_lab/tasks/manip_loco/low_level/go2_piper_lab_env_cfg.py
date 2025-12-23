@@ -82,7 +82,7 @@ class MySceneCfg(InteractiveSceneCfg):
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        attach_yaw_only=True,
+        ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
@@ -115,47 +115,46 @@ class EventCfg:
         },
     )
 
-    # randomize_rigid_body_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
-    #         "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
-    #         "operation": "scale",
-    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
-    #     },
-    # )
+    randomize_rigid_body_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "mass_distribution_params": (0.8, 1.2),   # 先收窄，之后再放宽
+            "operation": "scale",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
+        },
+    )
 
-    # base_com = EventTerm(
-    #     func=mdp.randomize_rigid_body_com,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-    #         "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01)},
-    #     },
-    # )
+    base_com = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "com_range": {"x": (-0.05, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01)},
+        },
+    )
 
-    # add_ee_mass = EventTerm(
-    #     func=mdp.randomize_rigid_body_mass,
-    #     mode="startup",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
-    #         "mass_distribution_params": (-0.1, 0.8),
-    #         "operation": "add",
-    #         "recompute_inertia": True,                # 关键：改质量后重算惯量
-    #     },
-    # )
+    add_ee_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="gripper_base"),
+            "mass_distribution_params": (-0.1, 0.8),
+            "operation": "add",
+            "recompute_inertia": True,                # 关键：改质量后重算惯量
+        },
+    )
 
-    # reset
-    # base_external_force_torque = EventTerm(
-    #     func=mdp.apply_external_force_torque,
-    #     mode="reset",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-    #         "force_range": (-10.0, 10.0),
-    #         "torque_range": (-10.0, 10.0),
-    #     },
-    # )
+    base_external_force_torque = EventTerm(
+        func=mdp.apply_external_force_torque,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "force_range": (-10.0, 10.0),
+            "torque_range": (-10.0, 10.0),
+        },
+    )
 
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
@@ -173,16 +172,16 @@ class EventCfg:
         },
     )
     
-    # actuator_gains = EventTerm(
-    #     func=mdp.randomize_actuator_gains,
-    #     mode="reset",
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-    #         "stiffness_distribution_params": (0.8, 1.5),
-    #         "damping_distribution_params": (0.8, 1.5),
-    #         "operation": "scale",
-    #     },
-    # )
+    actuator_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="reset",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stiffness_distribution_params": (0.8, 1.5),
+            "damping_distribution_params": (0.8, 1.5),
+            "operation": "scale",
+        },
+    )
 
     reset_robot_joints = EventTerm(
         func=mdp.reset_joints_by_scale,
@@ -193,13 +192,12 @@ class EventCfg:
         },
     )
 
-    # interval
-    # push_robot = EventTerm(
-    #     func=mdp.push_by_setting_velocity,
-    #     mode="interval",
-    #     interval_range_s=(10.0, 15.0),
-    #     params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
-    # )
+    push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(10.0, 15.0),
+        params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+    )
 
 ##
 # MDP settings
@@ -213,17 +211,18 @@ class CommandsCfg:
     ee_pose = mdp.command_cfg.MLUniformPoseCommandCfg(
         asset_name="robot",
         body_name="gripper_base",
-        resampling_time_range=(6.0,8.0),
+        resampling_time_range=(10.0, 10.0),
         debug_vis=True,
         is_QuadrupedManipulator=True,
-        curriculum_coeff = 1000,          
+        curriculum_coeff = 2000,          
         ranges_final =mdp.command_cfg.MLUniformPoseCommandCfg.Ranges(
             pos_x=(0.4, 0.6),
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
+            pitch=(3.3 - 3.14 / 9,3.3 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
-            pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(1.57 - 3.14 / 9,1.57 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(- 3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
@@ -232,8 +231,9 @@ class CommandsCfg:
             pos_y=(-0.35, 0.35),
             pos_z=(0.1, 0.55), # world frame not base frame
             roll=(-0.0, 0.0),
+            pitch=(3.3 - 3.14 / 9,3.3 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(3.14 - 3.14 / 9,3.14 + 3.14 / 9),  # depends on end-effector axis
-            pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
+            # pitch=(1.57 -3.14 / 9, 1.57 + 3.14 / 9),  # depends on end-effector axis
             # pitch=(-3.14 / 9, 3.14 / 9),  # depends on end-effector axis
             yaw=(-3.14 / 9, 3.14 / 9),
         ),
@@ -242,8 +242,9 @@ class CommandsCfg:
             pos_y=(-0.05, 0.05),
             pos_z=(0.35, 0.4), # world frame not base frame
             roll=(-0.0, 0.0),
+            pitch=(3.3, 3.3),  # depends on end-effector axis
             # pitch=(3.14, 3.14),  # depends on end-effector axis
-            pitch=(1.57, 1.57),  # depends on end-effector axis
+            # pitch=(1.57, 1.57),  # depends on end-effector axis
             # pitch=(0.0, 0.0),  # depends on end-effector axis
             yaw=(-0.0, 0.0),
         ),
@@ -251,7 +252,7 @@ class CommandsCfg:
 
     base_velocity = mdp.command_cfg.MLUniformVelocityCommandCfg(
         asset_name="robot",
-        resampling_time_range=(10.0,10.0),
+        resampling_time_range=(4.0,8.0),
         rel_standing_envs=0.1,
         debug_vis=True,
         is_QuadrupedManipulator=True,
@@ -284,27 +285,48 @@ class ActionsCfg:
                                          use_default_offset=True,
                                          preserve_order=True,
     )   
-    # arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
-    #                                       joint_names=[
-    #                                           "joint1", "joint2", "joint3", 
-    #                                           "joint4", "joint5", "joint6"],
-    #                                        scale = {"joint1":        0.5, # 0.8
-    #                                                 "joint2":     0.5, # 0.35
-    #                                                 "joint3":        0.5, # 0.35
-    #                                                 "joint4": 0.5, # 0.35
-    #                                                 "joint5":  0.5, # 0.35
-    #                                                 "joint6": 0.5}, # 0.35
-    #                                         use_default_offset=True,
-    #                                         preserve_order=True,
+    arm_pose = mdp.JointPositionActionCfg(asset_name="robot",
+                                          joint_names=[
+                                              "joint1", "joint2", "joint3", 
+                                              "joint4", "joint5", "joint6"],
+                                           scale = {"joint1":        0.2, # 0.8
+                                                    "joint2":     0.3, # 0.35
+                                                    "joint3":        0.5, # 0.35
+                                                    "joint4": 0.5, # 0.35
+                                                    "joint5":  0.2, # 0.35
+                                                    "joint6": 0.5}, # 0.35
+                                            use_default_offset=True,
+                                            preserve_order=True,
+    )
+    # arm_pose = DifferentialInverseKinematicsActionCfg(
+    #         asset_name="robot",
+    #         joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+    #         body_name="gripper_base",
+    #         controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=True, ik_method="dls"),
+    #         scale=0.5,
+    #         body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
+    #     )
+
+# --- 机械臂控制 (命令驱动，自动处理坐标转换) ---
+    # arm_pose = mdp.CommandDrivenIKActionCfg(
+    #     class_type=mdp.CommandDrivenIKAction,
+    #     asset_name="robot",
+    #     joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+    #     body_name="gripper_base", # 末端执行器
+    #     # --- 关键新增项：指定参考坐标系的 Link 名称 ---
+    #     # 你的 CommandsCfg 里的目标是相对于这个 Link 的。
+    #     # 对于四足机器人，这通常是 "base" 或 "trunk"。请查看你的 URDF 确认名称。
+    #     robot_base_body_name="trunk", 
+    #     # -----------------------------------------
+    #     command_name_to_follow="ee_pose",
+    #     controller=DifferentialIKControllerCfg(
+    #         command_type="pose",
+    #         # 必须为 False，因为 command 给出的是绝对目标位姿（虽然是在局部坐标系下）
+    #         use_relative_mode=False, 
+    #         ik_method="dls",
+    #     ),
     # )
-    arm_pose = DifferentialInverseKinematicsActionCfg(
-            asset_name="robot",
-            joint_names=["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
-            body_name="gripper_base",
-            controller=DifferentialIKControllerCfg(command_type="pose", use_relative_mode=True, ik_method="dls"),
-            scale=0.5,
-            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[0.0, 0.0, 0.0]),
-        )
+
 
 
 @configclass
@@ -340,6 +362,20 @@ class ObservationsCfg:
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
         )
+        # joint_pos_leg_rel = ObsTerm(
+        #     func=mdp.joint_pos_rel,
+        #     noise=Unoise(n_min=-0.01, n_max=0.01),
+        #     clip=(-100.0, 100.0),
+        #     scale=1.0,
+        #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+        # )
+        # joint_pos_arm_abs = ObsTerm(
+        #     func=mdp.joint_pos,
+        #     noise=Unoise(n_min=-0.01, n_max=0.01),
+        #     clip=(-100.0, 100.0),
+        #     scale=1.0,
+        #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+        # )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             noise=Unoise(n_min=-1.5, n_max=1.5),
@@ -352,6 +388,11 @@ class ObservationsCfg:
             clip=(-100.0, 100.0),
             scale=1.0,
         )
+        # actions = ObsTerm(
+        #     func=mdp.last_leg_actions_only,
+        #     clip=(-100.0, 100.0),
+        #     scale=1.0,
+        # )
         Manipulator_pose_command = ObsTerm(func=mdp.generated_commands,
                                    params={"command_name": "ee_pose"}) # dim = 7
         
@@ -487,7 +528,10 @@ class RewardsCfg:
         weight=-0.02,
     )
 
-    height_reward = RewTerm(func=mdp.rewards.base_height_l2, weight=-2.0, params={"target_height": 0.36})
+    height_reward = RewTerm(
+        func=mdp.rewards.base_height_l2, 
+        weight=-2.0, 
+        params={"target_height": 0.36, "sensor_cfg": SceneEntityCfg("height_scanner")})
 
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.0)
 
@@ -538,21 +582,43 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
-    # terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+    terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
+
     # flat_ori_modify = CurrTerm(func=mdp.modify_reward_weight,
     #                            params={"term_name": "flat_orientation_l2",
-    #                                    "num_steps": 2000,
-    #                                    "weight": -0.00})
+    #                                    "num_steps": 6000,
+    #                                    "weight": -1.00})
 
     # flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
     #                            params={"term_name": "height_reward",
+    #                                    "num_steps": 6000,
+    #                                    "weight": -1.50})
+
+    # end_effector_action_rate_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "end_effector_action_rate",
     #                                    "num_steps": 4000,
-    #                                    "weight": -1.00})
+    #                                    "weight": -0.005})
+
+    # end_effector_action_smoothness_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "end_effector_action_smoothness",
+    #                                    "num_steps": 4000,
+    #                                    "weight": -0.002})
+    # end_effector_position_tracking_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "end_effector_position_tracking",
+    #                                    "num_steps": 5000,
+    #                                    "weight": 2.0})
+    # end_effector_orientation_tracking_modify = CurrTerm(func=mdp.modify_reward_weight,
+    #                            params={"term_name": "end_effector_orientation_tracking",
+    #                                    "num_steps": 5000,
+    #                                    "weight": -1.0})
+    command_levels = CurrTerm(
+        func=mdp.command_levels_vel,
+        params={
+            "reward_term_name": "track_lin_vel_xy_exp",
+            "range_multiplier": (0.1, 1.0),
+        },
+    )
     
-    # flat_height_modify = CurrTerm(func=mdp.modify_reward_weight,
-    #                            params={"term_name": "height_reward",
-    #                                    "num_steps": 4000,
-    #                                    "weight": -1.00})
     
 ##
 # Environment configuration

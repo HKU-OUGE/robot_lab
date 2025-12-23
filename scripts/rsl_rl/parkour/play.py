@@ -138,25 +138,48 @@ def main():
 
     estimator = ppo_runner.get_estimator_inference_policy(device=env.device) 
     if agent_cfg.algorithm.class_name == "DistillationWithExtractor":
+            # extract the normalizer
+        # if hasattr(policy_nn, "actor_obs_normalizer"):
+        #     normalizer = policy_nn.actor_obs_normalizer
+        # elif hasattr(policy_nn, "student_obs_normalizer"):
+        #     normalizer = policy_nn.student_obs_normalizer
+        # else:
+        #     normalizer = None
         policy = ppo_runner.get_inference_depth_policy(device=env.unwrapped.device)
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
         policy_nn = ppo_runner.alg.depth_actor
         export_model_dir = os.path.join(os.path.dirname(resume_path), "exported_deploy")
-        export_deploy_policy_as_jit(policy_nn, 
-                                    estimator,
-                                    depth_encoder,
-                                    ppo_runner.obs_normalizer, 
-                                    path=export_model_dir, 
-                                    filename="policy.pt")
-        export_deploy_policy_as_onnx(
-                            policy_nn, 
-                            estimator,
-                            depth_encoder,
-                            agent_cfg,
-                            normalizer=ppo_runner.obs_normalizer, 
-                            path=export_model_dir, 
-                            filename="policy.onnx"
-                        )
+        # from torch.nn.utils.parametrize import is_parametrized, remove_parametrizations
+        # def _deparametrize_all(m):
+        #     # 遍历所有子模块，若存在任何参数化(如 spectral_norm)则移除
+        #     for mod in m.modules():
+        #         if is_parametrized(mod):
+        #             # 逐个把所有被参数化的参数（通常是 "weight"）恢复成普通参数
+        #             if hasattr(mod, "parametrizations"):
+        #                 for pname in list(mod.parametrizations.keys()):
+        #                     try:
+        #                         remove_parametrizations(mod, pname, leave_parametrized=False)
+        #                     except Exception:
+        #                         pass
+    # 对策略网络做去参数化
+        # _deparametrize_all(policy_nn)
+        # export_deploy_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        # export_deploy_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx", verbose=True)
+        # export_deploy_policy_as_jit(policy_nn, 
+        #                             estimator,
+        #                             depth_encoder,
+        #                             # ppo_runner.obs_normalizer, 
+        #                             path=export_model_dir, 
+        #                             filename="policy.pt")
+        # export_deploy_policy_as_onnx(
+        #                     policy_nn, 
+        #                     estimator,
+        #                     depth_encoder,
+        #                     agent_cfg,
+        #                     # normalizer=ppo_runner.obs_normalizer, 
+        #                     path=export_model_dir, 
+        #                     filename="policy.onnx"
+        #                 )
 
     else:
         policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)

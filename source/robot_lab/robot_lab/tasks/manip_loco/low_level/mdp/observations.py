@@ -20,6 +20,7 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers.manager_base import ManagerTermBase
 from isaaclab.managers.manager_term_cfg import ObservationTermCfg
 from isaaclab.sensors import Camera, Imu, RayCaster, RayCasterCamera, TiledCamera
+from isaaclab.envs.mdp.observations import last_action as base_last_action
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
@@ -83,6 +84,21 @@ def last_action(env: ManagerBasedEnv, action_name: str | None = None) -> torch.T
     else:
         # print("last_action",env.action_manager.get_term(action_name).raw_actions)
         return env.action_manager.get_term(action_name).raw_actions
+
+def last_leg_actions_only(env: ManagerBasedEnv) -> torch.Tensor:
+    """
+    返回上一步动作的前 12 个维度（对应四足机器人的腿部关节）。
+    它首先调用原始的 last_action 获取完整动作张量，然后进行切片。
+    """
+    # 调用原始函数获取完整的动作张量
+    # 假设完整动作张量的形状是 [num_envs, total_action_dim]
+    full_action_tensor = base_last_action(env, action_name=None)
+    
+    # 对张量进行切片，只取第二个维度（动作维度）的前 12 个元素
+    # 结果张量的形状将是 [num_envs, 12]
+    sliced_action_tensor = full_action_tensor[:, :12]
+    
+    return sliced_action_tensor
 
 
 from isaaclab.sensors import ContactSensor

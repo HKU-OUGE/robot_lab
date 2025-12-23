@@ -60,7 +60,7 @@ class Go2PiperRslRlOnPolicyRunnerCfg(RslRlOnPolicyRunnerCfg):
 class Go2PiperFlatPPORunnerCfg(Go2PiperRslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
     max_iterations = 15000
-    save_interval = 1000
+    save_interval = 200
     experiment_name = "go2_piper_flat"
     empirical_normalization = False
     policy = Go2PiperRslRlPpoActorCriticCfg(
@@ -122,43 +122,19 @@ class Go2PiperRoughPPORunnerCfg(Go2PiperFlatPPORunnerCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.max_iterations = 15000
+        self.max_iterations = 25000
         self.experiment_name = "go2_piper_rough"
-    # num_steps_per_env = 24
-    # max_iterations = 10000
-    # save_interval = 500
-    # experiment_name = "unitree_Go2arm_rough"
-    # empirical_normalization = False
-    # policy = Go2ArmRslRlPpoActorCriticCfg(
-    #     init_noise_std=1.0,
-    #     actor_hidden_dims=[256],
-    #     critic_hidden_dims=[256],
-    #     activation="elu",
-    #     activation_out="elu",
-    #     leg_control_head_hidden_dims = [256, 128],
-    #     arm_control_head_hidden_dims = [256, 128],
-    #     critic_leg_control_head_hidden_dims = [256, 128, 64],
-    #     critic_arm_control_head_hidden_dims = [256, 128, 64],
-    #     priv_encoder_dims = [32, 18],
-    #     num_leg_actions = 12,
-    #     num_arm_actions = 6,
-    # )
-
-    # algorithm = Go2ArmRslRlPpoAlgorithmCfg(
-    #     value_loss_coef=1.0,
-    #     use_clipped_value_loss=True,
-    #     clip_param=0.2,
-    #     entropy_coef=0.005,
-    #     num_learning_epochs=5,
-    #     num_mini_batches=4,
-    #     learning_rate=1e-3,
-    #     schedule="adaptive",
-    #     gamma=0.99,
-    #     lam=0.95,
-    #     desired_kl=0.01,
-    #     max_grad_norm=1.0,
-    #     # dagger_update_freq = 20,
-    #     # priv_reg_coef_schedual = [0, 0.1, 1500, 4000],
-    #     # mixing_schedule=[1.0, 0, 3000] ,
-    #     # eps = 1e-5,
-    # )
+        algorithm = Go2PiperRslRlPpoAlgorithmCfg(
+            value_loss_coef=2.0,
+            use_clipped_value_loss=True,
+            clip_param=0.2,
+            entropy_coef=0.01,
+            num_learning_epochs=8,
+            num_mini_batches=8,
+            learning_rate=1.0e-4,
+            schedule="adaptive",
+            gamma=0.99,
+            lam=0.92,
+            desired_kl=0.01,
+            max_grad_norm=1.0,
+        )
