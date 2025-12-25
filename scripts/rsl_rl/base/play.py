@@ -18,7 +18,7 @@ import os
 import sys
 
 from isaaclab.app import AppLauncher
-from isaaclab.utils.dict import print_dict
+
 
 # import json
 
@@ -85,7 +85,7 @@ import robot_lab.tasks  # noqa: F401
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from isaaclab.utils.dict import print_dict
 def _make_mlp(in_dim: int, hidden: list[int], out_dim: int, act: nn.Module):
     layers: list[nn.Module] = []
     last = in_dim
