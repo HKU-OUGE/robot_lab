@@ -67,7 +67,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheels_stop_without_cmd = RewTerm(
         func=mdp.wheels_stop_without_cmd,
-        weight=-0.1,   # 惩罚系数，可调
+        weight=0.0,   # 惩罚系数，可调
         params={
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*_WHEEL"),
@@ -87,7 +87,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     wheel_action_l2 = RewTerm(
         func=mdp.wheel_action_l2,
-        weight=-3.5,   #前2500
+        weight=0.0,   #前2500
         # weight=0.0,
         params={"wheel_ids": [12, 13, 14, 15]},
     )
@@ -119,7 +119,7 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     feet_air_time_wheel = RewTerm(
         func=mdp.feet_air_time,
-        weight=0.125,
+        weight=0.0,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_FOOT_link"),
             "command_name": "base_velocity",
@@ -131,15 +131,26 @@ class CUHKLRLSiriusWRewardsCfg(RewardsCfg):
     )
     is_alive = RewTerm(func=mdp.is_alive_gated, weight=1.0)
     is_terminated = RewTerm(func=mdp.is_terminated, weight=-1.0)
+
 @configclass
 class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     """Reward terms for the MDP."""
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         obs_scan = None
+        gait_command = ObsTerm(func=mdp.gait_mode_obs)
+        # [Analysis Fix] Remove mixed joint_vel, split into legs and wheels
+        joint_vel = None
+        joint_vel_legs = ObsTerm(func=mdp.joint_vel_rel)
+        joint_vel_wheels = ObsTerm(func=mdp.joint_vel_rel)
     @configclass
     class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
         obs_scan = None
+        gait_command = ObsTerm(func=mdp.gait_mode_obs)
+        # [Analysis Fix] Remove mixed joint_vel, split into legs and wheels
+        joint_vel = None
+        joint_vel_legs = ObsTerm(func=mdp.joint_vel_rel)
+        joint_vel_wheels = ObsTerm(func=mdp.joint_vel_rel)
 
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
     critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
@@ -200,12 +211,8 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
         # self.observations.policy.height_scan = None
-        self.observations.policy.height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
-        )
-        self.observations.critic.height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-2.0, 2.0)
-        )
+        self.observations.policy.height_scan = None
+        self.observations.critic.height_scan = None
         # self.observations.policy.height_scan = None
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
         self.observations.policy.joint_pos.params["asset_cfg"] = SceneEntityCfg(
@@ -218,18 +225,13 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.base_lin_vel.scale = 2.0
         self.observations.policy.base_ang_vel.scale = 0.25
         self.observations.policy.joint_pos.scale = 1.0
-        self.observations.policy.joint_vel.func = mdp.joint_vel_rel
-        self.observations.policy.joint_vel.params["asset_cfg"] = SceneEntityCfg(
-            "robot", joint_names=self.wheel_joint_names, preserve_order=True
-        )
-        self.observations.policy.joint_vel.scale = 0.5
-        self.observations.critic.joint_vel.scale = 0.5
+
         # self.observations.policy.base_lin_vel = None
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
-        self.actions.joint_vel.scale = 12.0
+        self.actions.joint_pos.scale = 0.6
+        self.actions.joint_vel.scale = 1.5
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -258,26 +260,27 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_apply_external_force_torque.params["asset_cfg"].body_names = [self.base_link_name]
         self.events.randomize_rigid_body_material.params["static_friction_range"] = (1.0, 1.0)
         self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
+        self.events.randomize_actuator_gains = None
 
         # ------------------------------Rewards------------------------------
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0 # 前1500轮
         # self.rewards.lin_vel_z_l2.weight = -2.0
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -2.0
+        self.rewards.flat_orientation_l2.weight = 0.0
         # Joint penalties
-        self.rewards.joint_pos_penalty.weight = -0.1
-        self.rewards.joint_pos_penalty.params["asset_cfg"].joint_names = self.leg_joint_names
+        self.rewards.joint_deviation_hip_roll.weight = -1.0
+        self.rewards.joint_deviation_hip_roll.params["asset_cfg"].joint_names = self.leg_joint_names
         # Joint penalties
-        self.rewards.joint_torques_l2.weight = -2.5e-5
+        self.rewards.joint_torques_l2.weight = 0.0
         self.rewards.joint_torques_l2.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_vel_l2.weight = -2.5e-6
+        self.rewards.joint_vel_l2.weight = 0.0
         self.rewards.joint_vel_l2.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_vel_wheel_l2.weight = -2.5e-8
+        self.rewards.joint_vel_wheel_l2.weight = 0.0
         self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
-        self.rewards.joint_acc_l2.weight = -2.5e-7
+        self.rewards.joint_acc_l2.weight = 0.0
         self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.joint_acc_wheel_l2.weight = -2.5e-9
+        self.rewards.joint_acc_wheel_l2.weight = 0.0
         self.rewards.joint_acc_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
         # self.rewards.joint_vel_wheel_l2.weight = -2.5e-4
         self.rewards.joint_vel_wheel_l2.params["asset_cfg"].joint_names = self.wheel_joint_names
@@ -294,11 +297,30 @@ class CUHKLRLSiriusWRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Velocity-tracking rewards
         self.rewards.track_lin_vel_xy_exp = RewTerm(
-            func=mdp.track_lin_vel_xy_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.5}
+            func=mdp.track_lin_vel_xy_exp, weight=3.0, params={"command_name": "base_velocity", "std": 0.5}
         )
         self.rewards.track_ang_vel_z_exp = RewTerm(
-            func=mdp.track_ang_vel_z_exp, weight=1.0, params={"command_name": "base_velocity", "std": 0.5}
+            func=mdp.track_ang_vel_z_exp, weight=2.0, params={"command_name": "base_velocity", "std": 0.25}
         )
+        # 1. Legs (Standard scale)
+        self.observations.policy.joint_vel_legs.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
+        )
+        self.observations.policy.joint_vel_legs.scale = 0.25 # Typically ~4 rad/s -> 1.0
+        self.observations.critic.joint_vel_legs.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.leg_joint_names, preserve_order=True
+        )
+        self.observations.critic.joint_vel_legs.scale = 0.25
+
+        # 2. Wheels (Reduced scale for high speed)
+        self.observations.policy.joint_vel_wheels.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.wheel_joint_names, preserve_order=True
+        )
+        self.observations.policy.joint_vel_wheels.scale = 0.05 # Typically ~20 rad/s -> 1.0
+        self.observations.critic.joint_vel_wheels.params["asset_cfg"] = SceneEntityCfg(
+            "robot", joint_names=self.wheel_joint_names, preserve_order=True
+        )
+        self.observations.critic.joint_vel_wheels.scale = 0.05
         # self.rewards.upward.weight = 1.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "CUHKLRLSiriusWRoughEnvCfg":

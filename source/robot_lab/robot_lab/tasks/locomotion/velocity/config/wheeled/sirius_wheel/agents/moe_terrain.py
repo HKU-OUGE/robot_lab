@@ -414,8 +414,8 @@ class SharedBackboneMoEActorCriticCfg(RslRlPpoActorCriticCfg):
 @configclass
 class SiriusSharedMoEPPOCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 48
-    max_iterations = 25000 
-    save_interval = 50
+    max_iterations = 3000 
+    save_interval = 200
     experiment_name = "sirius_h_moe_shared_backbone"
     empirical_normalization = False
     
