@@ -533,9 +533,9 @@ class CUHKLRLSiriusWLegEXPDistillationRunnerCfg(RslRlDistillationRunnerCfg):
 
 @configclass
 class SiriusMoECMPPPOCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 48
-    max_iterations = 25000
-    save_interval = 100
+    num_steps_per_env = 64
+    max_iterations = 2000
+    save_interval = 150
     experiment_name = "sirius_moe_cmp"
     empirical_normalization = False
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}

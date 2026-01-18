@@ -254,8 +254,8 @@ CUHKLRL_SIRIUS_WHEEL_STAND_CFG = ArticulationCfg(
 """
 CUHKLRL_SIRIUS_WHEEL_DELAY_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_ori.usd", # 初步
-        # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_pre.usd", # 调优
+        # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_ori.usd", # 初步
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_simple.usd", # 调优
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,

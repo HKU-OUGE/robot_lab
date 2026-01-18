@@ -112,8 +112,39 @@ def stand_still_without_cmd(
 
 
 def wheel_action_l2(env: ManagerBasedRLEnv, wheel_ids: list[int]) -> torch.Tensor:
+    """
+    Penalize the maximum action among the selected wheels.
+    This encourages the policy to distribute effort across all wheels 
+    rather than relying on a single wheel (L-infinity norm style penalty).
+    """
+    # 1. 获取指定轮子的动作 [env_num, num_wheels]
     actions = env.action_manager.action[:, wheel_ids]
-    return torch.sum(actions**2, dim=1)
+    
+    # 2. 计算动作的平方 (或者绝对值，取决于你想惩罚能量还是幅度，这里保持原逻辑用平方)
+    actions_sq = torch.square(actions)
+    
+    # 3. 取最大值
+    # torch.max(dim=1) 返回一个元组 (values, indices)，我们只需要 values
+    # max_val 形状: [env_num]
+    max_val, _ = torch.max(actions_sq, dim=1)
+    
+    return max_val
+
+def wheel_sync_penalty(env: ManagerBasedRLEnv, wheel_ids: list[int]) -> torch.Tensor:
+    """
+    Penalize the variance between wheel actions.
+    Encourages all wheels to spin at the same speed.
+    """
+    actions = env.action_manager.action[:, wheel_ids]
+    
+    # 计算当前这组轮子的平均动作 [env, 1]
+    mean_action = torch.mean(actions, dim=1, keepdim=True)
+    
+    # 计算每个轮子偏离平均值的程度 (方差)
+    # Sum((a_i - a_mean)^2)
+    variance = torch.sum(torch.square(actions - mean_action), dim=1)
+    
+    return variance
 
 def wheel_slip_l1(
     env: ManagerBasedRLEnv,
@@ -712,6 +743,7 @@ def _get_gait(env: ManagerBasedRLEnv) -> torch.Tensor:
 
 def _get_gait_mask(env: ManagerBasedRLEnv, gait_mode: int) -> torch.Tensor:
     g = _get_gait(env).squeeze(-1)
+    # gait_mode 1: Biped/Stand, gait_mode 0: Quadruped
     return g if gait_mode == 1 else (1.0 - g)
 
 def is_alive_gated(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -729,11 +761,69 @@ def track_ang_vel_z_gated(env: ManagerBasedRLEnv, std: float, command_name: str,
     ang_vel_error = torch.square(vel_cmd - ang_vel)
     return torch.exp(-ang_vel_error / (std**2)) * _get_gait_mask(env, gait_mode)
 
-def joint_pos_penalty_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
+def joint_pos_penalty_gated(
+    env: ManagerBasedRLEnv, 
+    asset_cfg: SceneEntityCfg, 
+    gait_mode: int,
+    sigma: float = 0.5
+) -> torch.Tensor:
+    """
+    Penalize deviation from default joint positions ONLY in specific gait mode.
+    """
     robot = env.scene["robot"]
     diff = robot.data.joint_pos[:, asset_cfg.joint_ids] - robot.data.default_joint_pos[:, asset_cfg.joint_ids]
-    reward = torch.sum(torch.square(diff), dim=1)
-    return reward * _get_gait_mask(env, gait_mode)
+    error = torch.sum(torch.square(diff), dim=1)
+    return torch.exp(-error / sigma) * _get_gait_mask(env, gait_mode)
+
+def joint_deviation_l1_gated(
+    env: ManagerBasedRLEnv, 
+    asset_cfg: SceneEntityCfg, 
+    gait_mode: int
+) -> torch.Tensor:
+    """
+    Penalize joint positions that deviate from the default one (L1 Norm), 
+    masked by the specific gait mode.
+    """
+    # Extract the asset
+    asset: Articulation = env.scene[asset_cfg.name]
+    
+    # Calculate deviation from default positions
+    diff = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    
+    # Compute L1 norm (sum of absolute errors)
+    l1_error = torch.sum(torch.abs(diff), dim=1)
+    
+    # Apply gait mask
+    return l1_error * _get_gait_mask(env, gait_mode)
+
+def joint_pos_target_l1_gated(
+    env: ManagerBasedRLEnv, 
+    target_pos_list: list[float], 
+    gait_mode: int,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    Penalize deviation from a specific target joint position list, gated by gait mode.
+    
+    Args:
+        target_pos_list: A list of target angles (rad) matching the order of joint_names in asset_cfg.
+    """
+    # 1. 获取当前关节位置
+    asset = env.scene[asset_cfg.name]
+    # 注意：这里获取的是 asset_cfg 中指定的 joint_names 的数据
+    current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    
+    # 2. 将传入的列表转换为 Tensor
+    # 形状扩展为 (num_envs, num_selected_joints)
+    target_tensor = torch.tensor(target_pos_list, device=env.device, dtype=torch.float32)
+    target_tensor = target_tensor.view(1, -1).repeat(env.num_envs, 1)
+    
+    # 3. 计算 L1 误差 (绝对值之和 或 平均)
+    # 使用 mean 可以避免关节数量不同导致权重需要重新调整，使用 sum 梯度更强
+    deviation = torch.sum(torch.abs(current_joint_pos - target_tensor), dim=1)
+    
+    # 4. 门控输出
+    return deviation * _get_gait_mask(env, gait_mode)
 
 def joint_vel_penalty_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
     robot = env.scene["robot"]
@@ -812,11 +902,22 @@ def joint_power_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mo
     return torch.sum(power, dim=1) * _get_gait_mask(env, gait_mode)
 
 def biped_stand_orientation(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """
+    Reward for upright orientation in Biped mode.
+    Encourages the robot's projected gravity vector to align with the body's negative z-axis.
+    """
     robot = env.scene["robot"]
     gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
     projected_gravity = quat_apply_inverse(robot.data.root_quat_w, gravity_vec)
-    cos_theta = -projected_gravity[:, 2]
-    r = torch.square(0.5 * cos_theta + 0.5)
+    
+    # projected_gravity[:, 2] should be -1.0 (gravity pointing down in body frame)
+    # We use -projected_gravity[:, 2] which should be 1.0
+    upright_alignment = -projected_gravity[:, 2]
+    
+    # Use a sharper curve to punish deviation stronger: x^4 or similar, or just high weight
+    r = torch.clamp(upright_alignment, min=0.0)
+    r = torch.square(r) 
+    
     return r * _get_gait_mask(env, 1)
 
 def biped_stand_height_linear(
@@ -825,19 +926,26 @@ def biped_stand_height_linear(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     sensor_cfg: SceneEntityCfg | None = None
 ) -> torch.Tensor:
+    """
+    Reward for reaching a specific base height in Biped mode.
+    """
     robot = env.scene[asset_cfg.name]
     if sensor_cfg is not None:
         sensor: RayCaster = env.scene[sensor_cfg.name]
         ray_hits_z = sensor.data.ray_hits_w[..., 2]
         ground_height = torch.mean(ray_hits_z, dim=1)
+        # Handle invalid ray casts
+        ground_height = torch.where(torch.abs(ground_height) > 10.0, torch.zeros_like(ground_height), ground_height)
         current_height = robot.data.root_pos_w[:, 2] - ground_height
     else:
         current_height = robot.data.root_pos_w[:, 2]
-    z_min = target_height - 0.15
-    z_max = target_height + 0.05
-    r = (current_height - z_min) / (z_max - z_min)
-    r = torch.clamp(r, 0.0, 1.0)
-    return r * _get_gait_mask(env, 1)
+    
+    # Linear reward: 1.0 at target, decreasing to 0.0 at distance
+    error = torch.abs(current_height - target_height)
+    # Tolerance range
+    reward = 1.0 - torch.clamp(error / 0.25, 0.0, 1.0) # Within 25cm
+    
+    return reward * _get_gait_mask(env, 1)
 
 def biped_front_legs_lift(
     env: ManagerBasedRLEnv, 
@@ -1057,7 +1165,7 @@ def biped_front_joint_acc(
 ) -> torch.Tensor:
     """
     Penalize joint acceleration for front legs in biped mode (Squared L2).
-    Includes optional time gating: 1{t > T_allow}
+    Includes optional time gating: 1{t > T_allow}from isaaclab.utils.math import yaw_quat, quat_apply_inverse
     """
     robot = env.scene[asset_cfg.name]
     # Formula: sum(q_ddot^2)
@@ -1173,9 +1281,10 @@ def undesired_contacts_gated(
     gait_mode: int, 
     threshold: float = 1.0
 ) -> torch.Tensor:
-    """Penalize undesired contacts."""
+    """
+    Penalize contacts on specified bodies (e.g., front feet/knees) in a specific gait mode.
+    """
     contact_sensor = env.scene.sensors[sensor_cfg.name]
-    # Check if any force on body parts exceeds threshold
     forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
     is_contact = torch.max(torch.norm(forces, dim=-1), dim=1)[0] > threshold
     return is_contact.float() * _get_gait_mask(env, gait_mode)
@@ -1372,3 +1481,664 @@ def wheel_spin_in_air_penalty_gated(
     """Gated version of wheel_spin_in_air_penalty."""
     base_penalty = wheel_spin_in_air_penalty(env, sensor_cfg, asset_cfg)
     return base_penalty * _get_gait_mask(env, gait_mode)
+
+def wheel_vel_smoothness_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    gait_mode: int
+) -> torch.Tensor:
+    """
+    Penalize large changes in wheel velocity to encourage smooth rolling.
+    """
+    if env.action_manager.prev_action is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # Assuming actions map to velocities for wheels roughly
+    # Or directly check joint accel
+    robot = env.scene[asset_cfg.name]
+    acc = robot.data.joint_acc[:, asset_cfg.joint_ids]
+    return torch.sum(torch.square(acc), dim=1) * _get_gait_mask(env, gait_mode)
+
+def feet_contact_gated(
+    env: ManagerBasedRLEnv, 
+    sensor_cfg: SceneEntityCfg, 
+    gait_mode: int,
+    threshold: float = 1.0
+) -> torch.Tensor:
+    """
+    Reward having contact on specific feet/wheels in a specific gait mode.
+    Useful for ensuring rear wheels stay on the ground in Biped mode.
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    # Check if force magnitude > threshold
+    forces = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    has_contact = (forces > threshold).float()
+    
+    # Reward is mean contact of all specified bodies
+    return torch.mean(has_contact, dim=1) * _get_gait_mask(env, gait_mode)
+
+
+def track_lin_vel_xy_biped_soft(
+    env: ManagerBasedRLEnv, 
+    std: float, 
+    command_name: str, 
+    # target_height: float = 1.0 # 移除高度耦合，让速度奖励专注于速度
+) -> torch.Tensor:
+    """
+    修改版：移除硬截断 Gate。即使倒在地上，只要尝试移动也能获得部分奖励，
+    配合 Orientation 奖励共同作用。
+    """
+    vel_cmd = env.command_manager.get_command(command_name)[:, :2]
+    lin_vel = env.scene["robot"].data.root_lin_vel_b[:, :2]
+    lin_vel_error = torch.sum(torch.square(vel_cmd - lin_vel), dim=1)
+    
+    # 基础速度奖励
+    base_reward = torch.exp(-lin_vel_error / (std**2))
+    
+    # 可选：加上一个软性的姿态系数，而不是硬截断 (0 or 1)
+    # 这样当它趴着时 (upright~0)，奖励很小但不是0；站起来时奖励变大
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    proj_g = quat_apply_inverse(env.scene["robot"].data.root_quat_w, gravity_vec)
+    upright = -proj_g[:, 2] # 1.0 is standing
+    
+    # 使用 ReLU 或软映射，保证趴着时也有微弱信号
+    soft_posture = torch.clamp(upright, min=0.0) 
+    
+    return base_reward * soft_posture * _get_gait_mask(env, 1)
+
+def track_ang_vel_z_biped_soft(
+    env: ManagerBasedRLEnv, 
+    std: float, 
+    command_name: str, 
+) -> torch.Tensor:
+    """
+    修改版：移除硬截断 Gate。
+    """
+    vel_cmd = env.command_manager.get_command(command_name)[:, 2]
+    ang_vel = env.scene["robot"].data.root_ang_vel_b[:, 2]
+    ang_vel_error = torch.square(vel_cmd - ang_vel)
+    
+    base_reward = torch.exp(-ang_vel_error / (std**2))
+    
+    # 同样使用软姿态系数
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    proj_g = quat_apply_inverse(env.scene["robot"].data.root_quat_w, gravity_vec)
+    upright = torch.clamp(-proj_g[:, 2], min=0.0)
+
+    return base_reward * upright * _get_gait_mask(env, 1)
+
+def biped_stand_height_exp(
+    env: ManagerBasedRLEnv, 
+    target_height: float, 
+    std: float = 0.5, # 使用较大的 std 确保长距离也有梯度
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg | None = None
+) -> torch.Tensor:
+    """
+    修改版：使用指数奖励代替线性截断。
+    即使误差很大（如 0.5m），指数函数也会返回非零值和梯度。
+    """
+    robot = env.scene[asset_cfg.name]
+    if sensor_cfg is not None:
+        sensor: RayCaster = env.scene[sensor_cfg.name]
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        ground_height = torch.mean(ray_hits_z, dim=1)
+        # 过滤无效数据
+        ground_height = torch.where(torch.abs(ground_height) > 10.0, torch.zeros_like(ground_height), ground_height)
+        current_height = robot.data.root_pos_w[:, 2] - ground_height
+    else:
+        current_height = robot.data.root_pos_w[:, 2]
+    
+    error = torch.square(current_height - target_height)
+    
+    # 指数奖励：exp(-error / std^2)
+    reward = torch.exp(-error / (std**2))
+    
+    return reward * _get_gait_mask(env, 1)
+
+def biped_upright_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """
+    更直接的姿态惩罚：最小化重力在 X/Y 轴的分量。
+    这比最大化 Z 分量在数值优化上通常更平滑。
+    """
+    robot = env.scene["robot"]
+    # 投影重力到机身坐标系
+    g = robot.data.projected_gravity_b 
+    # 我们希望 g 接近 [0, 0, -1]。所以 punish x 和 y 的分量
+    error = torch.sum(torch.square(g[:, :2]), dim=1)
+    return torch.exp(-error / 0.5) * _get_gait_mask(env, 1)
+
+def track_lin_vel_xy_yaw_frame_biped(
+    env: ManagerBasedRLEnv, 
+    std: float, 
+    command_name: str, 
+) -> torch.Tensor:
+    """
+    修正版：在 Heading Frame (航向坐标系) 下计算速度误差。
+    无论机器人是趴着还是站着，Heading Frame 的 X 轴永远指向它面朝的“水平前方”。
+    """
+    # 1. 获取指令 (通常是在水平面上的 x, y)
+    vel_cmd = env.command_manager.get_command(command_name)[:, :2]
+    
+    # 2. 获取世界坐标系下的绝对速度
+    vel_w = env.scene["robot"].data.root_lin_vel_w[:, :3]
+    
+    # 3. 计算机器人的 Yaw (航向)
+    # 提取四元数中的 Yaw 分量 (忽略 Pitch 和 Roll)
+    # 注意：这里假设机器人的 root_quat_w 能够反映整体朝向
+    # 如果站立时发生 Gimbal Lock 导致 Yaw 乱跳，可能需要用 IMU 或特定 Link 辅助，
+    # 但一般 IsaacLab 的 yaw_quat 工具对 standard Z-up 也是适用的。
+    yaw_q = yaw_quat(env.scene["robot"].data.root_quat_w)
+    
+    # 4. 将世界速度投影回航向坐标系 (Heading Frame)
+    # 结果: [v_forward, v_left, v_up]
+    vel_heading = quat_apply_inverse(yaw_q, vel_w)
+    
+    # 5. 只取前两维 (Forward, Left) 与指令比较
+    lin_vel_error = torch.sum(torch.square(vel_cmd - vel_heading[:, :2]), dim=1)
+    
+    # 6. 计算奖励
+    base_reward = torch.exp(-lin_vel_error / (std**2))
+    
+    # 加上之前讨论的软姿态门控
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    proj_g = quat_apply_inverse(env.scene["robot"].data.root_quat_w, gravity_vec)
+    soft_posture = torch.clamp(-proj_g[:, 2], min=0.0) # 修正这里：-proj_g[:, 2] 代表 Up 轴分量
+    
+    return base_reward * soft_posture * _get_gait_mask(env, 1)
+
+def track_ang_vel_z_world_biped(
+    env: ManagerBasedRLEnv, 
+    std: float, 
+    command_name: str, 
+) -> torch.Tensor:
+    """
+    修正版：追踪世界坐标系下的 Z 轴角速度。
+    不管机器人怎么倾斜，我们只关心它绕着世界垂直轴旋转的速度。
+    """
+    vel_cmd = env.command_manager.get_command(command_name)[:, 2]
+    
+    # 直接取世界坐标系的角速度 Z 分量
+    # 这样只有绕地面的垂直轴旋转才算数
+    ang_vel_w_z = env.scene["robot"].data.root_ang_vel_w[:, 2]
+    
+    ang_vel_error = torch.square(vel_cmd - ang_vel_w_z)
+    
+    base_reward = torch.exp(-ang_vel_error / (std**2))
+    
+    # 姿态门控
+    gravity_vec = torch.tensor([0.0, 0.0, -1.0], device=env.device).repeat(env.num_envs, 1)
+    proj_g = quat_apply_inverse(env.scene["robot"].data.root_quat_w, gravity_vec)
+    soft_posture = torch.clamp(-proj_g[:, 2], min=0.0)
+
+    return base_reward * soft_posture * _get_gait_mask(env, 1)
+def lin_vel_z_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalize vertical velocity to prevent hopping/bouncing."""
+    asset = env.scene[asset_cfg.name]
+    return torch.square(asset.data.root_lin_vel_b[:, 2]) * _get_gait_mask(env, 1)
+# ==============================================================================
+# Improved Bipedal Rewards (Focus on Swing-up)
+# ==============================================================================
+
+def biped_upright_linear(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """
+    Reward for upright orientation (Alignment with Gravity).
+    Uses a linear reward structure to provide strong gradients even when the robot is flat.
+    range: [0, 1]
+    """
+    robot = env.scene["robot"]
+    # Projected gravity in body frame
+    # For a standing robot, gravity vector in body frame should be [0, 0, -1]
+    g_body = robot.data.projected_gravity_b 
+    
+    # We want g_body.z to be -1.
+    # If robot is flat, g_body.z is approx 0.
+    # Reward = -g_body.z (Since g_z is negative when upright)
+    # Clamp to ensure it's positive [0, 1]
+    
+    # Note: This gives a linear gradient. 
+    # Flat (0) -> 45deg (0.7) -> Upright (1.0)
+    reward = torch.clamp(-g_body[:, 2], min=0.0)
+    
+    # Optional: Enhance gradient at the beginning (swing-up phase)
+    # reward = torch.pow(reward, 0.5) # Square root makes the gradient steeper near 0
+    
+    return reward * _get_gait_mask(env, 1)
+
+def biped_stand_orientation_corrected(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """
+    Corrected Orientation Reward for Wheel-Bipedal Balance.
+    Target: The robot should pitch up ~90 degrees.
+    
+    Logic:
+    - Flat (Quadruped): Gravity projects to Z-axis (approx -1).
+    - Upright (Biped): Gravity projects to X-axis (approx -1 if nose up, +1 if nose down).
+    
+    We want to maximize the magnitude of gravity on the X-axis.
+    """
+    robot = env.scene[asset_cfg.name]
+    # Projected gravity in body frame
+    g_body = robot.data.projected_gravity_b 
+    
+    # We want g_body.x to be large (close to 1 or -1).
+    # We want g_body.z to be small (close to 0).
+    
+    # Method 1: Penalize Z-alignment (Force it to be NOT flat)
+    # If flat, g_z ~ -1, reward ~ 0.
+    # If upright, g_z ~ 0, reward ~ 1.
+    reward_z = 1.0 - torch.abs(g_body[:, 2])
+    
+    # Method 2: Encourage X-alignment (Stronger gradient for lifting nose)
+    # Assuming standing on rear wheels means 'nose up', X-axis points roughly UP.
+    # Gravity points DOWN. So g_body.x should be approx -1.
+    # reward_x = torch.relu(-g_body[:, 0]) 
+    
+    # Combined: Penalize Z is safer to avoid confusion about "which way is up" initially
+    # Use a squared penalty to make the gradient sharper near flat
+    reward = torch.square(1.0 - torch.abs(g_body[:, 2]))
+    
+    return reward * _get_gait_mask(env, 1)
+
+def biped_stand_height_posture_gated(
+    env: ManagerBasedRLEnv, 
+    target_height: float, 
+    std: float = 0.5,
+    gate_threshold: float = 0.3, # Approx 17 degrees pitch required to start getting height reward
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg | None = None
+) -> torch.Tensor:
+    """
+    Reward base height ONLY if the robot is sufficiently upright.
+    Prevents the 'tiptoeing' local minimum where robot extends legs while lying flat.
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # 1. Calculate Height Error
+    if sensor_cfg is not None:
+        sensor: RayCaster = env.scene[sensor_cfg.name]
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        ground_height = torch.mean(ray_hits_z, dim=1)
+        ground_height = torch.where(torch.abs(ground_height) > 10.0, torch.zeros_like(ground_height), ground_height)
+        current_height = robot.data.root_pos_w[:, 2] - ground_height
+    else:
+        current_height = robot.data.root_pos_w[:, 2]
+    
+    height_error = torch.square(current_height - target_height)
+    height_reward = torch.exp(-height_error / (std**2))
+    
+    # 2. Calculate Orientation Gate
+    g_body = robot.data.projected_gravity_b
+    uprightness = -g_body[:, 2] # 1.0 is upright, 0.0 is flat
+    
+    # Hard Gate or Soft Sigmoid Gate
+    # If uprightness < threshold, reward is 0 (or very small)
+    # This forces the agent to fix orientation FIRST.
+    gate = torch.where(uprightness > gate_threshold, torch.ones_like(uprightness), torch.zeros_like(uprightness))
+    
+    # Alternative: Soft multiplication (uprightness * height)
+    # But a hard gate is often better to break the local minimum.
+    
+    return height_reward * gate * _get_gait_mask(env, 1)
+
+def biped_height_strict_gated(
+    env: ManagerBasedRLEnv, 
+    target_height: float, 
+    gate_pitch_threshold: float = 0.5, # ~30 degrees
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    sensor_cfg: SceneEntityCfg | None = None
+) -> torch.Tensor:
+    """
+    Height reward that ONLY activates if the robot is actually pitching up.
+    Stops the robot from 'jumping' while flat.
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # 1. Height Error
+    if sensor_cfg is not None:
+        sensor: RayCaster = env.scene[sensor_cfg.name]
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        ground_height = torch.mean(ray_hits_z, dim=1)
+        # Filter invalid
+        ground_height = torch.where(torch.abs(ground_height) > 10.0, torch.zeros_like(ground_height), ground_height)
+        current_height = robot.data.root_pos_w[:, 2] - ground_height
+    else:
+        current_height = robot.data.root_pos_w[:, 2]
+    
+    # Exponential reward for height
+    height_reward = torch.exp(-torch.square(current_height - target_height) / 0.25)
+    
+    # 2. Strict Pitch Gate
+    # Calculate Pitch from Projected Gravity
+    # If flat, g_x ~ 0, g_z ~ -1.
+    # If pitched up, g_x becomes non-zero.
+    g_body = robot.data.projected_gravity_b
+    
+    # We use the absolute value of X projection as a proxy for pitch angle magnitude
+    # If g_body.x > 0.5, it means we are tilted at least 30 degrees (sin(30)=0.5)
+    tilt_magnitude = torch.abs(g_body[:, 0])
+    
+    # Sigmoid gate: 0 if flat, 1 if tilted
+    gate = torch.sigmoid((tilt_magnitude - 0.3) * 10.0)
+    
+    return height_reward * gate * _get_gait_mask(env, 1)
+
+def biped_swingup_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    Incentivize Pitch Velocity explicitly when the robot is NOT yet upright.
+    Helping the robot discover the 'jerk' motion needed to stand up.
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # Check orientation
+    g_body = robot.data.projected_gravity_b
+    uprightness = -g_body[:, 2]
+    
+    # Only reward pitch velocity if we are lying down (uprightness < 0.8)
+    # Assuming standard coordinate system where +Pitch (y-axis angular vel) raises the front
+    # Check your robot's coordinate frame! Usually Pitch is Y-axis.
+    # If robot faces +X, rotating around +Y lifts the nose (if using Right Hand Rule).
+    # You might need to check if it needs +Y or -Y velocity.
+    
+    ang_vel_pitch = robot.data.root_ang_vel_b[:, 1]
+    
+    # Bonus for pitching UP when flat
+    # We use a tanh to cap the bonus so it doesn't explode
+    bonus = torch.tanh(ang_vel_pitch) 
+    
+    mask = (uprightness < 0.7).float() # Only active during transition
+    
+    return bonus * mask * _get_gait_mask(env, 1)
+
+def biped_stand_orientation_strict(
+    env: ManagerBasedRLEnv, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    Strict orientation reward for Rear-Wheel Standing.
+    Target: The robot's nose should point UP.
+    
+    Physics:
+    - Gravity vector in World is [0, 0, -1].
+    - If Robot Nose (+X) points UP, Gravity in Body frame is [-1, 0, 0].
+    
+    We reward -g_body_x.
+    """
+    robot = env.scene[asset_cfg.name]
+    g_body = robot.data.projected_gravity_b 
+    
+    # g_body[:, 0] 是重力在 X 轴的分量。
+    # 我们希望它是 -1.0。
+    # 奖励公式： (-g_x + 1) / 2  --> 范围 [0, 1]
+    # 或者简单粗暴的ReLU： clamp(-g_x, 0, 1)
+    
+    # 采用平方误差形式，引导梯度更平滑
+    # error = (g_x - (-1))^2 + g_y^2 + g_z^2
+    # 但我们只关心把头抬起来，所以主要奖励 -g_x
+    
+    # 线性奖励：越接近 -1 越高
+    reward = torch.clamp(-g_body[:, 0], min=0.0) 
+    
+    # 增加指数锐化，迫使它必须非常直才能拿高分
+    reward = torch.pow(reward, 2)
+    
+    return reward * _get_gait_mask(env, 1)
+
+def biped_swing_pitch_bonus(
+    env: ManagerBasedRLEnv, 
+    threshold_rad: float = 0.5,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    Reward giving a 'kick' of Pitch Velocity ONLY when the robot is lying flat.
+    Helps initiate the stand-up motion.
+    """
+    robot = env.scene[asset_cfg.name]
+    g_body = robot.data.projected_gravity_b
+    
+    # If g_x is near 0, we are flat. 
+    is_flat = torch.abs(g_body[:, 0]) < 0.5 # < 30 degrees tilt
+    
+    # We want +Pitch Velocity (Nose goes up)
+    # Check your axis! Usually Y-axis angular velocity.
+    pitch_vel = robot.data.root_ang_vel_b[:, 1]
+    
+    reward = torch.relu(pitch_vel) 
+    
+    return reward * is_flat.float() * _get_gait_mask(env, 1)
+
+
+# ==============================================================================
+# Ported Handstand/Stand-Env Rewards (with Gait Gating)
+# ==============================================================================
+
+def biped_stand_orientation_l2(
+    env: ManagerBasedRLEnv, 
+    target_gravity: list[float], 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    L2 regularization for orientation based on projected gravity.
+    Ported from stand_env's handstand_orientation_l2.
+    
+    Arguments:
+        target_gravity: Expected gravity vector in BODY frame (e.g. [-1, 0, 0] for nose up).
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # 当前在机身坐标系下的重力向量
+    current_gravity = robot.data.projected_gravity_b
+    
+    # 目标重力向量
+    target = torch.tensor(target_gravity, device=env.device)
+    
+    # 计算 L2 误差 (Sum of Squared Errors)
+    error = torch.sum(torch.square(current_gravity - target), dim=1)
+    
+    # 转化为奖励：exp(-error) 或 直接用负 error (stand_env 似乎直接用了 L2 作为惩罚项，权重为负)
+    # 这里我们返回 Error 本身，配置里权重设为负数 (weight < 0)
+    return error * _get_gait_mask(env, 1)
+
+
+def biped_feet_air_height_exp(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    std: float = 0.5,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Reward for keeping specific feet (wheels) at a target height.
+    Used for the "Air Feet" (Front wheels).
+    """
+    asset = env.scene[asset_cfg.name]
+    
+    # 获取指定脚（body_ids）的 Z 坐标
+    # asset_cfg.body_ids 应该在 config 里指定为前轮/前脚
+    foot_pos_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+    
+    # 计算误差
+    error = torch.square(foot_pos_z - target_height)
+    
+    # 对所有指定的脚取平均或求和
+    mean_error = torch.mean(error, dim=1)
+    
+    reward = torch.exp(-mean_error / (std**2))
+    
+    return reward * _get_gait_mask(env, 1)
+
+
+def biped_feet_air_contact_penalty(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """
+    Penalize if the specified feet (Front feet) touch the ground.
+    Ported from handstand_feet_on_air.
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    
+    # 获取接触力 (Net Forces)
+    # shape: (num_envs, num_bodies, 3)
+    forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
+    
+    # 计算合力大小
+    force_norm = torch.norm(forces, dim=-1)
+    
+    # 如果力 > 1.0，则认为接触
+    is_contact = (force_norm > 1.0).float()
+    
+    # 对所有指定的脚求和 (接触脚的数量)
+    # 我们希望这个值为 0，所以配置里权重设为负数
+    return torch.sum(is_contact, dim=1) * _get_gait_mask(env, 1)
+
+def feet_contact_gated(
+    env: ManagerBasedRLEnv, 
+    sensor_cfg: SceneEntityCfg, 
+    gait_mode: int,
+    threshold: float = 1.0
+) -> torch.Tensor:
+    """
+    Reward having contact on specific feet/wheels in a specific gait mode.
+    Encourages maintaining contact (avoiding stepping/trotting) for wheeled locomotion.
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    # Check if force magnitude > threshold
+    forces = torch.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :], dim=-1)
+    has_contact = (forces > threshold).float()
+    
+    # Reward is mean contact ratio of all specified bodies (1.0 = all commanded feet on ground)
+    return torch.mean(has_contact, dim=1) * _get_gait_mask(env, gait_mode)
+
+def joint_pos_penalty_adaptive_gated(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    gait_mode: int,
+    # --- 基础参数 ---
+    velocity_threshold: float = 0.5,
+    # --- 高度门控 (Floating Ring/Gap) ---
+    h_free_min: float = 0.10,   # 当障碍物距离/高度差小于此值（比如头顶空间紧张），完全放松限制
+    h_free_max: float = 0.50,   # 当空间正常时，施加完全限制
+    offset: float = 0.5,
+    # --- 平滑参数 ---
+    alpha: float = 0.05,        # [重要] 降低此值以减缓 Gate 变化，防止闪烁 (原 0.1)
+) -> torch.Tensor:
+    """
+    自适应关节位置惩罚（稳定版）。
+    1. 移除了 Pitch Gate 以消除高频振荡。
+    2. 仅保留 Height Gate 以应对 Floating Ring 的蹲下需求。
+    3. 增强了 EMA 平滑。
+    """
+    # 1. 基础 L2 偏差计算
+    asset: Articulation = env.scene[asset_cfg.name]
+    diff = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    pos_err = torch.sum(torch.square(diff), dim=1) # L2 Error
+
+    # 2. Gate: 高度/障碍物门控 (Height Gate)
+    # 调用 mdp 中的 height_scan (确保你的 rewards.py 顶部导入了 mdp)
+    # H 通常代表 "扫描到的地形高度 z" 或 "射线击中点的 z 坐标"
+    # 假设你的 sensor_cfg 指向一个 Height Scanner
+    # 如果是向上看的 scanner (测天花板): H 越小，说明空间越局促 -> 需要放松限制 (Gate -> 1)
+    # 如果是向下看的 scanner (测地形): H 代表地形高度。
+    
+    # 这里的逻辑假设: 高度扫描器检测到某种"异常"或"障碍"
+    # 我们用 magnitude 来衡量"非平坦程度"或"障碍物接近程度"
+    H = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
+    
+    if H.ndim == 2 and H.shape[1] > 1:
+        mag = H.abs().max(dim=1).values
+    else:
+        mag = H.abs().squeeze(-1)
+        
+    # 计算 Gate: 
+    # mag < h_free_min (遇到障碍/高度差大): Gate -> 1.0 (Relax)
+    # mag > h_free_max (正常空间):         Gate -> 0.0 (Strict)
+    # 注意：这里需要根据你的 scanner 具体是"测距"还是"测高"来调整符号。
+    # 假设 mag 代表"自由空间高度"或"与障碍物的距离": 距离越小，Gate越大(放松)
+    # 如果 mag 代表"地形高度差(terrain delta)": 差值越大，Gate越大(放松)
+    
+    # 下面逻辑假设 mag 是 "地形起伏/障碍程度" (越大约危险 -> 放松限制允许调整):
+    gate = torch.clamp((mag - h_free_min) / max(1e-6, (h_free_max - h_free_min)), 0.0, 1.0)
+
+    # 3. 平滑 (EMA)
+    # 即使移除了 Pitch，Height Scan 也可能有噪声，必须平滑
+    if not hasattr(env, "adaptive_pos_gate_ema"):
+        env.adaptive_pos_gate_ema = torch.zeros_like(gate)
+    # 使用更小的 alpha (如 0.05) 让变化更迟钝，过滤高频噪声
+    env.adaptive_pos_gate_ema = (1.0 - alpha) * env.adaptive_pos_gate_ema + alpha * gate
+    g_smooth = env.adaptive_pos_gate_ema
+
+    # 4. 计算最终缩放系数
+    # g=0 (Normal) -> scale=1.0 (全额惩罚)
+    # g=1 (Obstructed) -> scale=0.1 (保留微弱引导)
+    min_scale = 0.1
+    scale = (1.0 - g_smooth) + (min_scale * g_smooth)
+
+    # 5. 应用 Gait Mask
+    gait_mask = _get_gait_mask(env, gait_mode)
+
+    return pos_err * scale * gait_mask
+
+
+def wheel_sync_when_straight_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    gait_mode: int,
+    rot_threshold: float = 0.1
+) -> torch.Tensor:
+    """
+    Penalize variance in wheel velocities when the rotational command is small (moving straight).
+    Formula: Sum((v_i - v_mean)^2) * Mask
+    """
+    # 1. 获取指令
+    cmd = env.command_manager.get_command(command_name)
+    ang_cmd = cmd[:, 2] # Yaw rate command
+
+    # 2. 计算 Mask：只有当转向指令绝对值小于阈值时才激活
+    is_straight = (torch.abs(ang_cmd) < rot_threshold).float()
+
+    # 3. 获取轮子速度
+    asset = env.scene[asset_cfg.name]
+    # 注意：这里假设 asset_cfg 传入的是 4 个轮子的 joint_names
+    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+
+    # 4. 计算方差惩罚
+    # 计算当前时刻 4 个轮子的平均速度 [env_num, 1]
+    mean_vel = torch.mean(wheel_vel, dim=1, keepdim=True)
+    # 计算每个轮子偏离平均值的平方和 [env_num]
+    sync_penalty = torch.sum(torch.square(wheel_vel - mean_vel), dim=1)
+
+    # 5. 应用 Gate 和 Gait Mask
+    # 如果处于四足模式(gait_mode=0) 且 处于直线行驶指令，则施加惩罚
+    return sync_penalty * is_straight * _get_gait_mask(env, gait_mode)
+
+
+
+def joint_deviation_abad_straight_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    gait_mode: int,
+    rot_threshold: float = 0.1,
+) -> torch.Tensor:
+    """
+    Penalize deviation of specific joints (usually HAA/ABAD) ONLY when moving straight.
+    This prevents the penalty from fighting against necessary leg movements during turning.
+    """
+    # 1. 获取指令
+    cmd = env.command_manager.get_command(command_name)
+    ang_cmd = cmd[:, 2]  # Yaw rate command
+
+    # 2. 计算 Mask：只有当转向指令绝对值小于阈值时才激活 (直线行驶)
+    is_straight = (torch.abs(ang_cmd) < rot_threshold).float()
+
+    # 3. 计算关节偏差 (L2 square)
+    asset: Articulation = env.scene[asset_cfg.name]
+    # 注意：这里只计算 asset_cfg 中选定的关节 (即 HAA)
+    diff = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    deviation = torch.sum(torch.square(diff), dim=1)
+
+    # 4. 组合 Mask 和 Gait Mode
+    # 逻辑：(是直线行驶) AND (是指定步态)
+    return deviation * is_straight * _get_gait_mask(env, gait_mode)

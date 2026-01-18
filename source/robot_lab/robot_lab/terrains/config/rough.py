@@ -728,86 +728,111 @@ AVOID1_TERRAINS_CFG = TerrainGeneratorCfg(
 FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(12.0, 12.0),       # 整个 terrain tile 尺寸
     border_width=20.0,        # 地形边界，防止掉落
-    num_rows=15,
-    num_cols=20,
+    num_rows=10,
+    num_cols=14,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
-    use_cache=False,
+    use_cache=True,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.5,                           # 完全生成此地形
+            proportion=0.1,                           # 完全生成此地形
             ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.1, 0.3),             # 环的离地高度范围
-            ring_thickness=0.3,                       # 环厚度（z 方向）
-            platform_width=2.5,                       # 地形中心的方形平台大小
-            size=(12.0, 12.0),                        # 每块地形大小
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,     
-                    patch_radius=0.15,    
-                    max_height_diff=0.05
-                )
-            },
+            ring_height_range=(0.8, 0.5),             # 环的离地高度范围
+            ring_thickness=0.2,                       # 环厚度（z 方向）
+            platform_width=4.0,                       # 地形中心的方形平台大小
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
         ),
         "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.4, 0.6),
+            proportion=0.1,
+            step_height_range=(0.05, 0.25),
             step_width=3.5,
             platform_width=2,
             border_width=1.5,
             holes=False,
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,     
-                    patch_radius=0.15,    
-                    max_height_diff=0.05
-                )
-            },
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.3,
-            step_height_range=(0.4, 0.6),
+            proportion=0.1,
+            step_height_range=(0.05, 0.25),
             step_width=3.5,
             platform_width=2,
             border_width=1.5,
             holes=False,
-            flat_patch_sampling={
-                "target": FlatPatchSamplingCfg(
-                    num_patches=50,     
-                    patch_radius=0.15,    
-                    max_height_diff=0.05
-                )
-            },
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
         ),
         # "boxes": terrain_gen.MeshRandomGridTerrainCfg(
         #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
         # ),
-        # "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-        #     proportion=0.10, slope_range=(0.4, 0.4), platform_width=2.0, border_width=0.25,
-        #     flat_patch_sampling={
-        #         "target": FlatPatchSamplingCfg(
-        #             num_patches=50,   
-        #             patch_radius=0.15,   
-        #             max_height_diff=0.05
-        #         )
-        #     },
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.1, slope_range=(0.05, 0.2), platform_width=2.0, border_width=0.25,
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,   
+            #         patch_radius=0.15,   
+            #         max_height_diff=0.05
+            #     )
+            # },
+        ),
+        # "noisy_slope": terrain_gen.HfNoisyPyramidSlopedTerrainCfg(
+        #     proportion=0.05,
+        #     slope_range=(0.01, 0.4),     # 自己调
+        #     platform_width=2.0,
+        #     noise_range=(-0.05, 0.0),    # 在高度上加最多 2cm 的波动
         # ),
-        # "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-        #     proportion=0.10, slope_range=(0.0, 0.4), platform_width=2.0, border_width=0.25,
-        #     flat_patch_sampling={
-        #         "target": FlatPatchSamplingCfg(
-        #             num_patches=50,    
-        #             patch_radius=0.15,    
-        #             max_height_diff=0.05 
-        #         )
-        #     },
-        # ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.10, slope_range=(0.05, 0.2), platform_width=2.0, border_width=0.25,
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,    
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05 
+            #     )
+            # },
+        ),
+        "gap": terrain_gen.trimesh.mesh_terrains_cfg.MeshGapTerrainCfg(
+            proportion=0.10, gap_width_range=(0.05, 0.25), platform_width=4.0,
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,    
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05 
+            #     )
+            # },
+        ),
+        "rail": terrain_gen.trimesh.mesh_terrains_cfg.MeshRailsTerrainCfg(
+            proportion=0.10, rail_thickness_range=(0.05, 0.05), rail_height_range=(0.05, 0.25),platform_width=4.0,
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,    
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05 
+            #     )
+            # },
+        ),
         # "plane": terrain_gen.MeshPlaneTerrainCfg(
         #     proportion=0.10,size=(10.0, 10.0)
         # ),
         # "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-        #     proportion=0.1, noise_range=(0.01, 0.08), noise_step=0.005, border_width=0.25,
+        #     proportion=0.10, noise_range=(0.01, 0.05), noise_step=0.005, border_width=0.25,
         #     flat_patch_sampling={
         #         "target": FlatPatchSamplingCfg(
         #             num_patches=50,      

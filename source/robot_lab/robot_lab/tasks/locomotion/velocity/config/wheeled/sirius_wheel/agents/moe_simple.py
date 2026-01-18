@@ -369,7 +369,7 @@ class MoEPPO(PPO):
 @configclass
 class RobustMoEActorCriticCfg(RslRlPpoActorCriticCfg):
     class_name: str = "RobustMoEActorCritic"
-    num_experts: int = 3
+    num_experts: int = 6
     latent_dim: int = 256
     rnn_type: str = "gru" 
     
@@ -387,8 +387,8 @@ class RobustMoEActorCriticCfg(RslRlPpoActorCriticCfg):
 @configclass
 class SiriusRobustMoEPPOCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 48
-    max_iterations = 5000 
-    save_interval = 200
+    max_iterations = 10000 
+    save_interval = 500
     experiment_name = "sirius_paper_moe_hybrid_lower_noise" # 修改实验名
     empirical_normalization = False 
     
@@ -397,7 +397,7 @@ class SiriusRobustMoEPPOCfg(RslRlOnPolicyRunnerCfg):
     policy = RobustMoEActorCriticCfg(
         init_noise_std=0.8, # === 低初始噪声 0.5 ===
         activation="elu",
-        num_experts=3,
+        num_experts=6,   # === 核心：6 专家 ===
         latent_dim=256,
         rnn_type="gru",
         separate_gating=True,
@@ -426,7 +426,7 @@ class SiriusRobustMoEPPOCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class SiriusMoESanityCheckCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 48
+    num_steps_per_env = 64
     max_iterations = 5000 
     save_interval = 200
     experiment_name = "sirius_moe_sanity_check_1exp" # 明确实验名

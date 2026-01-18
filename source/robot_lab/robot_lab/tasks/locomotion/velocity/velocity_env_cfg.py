@@ -55,7 +55,7 @@ class MySceneCfg(InteractiveSceneCfg):
         # terrain_generator=SLOPE_TERRAINS_CFG,
         terrain_generator=STAIR_TERRAINS_CFG,
         # terrain_generator=NOISE_TERRAINS_CFG,
-        max_init_terrain_level=10,
+        max_init_terrain_level=0,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -76,18 +76,18 @@ class MySceneCfg(InteractiveSceneCfg):
     # sensors
     height_scanner = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
         ray_alignment='yaw',
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 0.5]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.6, 0.5]),
         debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     height_scanner_base = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        offset=RayCasterCfg.OffsetCfg(pos=(0.1, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.1, 0.1)),
-        debug_vis=False,
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=(1.4, 0.5)),
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     ray_caster = None
@@ -128,9 +128,9 @@ class CommandsCfg:
 
     base_velocity = mdp.UniformThresholdVelocityCommandCfg(
         asset_name="robot",
-        resampling_time_range=(10.0, 10.0),
-        rel_standing_envs=0.1,
-        rel_heading_envs=0.9,
+        resampling_time_range=(10.0, 20.0),
+        rel_standing_envs=0.05,
+        rel_heading_envs=0.95,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
@@ -204,7 +204,7 @@ class ObservationsCfg:
         )
         height_scan = ObsTerm(
             func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            params={"sensor_cfg": SceneEntityCfg("height_scanner_base")},
             noise=Unoise(n_min=-0.1, n_max=0.1),
             clip=(-1.0, 1.0),
             scale=1.0,
@@ -239,7 +239,7 @@ class ObservationsCfg:
         )
         actions = ObsTerm(func=mdp.last_action, scale=1.0, clip=(-100.0, 100.0))
         height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
+            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner_base")}, scale=1.0, clip=(-1.0, 1.0)
         )
 
         def __post_init__(self):
