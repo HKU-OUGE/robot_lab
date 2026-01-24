@@ -22,9 +22,9 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 ##
 
 
-ARCLAB_ARCDOG_CFG = ArticulationCfg(
+ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog/arcdog.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg/arcdog_adjustable_leg.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -42,58 +42,66 @@ ARCLAB_ARCDOG_CFG = ArticulationCfg(
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.45),
         joint_pos={
-            "FL_HAA": 0.00,
-            "FR_HAA": -0.00,
-            "RL_HAA": 0.00,
-            "RR_HAA": -0.00,
-            "FL_HFE": 0.60,
-            "FR_HFE": 0.60,
-            "RL_HFE": 0.60,
-            "RR_HFE": 0.60,
-            "FL_KFE": -0.95,
-            "FR_KFE": -0.95,
-            "RL_KFE": -0.95,
-            "RR_KFE": -0.95,
-            "FL_box_joint": 0.075,
-            "FR_box_joint": 0.075,
-            "RL_box_joint": 0.075,
-            "RR_box_joint": 0.075,
+            "FL_hip_joint": 0.00,
+            "FR_hip_joint": -0.00,
+            "RL_hip_joint": 0.00,
+            "RR_hip_joint": -0.00,
+            "FL_thigh_joint": 0.60,
+            "FR_thigh_joint": 0.60,
+            "RL_thigh_joint": 0.60,
+            "RR_thigh_joint": 0.60,
+            "FL_calf_joint": -0.95,
+            "FR_calf_joint": -0.95,
+            "RL_calf_joint": -0.95,
+            "RR_calf_joint": -0.95,
+            "FL_box_joint": -0.075,
+            "FR_box_joint": -0.075,
+            "RL_box_joint": -0.075,
+            "RR_box_joint": -0.075,
         },
         joint_vel={".*": 0.0},
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        "legs_fe": DCMotorCfg(
-            joint_names_expr=[".*FE"],
-            effort_limit=100.0,
-            saturation_effort=100.0,
-            velocity_limit=30.0,
-            stiffness=30.0,
-            damping=3.0,
-            friction=0.0,
+        "legs_hip": DCMotorCfg(
+            joint_names_expr=[".*hip_joint"],
+            effort_limit=35.0,
+            saturation_effort=50.0,
+            velocity_limit=45.0,
+            stiffness=45.0,
+            damping=1.5,
+            friction=0.1,
         ),
-        "legs_aa": DCMotorCfg(
-            joint_names_expr=[".*AA"],
-            effort_limit=100.0,
+        "legs_thigh": DCMotorCfg(
+            joint_names_expr=[".*thigh_joint"],
+            effort_limit=35.0,
+            saturation_effort=50.0,
+            velocity_limit=45.0,
+            stiffness=50.0,
+            damping=1.5,
+            friction=0.1,
+        ),
+        "legs_calf": DCMotorCfg(
+            joint_names_expr=[".*calf_joint"],  
+            effort_limit=80.0,
             saturation_effort=100.0,
-            velocity_limit=30.0,
-            stiffness=30.0,
-            damping=3.0,
-            friction=0.0,
+            velocity_limit=45.0,
+            stiffness=60.0,
+            damping=2.0,
+            friction=0.1,
         ),
         "extensions": DCMotorCfg(
             joint_names_expr=[".*_box_joint"],  
             effort_limit=200.0,
             saturation_effort=200.0,
             velocity_limit=10.0,
-            stiffness=30.0,
+            stiffness=1500.0,
             damping=3.0,
             friction=0.0,
         ),
     },
 )
-"""Configuration of Unitree A1 using DC motor.
-"""
+
 
 
 ARCLAB_ARCDOG_NEW_CFG = ArticulationCfg(
