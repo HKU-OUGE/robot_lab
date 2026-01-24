@@ -112,37 +112,24 @@ def stand_still_without_cmd(
 
 
 def wheel_action_l2(env: ManagerBasedRLEnv, wheel_ids: list[int]) -> torch.Tensor:
-    """
-    Penalize the maximum action among the selected wheels.
-    This encourages the policy to distribute effort across all wheels 
-    rather than relying on a single wheel (L-infinity norm style penalty).
-    """
-    # 1. 获取指定轮子的动作 [env_num, num_wheels]
     actions = env.action_manager.action[:, wheel_ids]
-    
-    # 2. 计算动作的平方 (或者绝对值，取决于你想惩罚能量还是幅度，这里保持原逻辑用平方)
-    actions_sq = torch.square(actions)
-    
-    # 3. 取最大值
-    # torch.max(dim=1) 返回一个元组 (values, indices)，我们只需要 values
-    # max_val 形状: [env_num]
-    max_val, _ = torch.max(actions_sq, dim=1)
-    
-    return max_val
+    # 改为 sum，让所有轮子都受到约束
+    return torch.sum(torch.square(actions), dim=1)
 
-def wheel_sync_penalty(env: ManagerBasedRLEnv, wheel_ids: list[int]) -> torch.Tensor:
+def wheel_sync_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     """
-    Penalize the variance between wheel actions.
-    Encourages all wheels to spin at the same speed.
+    Penalize the variance of PHYSICAL wheel velocities.
+    Robust to Action Scale changes.
     """
-    actions = env.action_manager.action[:, wheel_ids]
+    # 1. 获取物理速度 (rad/s)
+    # asset_cfg 需在 params 中传入
+    wheel_vel = env.scene[asset_cfg.name].data.joint_vel[:, asset_cfg.joint_ids]
     
-    # 计算当前这组轮子的平均动作 [env, 1]
-    mean_action = torch.mean(actions, dim=1, keepdim=True)
+    # 2. 计算平均物理速度
+    mean_vel = torch.mean(wheel_vel, dim=1, keepdim=True)
     
-    # 计算每个轮子偏离平均值的程度 (方差)
-    # Sum((a_i - a_mean)^2)
-    variance = torch.sum(torch.square(actions - mean_action), dim=1)
+    # 3. 计算方差 (Sum((v_i - v_mean)^2))
+    variance = torch.sum(torch.square(wheel_vel - mean_vel), dim=1)
     
     return variance
 
@@ -1206,19 +1193,49 @@ def base_height_l2_gated(
     gait_mode: int,
     sensor_cfg: SceneEntityCfg | None = None
 ) -> torch.Tensor:
-    """Penalize base height error."""
     asset = env.scene[asset_cfg.name]
+    
     if sensor_cfg is not None:
         sensor: RayCaster = env.scene[sensor_cfg.name]
-        ray_hits = sensor.data.ray_hits_w[..., 2]
-        if torch.isnan(ray_hits).any() or torch.isinf(ray_hits).any() or torch.max(torch.abs(ray_hits)) > 1e6:
-            adjusted_target_height = asset.data.root_link_pos_w[:, 2]
-        else:
-            adjusted_target_height = target_height + torch.mean(ray_hits, dim=1)
+        ray_hits_z = sensor.data.ray_hits_w[..., 2]
+        
+        # 1. 获取机器人基座高度
+        robot_z = asset.data.root_pos_w[:, 2]
+        
+        # 2. 计算 射线点 相对于 基座 的垂直距离
+        # dist = RobotZ - RayZ
+        # 正常地面：dist ≈ 0.55 (正数)
+        # 天花板(梁)：dist ≈ 0.55 - 2.0 = -1.45 (负数)
+        # 深坑(Gap)：dist ≈ 0.55 - (-10) = 10.55 (大正数)
+        dist_to_base = robot_z.unsqueeze(-1) - ray_hits_z
+        
+        # 3. 创建过滤器 Mask
+        # 条件 A: 不是深坑 (距离基座 < 1.5米) -> 过滤 Gap
+        # 条件 B: 不是天花板 (距离基座 > -0.2米) -> 过滤 Beam
+        #         (允许地面稍微比基座高一点点，比如上坡，但不能高出 20cm 以上)
+        valid_mask = (dist_to_base < 1.5) & (dist_to_base > -0.2)
+        
+        # 还要过滤无效值 (NaN/Inf)
+        valid_mask &= (~torch.isnan(ray_hits_z)) & (~torch.isinf(ray_hits_z))
+        
+        # 4. 替换无效值
+        # 如果射线击中了天花板或深坑，我们就认为该方向“没有有效地面数据”
+        # 此时使用默认策略：假设地面在基座下方 target_height 处
+        # 这样 Error = 0，不会产生错误的惩罚
+        default_ground_z = robot_z - target_height
+        
+        hits_safe = torch.where(valid_mask, ray_hits_z, default_ground_z.unsqueeze(-1))
+        
+        # 5. 计算平均地面高度
+        ground_height = torch.mean(hits_safe, dim=1)
+        
+        # 6. 计算相对高度
+        current_height = robot_z - ground_height
     else:
-        adjusted_target_height = target_height
+        # 无 Sensor 模式 (假设 Z=0 是地面)
+        current_height = asset.data.root_pos_w[:, 2]
     
-    error = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+    error = torch.square(current_height - target_height)
     return error * _get_gait_mask(env, gait_mode)
 
 def joint_torques_l2_gated(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, gait_mode: int) -> torch.Tensor:
@@ -1417,25 +1434,6 @@ def joint_mirror_gated(
 # Wheel Constraints & Standing Still Rewards
 # ==============================================================================
 
-def wheels_stop_without_cmd(
-    env: ManagerBasedRLEnv, 
-    command_name: str, 
-    asset_cfg: SceneEntityCfg,
-    command_threshold: float = 0.1
-) -> torch.Tensor:
-    """
-    Penalize wheel velocity when the command is small (standing still).
-    """
-    asset: Articulation = env.scene[asset_cfg.name]
-    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
-    
-    # Check linear velocity commands (xy)
-    cmd_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
-    is_standing = cmd_norm < command_threshold
-    
-    # Penalty is sum of absolute velocities
-    penalty = torch.sum(torch.abs(wheel_vel), dim=1)
-    return penalty * is_standing.float()
 
 def wheels_stop_without_cmd_gated(
     env: ManagerBasedRLEnv, 
@@ -1448,7 +1446,13 @@ def wheels_stop_without_cmd_gated(
     Gated version of wheels_stop_without_cmd. 
     Useful to apply only in Quad mode (gait_mode=0) and NOT in Biped mode (where wheels must move to balance).
     """
-    base_penalty = wheels_stop_without_cmd(env, command_name, asset_cfg, command_threshold)
+    # [修复] 使用关键字参数指定 asset_cfg 和 command_threshold，防止位置传参错误
+    base_penalty = wheels_stop_without_cmd(
+        env, 
+        command_name=command_name, 
+        asset_cfg=asset_cfg,
+        command_threshold=command_threshold      
+    )
     return base_penalty * _get_gait_mask(env, gait_mode)
 
 def wheel_spin_in_air_penalty(
@@ -2142,3 +2146,89 @@ def joint_deviation_abad_straight_gated(
     # 4. 组合 Mask 和 Gait Mode
     # 逻辑：(是直线行驶) AND (是指定步态)
     return deviation * is_straight * _get_gait_mask(env, gait_mode)
+
+def action_rate_l2_subset(
+    env: ManagerBasedRLEnv, 
+    action_ids: list[int], 
+    gait_mode: int | None = None  # 可选：如果不需要步态门控，可以不传
+) -> torch.Tensor:
+    """
+    Penalize the rate of change of specific actions (L2 squared).
+    Useful for penalizing leg jitter while allowing wheel velocity changes.
+    """
+    # 1. 处理第一帧没有 prev_action 的情况
+    if env.action_manager.prev_action is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # 2. 提取指定维度的动作
+    # [env_num, selected_dim]
+    curr_action = env.action_manager.action[:, action_ids]
+    prev_action = env.action_manager.prev_action[:, action_ids]
+    
+    # 3. 计算变化率平方 (curr - prev)^2
+    diff_sq = torch.square(curr_action - prev_action)
+    
+    # 4. 求和得到惩罚值
+    penalty = torch.sum(diff_sq, dim=1)
+    
+    # 5. (可选) 应用步态门控
+    if gait_mode is not None:
+        # 假设你在 rewards.py 里有这个辅助函数 _get_gait_mask
+        # 或者直接复制逻辑: mask = env.gait_mode if gait_mode==1 else (1 - env.gait_mode)
+        mask = _get_gait_mask(env, gait_mode)
+        penalty = penalty * mask
+        
+    return penalty
+
+
+def wheels_stop_without_cmd(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,  # 把 asset_cfg 放在非默认参数位置，或者统一参数顺序
+    command_threshold: float = 0.1,
+) -> torch.Tensor:
+    # 1. 检查命令：是否要求静止
+    cmd = env.command_manager.get_command(command_name)
+    # 取前两维 (lin_vel_x, lin_vel_y)
+    cmd_norm = torch.norm(cmd[:, :2], dim=1) 
+    is_still = cmd_norm < command_threshold
+
+    # 2. 获取【物理速度】(rad/s)
+    # 确保 asset_cfg 是正确的配置对象
+    wheel_vel = env.scene[asset_cfg.name].data.joint_vel[:, asset_cfg.joint_ids]
+    
+    # 3. 计算惩罚 (建议改用 L1 abs，锁车更紧)
+    cost = torch.sum(torch.abs(wheel_vel), dim=1)
+    
+    return cost * is_still.float()
+
+def wheel_freeze_during_turn_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    gait_mode: int,
+    rot_threshold: float = 0.1,  # 当转向命令大于此值
+    lin_threshold: float = 0.1,  # 且直线命令小于此值（原地转向）
+) -> torch.Tensor:
+    """
+    当处于原地转向状态时，惩罚轮子的转动。
+    强迫机器人使用腿部动作（踏步）来完成转向。
+    """
+    # 1. 获取指令
+    cmd = env.command_manager.get_command(command_name)
+    ang_cmd = torch.abs(cmd[:, 2])      # Z轴转向
+    lin_cmd = torch.norm(cmd[:, :2], dim=1) # XY平面速度
+
+    # 2. 判断是否是“原地转向”意图
+    # 逻辑：用户想转 (rot > 0.1) 且 不想走 (lin < 0.1)
+    is_turning_in_place = (ang_cmd > rot_threshold) & (lin_cmd < lin_threshold)
+
+    # 3. 获取轮子速度
+    asset = env.scene[asset_cfg.name]
+    wheel_vel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    
+    # 4. 惩罚：如果满足转向意图，轮子速度越快惩罚越大
+    penalty = torch.sum(torch.square(wheel_vel), dim=1)
+
+    # 5. 应用 Mask
+    return penalty * is_turning_in_place.float() * _get_gait_mask(env, gait_mode)

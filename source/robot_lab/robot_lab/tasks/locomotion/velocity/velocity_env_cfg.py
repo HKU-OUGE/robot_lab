@@ -79,15 +79,15 @@ class MySceneCfg(InteractiveSceneCfg):
         offset=RayCasterCfg.OffsetCfg(pos=(0.8, 0.0, 20.0)),
         ray_alignment='yaw',
         pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.6, 0.5]),
-        debug_vis=True,
+        debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
     height_scanner_base = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/base",
         offset=RayCasterCfg.OffsetCfg(pos=(0.1, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=(1.4, 0.5)),
-        debug_vis=True,
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(1.8, 0.5)),
+        debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
     ray_caster = None
@@ -106,7 +106,7 @@ class MySceneCfg(InteractiveSceneCfg):
     #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
     # )
 
-    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=8, track_air_time=True, debug_vis=True)
+    contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True, debug_vis=True)
     # lights
     sky_light = AssetBaseCfg(
         prim_path="/World/skyLight",
@@ -128,9 +128,9 @@ class CommandsCfg:
 
     base_velocity = mdp.UniformThresholdVelocityCommandCfg(
         asset_name="robot",
-        resampling_time_range=(10.0, 20.0),
-        rel_standing_envs=0.05,
-        rel_heading_envs=0.95,
+        resampling_time_range=(5.0, 10.0),
+        rel_standing_envs=0.15,
+        rel_heading_envs=0.50,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
@@ -731,19 +731,22 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         # self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # GPU 碰撞内存配置
-        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 
-        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 
-        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 
-        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 
-        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 
-        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 
+        # self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 
+        # self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 
+        # self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 
+        # self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 
+        # self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 
+        # self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 
 
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)
+        target_scan_dt = 0.1  # 目标: 0.1秒扫一次 (10Hz)
         if self.scene.height_scanner is not None:
             self.scene.height_scanner.update_period = self.decimation * self.sim.dt
         if self.scene.height_scanner_base is not None:
             self.scene.height_scanner_base.update_period = self.decimation * self.sim.dt
+        # if self.scene.height_scanner_base is not None:
+        #     self.scene.height_scanner_base.update_period = target_scan_dt
         if self.scene.front_height is not None:
             self.scene.front_height.update_period = self.decimation * self.sim.dt
         if self.scene.back_height is not None:

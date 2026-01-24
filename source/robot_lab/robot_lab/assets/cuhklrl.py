@@ -91,7 +91,7 @@ CUHKLRL_SIRIUS_CFG = ArticulationCfg(
 
 CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_ori.usd", # 初步
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_simple.usd", # 初步
         # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/CUHKLRL/Sirius_wheel/sirius_wheel_merge_v3_pre.usd", # 调优
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -104,7 +104,7 @@ CUHKLRL_SIRIUS_WHEEL_CFG = ArticulationCfg(
             max_depenetration_velocity=2.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=4
+            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=0
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(

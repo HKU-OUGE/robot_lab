@@ -122,6 +122,17 @@ def main():
         def reset_env_callback():
             print("[INFO] 'R' key pressed: Resetting environment.")
             nonlocal obs
+            # === [Debug] Checking Normalizer Stats (Corrected) ===
+            print("\n[Debug] Checking Normalizer Stats:")
+            if hasattr(model_instance, "actor_obs_normalizer"):
+                norm = model_instance.actor_obs_normalizer
+                print(f"  - Count: {norm.count}")
+                if norm.count > 0:
+                    # [修改] 使用 .mean 和 .var
+                    print(f"  - Mean (first 5): {norm.mean[:5].cpu().numpy()}") 
+                    print(f"  - Var  (first 5): {norm._var[:5].cpu().numpy()}")
+            else:
+                print("⚠️ [WARNING] No actor_obs_normalizer found in policy!")
             obs, _ = env.reset()
         
         # 注册回调
@@ -258,7 +269,17 @@ def main():
             sys.stdout.write(f"\033[{last_printed_lines}A\033[J")
         print("\n".join(lines))
         last_printed_lines = len(lines)
-
+    # === [Debug] Checking Normalizer Stats (Corrected) ===
+    print("\n[Debug] Checking Normalizer Stats:")
+    if hasattr(model_instance, "actor_obs_normalizer"):
+        norm = model_instance.actor_obs_normalizer
+        print(f"  - Count: {norm.count}")
+        if norm.count > 0:
+            # [修改] 使用 .mean 和 .var
+            print(f"  - Mean (first 5): {norm.mean[:5].cpu().numpy()}") 
+            print(f"  - Var  (first 5): {norm._var[:5].cpu().numpy()}")
+    else:
+        print("⚠️ [WARNING] No actor_obs_normalizer found in policy!")
     obs, _ = env.reset()
     print("\nStarting inference...")
     

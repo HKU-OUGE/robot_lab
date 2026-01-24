@@ -189,3 +189,24 @@ def bad_orientation_gated(
 
     # 5. 只有在指定模式下 且 姿态错误 时才终止
     return is_bad_orientation & is_in_mode
+
+def terminate_gate_contact_curriculum(
+    env: ManagerBasedRLEnv,
+    threshold: float,
+    sensor_cfg: SceneEntityCfg,
+    gait_mode: int,
+    disable_after_steps: int = 128000,  # 默认值设为计算好的值
+) -> torch.Tensor:
+    # 1. 检查当前步数
+    # env.common_step_counter 会随着每次 env.step() 自动+1
+    if env.common_step_counter > disable_after_steps:
+        # 超过 2000 轮 (128,000步) 后，不再触发此 Termination
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    # 2. 调用原始逻辑
+    return terminate_gate_contact(
+        env, 
+        threshold=threshold, 
+        sensor_cfg=sensor_cfg, 
+        gait_mode=gait_mode
+    )

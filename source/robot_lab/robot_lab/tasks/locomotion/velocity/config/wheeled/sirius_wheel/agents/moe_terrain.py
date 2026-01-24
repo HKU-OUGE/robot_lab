@@ -88,9 +88,7 @@ class SplitMoEActorCritic(ActorCritic):
         self.rnn_type = rnn_type.lower()
         self.aux_loss_coef = aux_loss_coef
         
-        self.num_wheel_experts = num_wheel_experts
-        self.num_leg_experts = num_leg_experts
-        
+
         # === 动作空间拆分 ===
         self.num_leg_actions = num_leg_actions
         self.num_wheel_actions = num_actions - num_leg_actions
@@ -158,7 +156,19 @@ class SplitMoEActorCritic(ActorCritic):
         # Logging & Loss
         self.latest_weights = {}
         self.active_aux_loss = 0.0
-
+        # === 6. 初始化动作噪声 (分腿轮设置不同噪声) ===
+        new_std = torch.ones(num_actions)
+        self.num_wheel_experts = num_wheel_experts
+        self.num_leg_experts = num_leg_experts
+        noise_legs = kwargs.get("init_noise_legs", 1.0)
+        noise_wheels = kwargs.get("init_noise_wheels", 0.4) # 轮子默认给小点
+        print(f"[SplitMoE] Overriding Noise: Legs={noise_legs}, Wheels={noise_wheels}")
+        if num_leg_actions <= num_actions:
+            new_std[:num_leg_actions] = noise_legs
+            new_std[num_leg_actions:] = noise_wheels
+        else:
+            print("[Warning] num_leg_actions > num_actions, skipping noise override.")
+        self.std.data.copy_(new_std.to(device))
     def _init_rnn_state(self, batch_size, device):
         if self.rnn_type == "lstm":
             h = torch.zeros(1, batch_size, self.latent_dim, device=device)
@@ -345,6 +355,20 @@ class SplitMoEPPO(PPO):
         if hasattr(self.policy, "active_aux_loss"):
             if isinstance(self.policy.active_aux_loss, torch.Tensor):
                  loss_dict["Loss/Load_Balancing"] = self.policy.active_aux_loss.item()
+        if hasattr(self.policy, "std"):
+            # 转移到 CPU 计算
+            std_np = self.policy.std.detach().cpu().numpy()
+            
+            # 获取切分点 (默认 12)
+            n_legs = getattr(self.policy, "num_leg_actions", 12)
+            
+            # 安全切片计算
+            if len(std_np) >= n_legs:
+                leg_val = std_np[:n_legs].mean()
+                wheel_val = std_np[n_legs:].mean() if len(std_np) > n_legs else 0.0
+                
+                loss_dict["Noise/Leg_Std"] = leg_val
+                loss_dict["Noise/Wheel_Std"] = wheel_val
         return loss_dict
 
 # === Configs ===
@@ -355,8 +379,10 @@ class SplitMoEActorCriticCfg(RslRlPpoActorCriticCfg):
     num_wheel_experts: int = 6
     num_leg_experts: int = 6
     # === 关键设置：请根据机器人实际关节数修改 ===
-    num_leg_actions: int = 12 
-    
+    num_leg_actions: int = 12
+    init_noise_std: float = 1.0
+    init_noise_legs: float = 1.0
+    init_noise_wheels: float = 0.5
     latent_dim: int = 256
     rnn_type: str = "gru"
     aux_loss_coef: float = 0.01
@@ -366,11 +392,32 @@ class SplitMoEActorCriticCfg(RslRlPpoActorCriticCfg):
     
     actor_hidden_dims: list = field(default_factory=lambda: [256, 128, 128])
     critic_hidden_dims: list = field(default_factory=lambda: [512, 256, 128])
-
+    def get_std(self):
+            """
+            Returns the current mean std for legs and wheels separately.
+            Assuming actions are ordered [Legs..., Wheels...]
+            """
+            # self.std 形状是 [num_actions]
+            # 确保数据在 CPU 上以便打印
+            std_np = self.std.detach().cpu().numpy()
+            
+            # 1. 腿部噪声 (前 num_leg_actions 维)
+            if self.num_leg_actions > 0:
+                leg_std = std_np[:self.num_leg_actions].mean()
+            else:
+                leg_std = 0.0
+                
+            # 2. 轮子噪声 (剩余维度)
+            if self.num_leg_actions < len(std_np):
+                wheel_std = std_np[self.num_leg_actions:].mean()
+            else:
+                wheel_std = 0.0
+                
+            return leg_std, wheel_std
 @configclass
 class SiriusSplitMoEPPOCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 64
-    max_iterations = 5000 
+    max_iterations = 50000
     save_interval = 200
     experiment_name = "sirius_split_moe_parallel" 
     empirical_normalization = False
@@ -378,7 +425,9 @@ class SiriusSplitMoEPPOCfg(RslRlOnPolicyRunnerCfg):
     obs_groups = {"policy": ["policy"], "critic": ["critic"]}
     
     policy = SplitMoEActorCriticCfg(
-        init_noise_std=0.8,
+        init_noise_std=1.0,  # 作为一个默认基准（会被下面覆盖）
+        init_noise_legs=0.8,  # 腿部建议保持 0.8 ~ 1.0
+        init_noise_wheels=0.5,   # 轮子建议给小一点，配合大 Scale
         actor_hidden_dims=[256, 128, 128], 
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
@@ -386,10 +435,11 @@ class SiriusSplitMoEPPOCfg(RslRlOnPolicyRunnerCfg):
         num_wheel_experts=6,
         num_leg_experts=6,
         num_leg_actions=12, # 12个腿部关节，剩余的自动分配给轮子
-        
         latent_dim=256,
         rnn_type="gru",
         aux_loss_coef=0.01,
+        actor_obs_normalization=True, 
+        critic_obs_normalization=True,
     )
 
     algorithm = RslRlPpoAlgorithmCfg(
@@ -399,7 +449,7 @@ class SiriusSplitMoEPPOCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.01,
         num_learning_epochs=5,
-        num_mini_batches=4,
+        num_mini_batches=8,
         learning_rate=1.0e-3, 
         schedule="adaptive",
         gamma=0.99,

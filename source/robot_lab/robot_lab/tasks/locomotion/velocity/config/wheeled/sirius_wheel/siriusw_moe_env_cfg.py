@@ -17,7 +17,7 @@ from isaaclab.managers import EventTermCfg as EventTerm
 ##
 # Pre-defined configs
 ##
-from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_DELAY_CFG  # isort: skip
+from robot_lab.assets.cuhklrl import CUHKLRL_SIRIUS_WHEEL_CFG  # isort: skip
 from robot_lab.terrains.config.rough import *
 from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
 import math
@@ -35,15 +35,7 @@ _BIPED_TARGET_JOINTS = [
 
 @configclass
 class CUHKLRLSiriusWActionsCfg(ActionsCfg):
-    """Action specifications for t    # feet_contact_quad = RewTerm(
-    #     func=mdp.feet_contact_gated,
-    #     weight=2.0,  # 给予正向奖励，数值可根据训练情况调整
-    #     params={
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_FOOT_link"),
-    #         "gait_mode": 0,
-    #         "threshold": 1.0,
-    #     },
-    # )he MDP."""
+    """Action specifications for the MDP."""
 
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot", joint_names=[""], scale=0.25, use_default_offset=True, clip=None, preserve_order=True
@@ -68,11 +60,20 @@ class CUHKLRLSiriusWTerminationsCfg(TerminationsCfg):
     #         "gait_mode": 0,
     #     },
     # )
+    gate_collision_trot_only = DoneTerm(
+        func=mdp.terminate_gate_contact_curriculum,
+        params={
+            "threshold": 1.0,
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["trunk"]),
+            "gait_mode": 0,
+            "disable_after_steps": 3200, # 2000 iters * 64 steps
+        },
+    )
     quad_bad_orientation = DoneTerm(
         func=mdp.bad_orientation_gated, # 指向刚才添加的函数
         params={
-            "limit_roll": 1.2,   # 约 68度
-            "limit_pitch": 1.2,  # 约 68度
+            "limit_roll": 1.0,   # 约 68度
+            "limit_pitch": 1.0,  # 约 68度
             "gait_mode": 0,      # 0 代表 Quadruped 模式
             "asset_cfg": SceneEntityCfg("robot"),
         },
@@ -88,25 +89,35 @@ class CUHKLRLSiriusWRewardsCfg:
     # ==============================================================================================
     
     # Alive / Terminated
-    is_alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    is_terminated = RewTerm(func=mdp.is_terminated, weight=-1.0)
-    # leg_action_l2 = RewTerm(
-    #     func=mdp.wheel_action_l2,
-    #     weight=-0.005,
-    #     # weight=0.0,
-    #     params={"wheel_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]},
-    # )
+    is_alive = RewTerm(func=mdp.is_alive, weight=1.5)
+    is_terminated = RewTerm(func=mdp.is_terminated, weight=-100.0)
+    leg_action_rate_l2 = RewTerm(
+        func=mdp.action_rate_l2_subset, 
+        weight=-0.05,
+        params={
+            "action_ids": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            "gait_mode": 0, 
+        }
+    )
+
+    wheel_action_rate_l2 = RewTerm(
+        func=mdp.action_rate_l2_subset,
+        weight=-0.2,
+        params={
+            "action_ids": [12, 13, 14, 15],
+            "gait_mode": 0,
+        }
+    )
     wheel_action_l2 = RewTerm(
         func=mdp.wheel_action_l2,
-        weight=-0.001,
-        # weight=0.0,
+        weight=-0.005,
         params={"wheel_ids": [12, 13, 14, 15]},
     )
     wheel_sync_penalty = RewTerm(
         func=mdp.wheel_sync_penalty,
-        weight=-0.005,
+        weight=-0.001,
         # weight=0.0,
-        params={"wheel_ids": [12, 13, 14, 15]},
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_WHEEL"])},
     )
     # Torque / Acc Limits
     torque_limits = RewTerm(
@@ -141,6 +152,16 @@ class CUHKLRLSiriusWRewardsCfg:
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
         },
     )
+    # wheels_stop_without_cmd = RewTerm(
+    #     func=mdp.wheels_stop_without_cmd, # 指向刚才写的函数
+    #     weight=-0.005,  # 负权重表示惩罚
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "command_threshold": 0.1, 
+    #         # 务必正确选择轮子关节
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_WHEEL"]), 
+    #     },
+    #     )
     # Knee collision is always bad
     # undesired_contacts = RewTerm(
     #     func=mdp.undesired_contacts,
@@ -160,12 +181,12 @@ class CUHKLRLSiriusWRewardsCfg:
     )
     ang_vel_xy_l2_quad = RewTerm(
         func=mdp.ang_vel_xy_l2_gated, 
-        weight=-0.05, 
+        weight=-0.1, 
         params={"asset_cfg": SceneEntityCfg("robot"), "gait_mode": 0}
     )
     flat_orientation_l2_quad = RewTerm(
         func=mdp.flat_orientation_l2_gated, 
-        weight=0.0, 
+        weight=-1.0, 
         params={"asset_cfg": SceneEntityCfg("robot"), "gait_mode": 0}
     )
     
@@ -173,7 +194,7 @@ class CUHKLRLSiriusWRewardsCfg:
     # Strict adherence to default pose when in Quad mode
     leg_deviation_l1_quad = RewTerm(
         func=mdp.joint_deviation_l1_gated,
-        weight=-0.5,
+        weight=0.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=""), 
             "gait_mode": 0  # 0 for Quadruped mode, 1 for Biped
@@ -189,26 +210,25 @@ class CUHKLRLSiriusWRewardsCfg:
             "gait_mode": 0,
             
             # 关键参数调整
-            "h_free_min": 0.15,   # 根据你的 Floating Ring 高度差调整
-            "h_free_max": 0.45,   
+            "h_free_min": 1.2,   # 根据你的 Floating Ring 高度差调整
+            "h_free_max": 2.0,   
             "alpha": 0.05,        # 降低平滑系数，防止闪烁
-            # "pitch_threshold": ... 已移除
         }
     )
     # Tracking (Quad)
     track_lin_vel_xy_quad = RewTerm(
         func=mdp.track_lin_vel_xy_exp_gated, 
-        weight=3.5, 
+        weight=4.0, 
         params={"command_name": "base_velocity", "std": 0.4, "gait_mode": 0}
     )
     track_ang_vel_z_quad = RewTerm(
         func=mdp.track_ang_vel_z_exp_gated, 
-        weight=3.5, 
+        weight=4.0, 
         params={"command_name": "base_velocity", "std": 0.4, "gait_mode": 0}
     )
     action_rate_l2_quad = RewTerm(
         func=mdp.action_rate_l2_gated,
-        weight=-0.01,
+        weight=0.0,
         params={"gait_mode": 0}
     )
     undesired_contacts_quad = RewTerm(
@@ -223,21 +243,34 @@ class CUHKLRLSiriusWRewardsCfg:
     leg_joint_vel_quad = RewTerm(
         func=mdp.joint_vel_penalty_gated,
         weight=-0.002,
+        # weight=0.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=[""]), # 腿关节
             "gait_mode": 0
         }
     )
-    abad_strict_straight_quad = RewTerm(
-        func=mdp.joint_deviation_abad_straight_gated,
-        weight=-5.0,  # 给予较强的负向惩罚 (建议从 -0.5 开始调试，不够就加到 -2.0)
-        params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_HAA"), # 正则匹配所有 HAA 关节
-            "command_name": "base_velocity",
-            "gait_mode": 0,       # 仅在四足模式生效
-            "rot_threshold": 0.1, # 当转向命令小于 0.1 rad/s 时生效
-        },
-    )
+    # wheel_freeze_turn = RewTerm(
+    #     func=mdp.wheel_freeze_during_turn_gated, # 刚才新写的函数
+    #     weight=-0.01, # 负分惩罚
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_WHEEL"]),
+    #         "command_name": "base_velocity",
+    #         "gait_mode": 0,       # Quadruped only
+    #         "rot_threshold": 0.2, # 当转向命令 > 0.2 rad/s 生效
+    #         "lin_threshold": 1.0, # 且直线速度 < 0.2 m/s 生效
+    #     },
+    # )
+
+    # abad_strict_straight_quad = RewTerm(
+    #     func=mdp.joint_deviation_abad_straight_gated,
+    #     weight=-5.0,  # 给予较强的负向惩罚 (建议从 -0.5 开始调试，不够就加到 -2.0)
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot", joint_names=".*_HAA"), # 正则匹配所有 HAA 关节
+    #         "command_name": "base_velocity",
+    #         "gait_mode": 0,       # 仅在四足模式生效
+    #         "rot_threshold": 0.1, # 当转向命令小于 0.1 rad/s 时生效
+    #     },
+    # )
     # wheel_sync_straight_quad = RewTerm(
     #     func=mdp.wheel_sync_when_straight_gated,
     #     weight=-0.05,  # 负值表示惩罚，数值大小需根据训练曲线调整
@@ -257,16 +290,26 @@ class CUHKLRLSiriusWRewardsCfg:
     #         "threshold": 1.0,
     #     },
     # )
-    # wheels_stop_quad = RewTerm(
-    #     func=mdp.wheels_stop_without_cmd_gated, # 需确认 rewards.py 中有此 gated 版本，或使用通用 gated 包装
-    #     weight=-0.01,  # 给予较强惩罚
-    #     params={
-    #         "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_WHEEL"]), 
-    #         "command_name": "base_velocity",
-    #         "command_threshold": 0.1,
-    #         "gait_mode": 0
-    #     },
-    # )
+    wheels_stop_quad = RewTerm(
+        func=mdp.wheels_stop_without_cmd_gated, # 需确认 rewards.py 中有此 gated 版本，或使用通用 gated 包装
+        weight=-0.02,  # 给予较强惩罚
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=[".*_WHEEL"]), 
+            "command_name": "base_velocity",
+            "command_threshold": 0.1,
+            "gait_mode": 0
+        },
+    )
+    base_height_l2_quad = RewTerm(
+        func=mdp.base_height_l2_gated,
+        weight=-2.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"), 
+            "target_height": 0.55, 
+            "gait_mode": 0,
+            "sensor_cfg": SceneEntityCfg("height_scanner_base"),
+        },
+    )
     # ==============================================================================
     # 3. Bipedal Rewards (Gait 1) - Standing & Driving
     # ==============================================================================
@@ -409,7 +452,7 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
     @configclass
     class CUHKLRLSiriusWPolicyCfg(ObservationsCfg.PolicyCfg):
         obs_scan = None
-        gait_command = ObsTerm(func=mdp.gait_mode_obs)
+        # gait_command = ObsTerm(func=mdp.gait_mode_obs)
         joint_vel = None
         joint_vel_legs = ObsTerm(func=mdp.joint_vel_rel)
         joint_vel_wheels = ObsTerm(func=mdp.joint_vel_rel)
@@ -417,13 +460,13 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner_base")},
             noise=Unoise(n_min=0.0, n_max=0.0),
-            clip=(-1.0, 1.0),
+            clip=(-2.0, 2.0),
             scale=1.0,
         )
     @configclass
     class CUHKLRLSiriusWCriticCfg(ObservationsCfg.CriticCfg):
         obs_scan = None
-        gait_command = ObsTerm(func=mdp.gait_mode_obs)
+        # gait_command = ObsTerm(func=mdp.gait_mode_obs)
         joint_vel = None
         joint_vel_legs = ObsTerm(func=mdp.joint_vel_rel)
         joint_vel_wheels = ObsTerm(func=mdp.joint_vel_rel)
@@ -431,12 +474,22 @@ class CUHKLRLSiriusWObservationsCfg(ObservationsCfg):
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner_base")},
             noise=Unoise(n_min=0.0, n_max=0.0),
-            clip=(-1.0, 1.0),
+            clip=(-2.0, 2.0),
             scale=1.0,
         )
-
+    @configclass
+    class EstimatorCfg(CUHKLRLSiriusWPolicyCfg):
+        # 绝对不能包含 base_lin_vel (因为这是要预测的目标)
+        terrain_scan = None
+        # projected_gravity = ObsTerm(func=mdp.projected_gravity) # 推荐加上重力
+        # commands = ObsTerm(func=mdp.commands) # 推荐加上指令
+        # joint_pos = ObsTerm(func=mdp.joint_pos_rel) # 推荐加上关节位置
+        base_lin_vel = None
+        base_ang_vel = None
+        joint_vel_legs = None
     policy: CUHKLRLSiriusWPolicyCfg = CUHKLRLSiriusWPolicyCfg()
     critic: CUHKLRLSiriusWCriticCfg = CUHKLRLSiriusWCriticCfg()
+    estimator: EstimatorCfg = EstimatorCfg()
 
 @configclass
 class CUHKLRLSiriusWEventsCfg(EventCfg):
@@ -483,16 +536,16 @@ class CUHKLRLSiriusWMoEEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
         # self.only_positive_rewards = True
-        CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.init_state.pos=(0.0, 0.0, 0.55)
+        CUHKLRL_SIRIUS_WHEEL_CFG.init_state.pos=(0.0, 0.0, 0.55)
         # ------------------------------Sence------------------------------
         # switch robot to unitree b2w
-        self.scene.robot = CUHKLRL_SIRIUS_WHEEL_DELAY_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = CUHKLRL_SIRIUS_WHEEL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.ray_caster = None
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         self.scene.height_scanner = None
         self.scene.height_scanner_base.prim_path = "{ENV_REGEX_NS}/Robot/" + self.base_link_name
         # self.scene.terrain.terrain_generator=ROUGH_TERRAINS_CFG
-        self.scene.terrain.terrain_generator=FLOATING_RING2_TERRAINS_CFG
+        self.scene.terrain.terrain_generator=MOE_TERRAINS_CFG
         self.observations.policy.height_scan = None
         self.observations.critic.height_scan = None
         self.observations.policy.joint_pos.func = mdp.joint_pos_rel
@@ -509,8 +562,8 @@ class CUHKLRLSiriusWMoEEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.6
-        self.actions.joint_vel.scale = 1.5
+        self.actions.joint_pos.scale = 0.5
+        self.actions.joint_vel.scale = 10.0
         self.actions.joint_pos.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_vel.clip = {".*": (-100.0, 100.0)}
         self.actions.joint_pos.joint_names = self.joint_names[:-4]
@@ -527,12 +580,12 @@ class CUHKLRLSiriusWMoEEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
+                "x": (-0.1, 0.1),
+                "y": (-0.1, 0.1),
+                "z": (-0.1, 0.1),
+                "roll": (-0.1, 0.1),
+                "pitch": (-0.1, 0.1),
+                "yaw": (-0.1, 0.1),
             },
         }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
@@ -541,21 +594,20 @@ class CUHKLRLSiriusWMoEEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.events.randomize_rigid_body_material.params["dynamic_friction_range"] = (1.0, 1.0)
         self.events.randomize_apply_external_force_torque = None
         self.events.randomize_actuator_gains = None
-        self.rewards.leg_deviation_l1_quad.weight = -0.1
         self.rewards.leg_deviation_l1_quad.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.leg_joint_vel_quad.weight = -0.002
         self.rewards.leg_joint_vel_quad.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.undesired_contacts_quad.weight = -0.2
+        self.rewards.undesired_contacts_quad.weight = -8.0
         self.rewards.undesired_contacts_quad.params["sensor_cfg"].body_names = [f"^(?!.*({self.foot_link_name})).*"]
-        self.rewards.leg_joint_power.weight = -2e-5
-        self.rewards.leg_joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
-        self.rewards.wheel_joint_power.weight = -2e-5
-        self.rewards.wheel_joint_power.params["asset_cfg"].joint_names = self.wheel_joint_names
+        # self.rewards.leg_joint_power.weight = -2e-5
+        # self.rewards.leg_joint_power.params["asset_cfg"].joint_names = self.leg_joint_names
+        # self.rewards.wheel_joint_power.weight = -1e-5
+        # self.rewards.wheel_joint_power.params["asset_cfg"].joint_names = self.wheel_joint_names
         self.rewards.abad_deviation_l1_biped.params["asset_cfg"].joint_names = self.abad_joint_names
         self.rewards.leg_pos_penalty_adaptive_quad.params["asset_cfg"].joint_names = self.leg_joint_names
         self.rewards.stand_still_without_cmd.weight = -2.0
         self.rewards.stand_still_without_cmd.params["asset_cfg"].joint_names = [f"^(?!{self.wheel_joint_name}).*"]
         self.rewards.joint_acc_l2.weight = -2.5e-7
+        # self.rewards.joint_acc_l2.weight = 0.0
         self.rewards.joint_acc_l2.params["asset_cfg"].joint_names = self.leg_joint_names
         # 1. Legs (Standard scale)
         self.observations.policy.joint_vel_legs.params["asset_cfg"] = SceneEntityCfg(
@@ -585,7 +637,7 @@ class CUHKLRLSiriusWMoEEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.scene.terrain.terrain_generator = None
         # self.curriculum.terrain_levels = None
         # ------------------------------Commands------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (0.0, 1.0)
+        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
         self.commands.base_velocity.ranges.lin_vel_y = (0.0, 0.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.ranges.heading = (-3.14, 3.14)

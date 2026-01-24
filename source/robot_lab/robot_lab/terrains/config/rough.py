@@ -725,22 +725,23 @@ AVOID1_TERRAINS_CFG = TerrainGeneratorCfg(
 )
 
 
-FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(12.0, 12.0),       # 整个 terrain tile 尺寸
+MOE_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
     border_width=20.0,        # 地形边界，防止掉落
     num_rows=10,
     num_cols=14,
     horizontal_scale=0.1,
     vertical_scale=0.005,
     slope_threshold=0.75,
-    use_cache=True,
+    use_cache=False,
+    curriculum=True,
     sub_terrains={
         "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
-            proportion=0.1,                           # 完全生成此地形
-            ring_width_range=(2.5, 2.5),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
-            ring_height_range=(0.8, 0.5),             # 环的离地高度范围
-            ring_thickness=0.2,                       # 环厚度（z 方向）
-            platform_width=4.0,                       # 地形中心的方形平台大小
+            proportion=1/7,                           # 完全生成此地形
+            ring_width_range=(0.1, 1.0),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.35, 0.8),             # 环的离地高度范围
+            ring_thickness=1.2,                       # 环厚度（z 方向）
+            platform_width=6.0,                       # 地形中心的方形平台大小
             # flat_patch_sampling={
             #     "target": FlatPatchSamplingCfg(
             #         num_patches=50,     
@@ -749,10 +750,10 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
             #     )
             # },
         ),
-        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.1,
+        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=1/7,
             step_height_range=(0.05, 0.25),
-            step_width=3.5,
+            step_width=0.4,
             platform_width=2,
             border_width=1.5,
             holes=False,
@@ -765,9 +766,9 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
             # },
         ),
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.1,
+            proportion=1/7,
             step_height_range=(0.05, 0.25),
-            step_width=3.5,
+            step_width=0.4,
             platform_width=2,
             border_width=1.5,
             holes=False,
@@ -783,7 +784,7 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
         #     proportion=0.2, grid_width=0.45, grid_height_range=(0.05, 0.2), platform_width=2.0
         # ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.1, slope_range=(0.05, 0.2), platform_width=2.0, border_width=0.25,
+            proportion=1/7, slope_range=(0.05, 0.4), platform_width=2.0, border_width=0.25,
             # flat_patch_sampling={
             #     "target": FlatPatchSamplingCfg(
             #         num_patches=50,   
@@ -799,7 +800,7 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
         #     noise_range=(-0.05, 0.0),    # 在高度上加最多 2cm 的波动
         # ),
         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.10, slope_range=(0.05, 0.2), platform_width=2.0, border_width=0.25,
+            proportion=1/7, slope_range=(0.05, 0.4), platform_width=2.0, border_width=0.25,
             # flat_patch_sampling={
             #     "target": FlatPatchSamplingCfg(
             #         num_patches=50,    
@@ -809,7 +810,7 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
             # },
         ),
         "gap": terrain_gen.trimesh.mesh_terrains_cfg.MeshGapTerrainCfg(
-            proportion=0.10, gap_width_range=(0.05, 0.25), platform_width=4.0,
+            proportion=1/7, gap_width_range=(0.10, 0.30), platform_width=4.0,
             # flat_patch_sampling={
             #     "target": FlatPatchSamplingCfg(
             #         num_patches=50,    
@@ -818,8 +819,18 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
             #     )
             # },
         ),
+        # "stepping_stones": terrain_gen.HfSteppingStonesTerrainCfg(
+        #     proportion=1/7,
+        #     stone_height_max=0.1,         # 石头高度浮动 (0.1m)
+        #     stone_width_range=(0.4, 0.8), # 石头宽度 (0.4m - 0.8m)
+        #     stone_distance_range=(0.1, 0.4), # 石头间距/缝隙宽度 (0.2m - 0.5m)
+        #     holes_depth=-3.0,             # 坑深 (-3.0m)
+        #     platform_width=4.0,
+        #     horizontal_scale=0.1,         # 确保精度
+        #     vertical_scale=0.005,
+        # ),
         "rail": terrain_gen.trimesh.mesh_terrains_cfg.MeshRailsTerrainCfg(
-            proportion=0.10, rail_thickness_range=(0.05, 0.05), rail_height_range=(0.05, 0.25),platform_width=4.0,
+            proportion=1/7, rail_thickness_range=(0.05, 0.05), rail_height_range=(0.05, 0.25),platform_width=4.0,
             # flat_patch_sampling={
             #     "target": FlatPatchSamplingCfg(
             #         num_patches=50,    
@@ -843,6 +854,96 @@ FLOATING_RING2_TERRAINS_CFG = TerrainGeneratorCfg(
         # )
     }
 )
+
+
+GAP_RING_PRETRAIN_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(10.0, 10.0),       # 整个 terrain tile 尺寸
+    border_width=20.0,        # 地形边界，防止掉落
+    num_rows=10,
+    num_cols=2,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    curriculum=True,
+    sub_terrains={
+        "gap": terrain_gen.trimesh.mesh_terrains_cfg.MeshGapTerrainCfg(
+            proportion=1/2, gap_width_range=(0.05, 0.20), platform_width=6.0,
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,    
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05 
+            #     )
+            # },
+        ),
+        "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+            proportion=1/2,                           # 完全生成此地形
+            ring_width_range=(0.1, 0.1),              # 环的宽度范围（中心向外延伸 0.5~1.0 米）
+            ring_height_range=(0.35, 0.8),             # 环的离地高度范围
+            ring_thickness=1.2,                       # 环厚度（z 方向）
+            platform_width=6.0,                       # 地形中心的方形平台大小
+            # flat_patch_sampling={
+            #     "target": FlatPatchSamplingCfg(
+            #         num_patches=50,     
+            #         patch_radius=0.15,    
+            #         max_height_diff=0.05
+            #     )
+            # },
+        ),
+    }
+)
+
+
+
+FLOATING_RING_TEST_TERRAINS_CFG2 = TerrainGeneratorCfg(
+    size=(9.0, 9.0),
+    border_width=20.0,
+    num_rows=5,
+    num_cols=5,  # 确保这里是 5，对应下面 5 种地形
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    curriculum=True,
+    sub_terrains={
+        # "floating_ring": terrain_gen.trimesh.mesh_terrains_cfg.MeshFloatingRingTerrainCfg(
+        #     proportion=0.2,  # 修改为 0.2 (1/5)
+        #     ring_width_range=(2.5, 2.5),
+        #     ring_height_range=(0.5, 0.5),
+        #     ring_thickness=0.2,
+        #     platform_width=2.0,
+        # ),
+        "pyramid_stairs_inv": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,  # 修改为 0.2
+            step_height_range=(0.2, 0.2),
+            step_width=0.4,
+            platform_width=2,
+            holes=False,
+            border_width=0.25,
+        ),
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,  # 修改为 0.2
+            step_height_range=(0.2, 0.2),
+            step_width=0.4,
+            platform_width=2,
+            holes=False,
+            border_width=0.25,
+        ),
+        "gap": terrain_gen.trimesh.mesh_terrains_cfg.MeshGapTerrainCfg(
+            proportion=0.2,  # 修改为 0.2
+            gap_width_range=(0.25, 0.25), 
+            platform_width=2.0,
+        ),
+        "rail": terrain_gen.trimesh.mesh_terrains_cfg.MeshRailsTerrainCfg(
+            proportion=0.2,  # 修改为 0.2
+            rail_thickness_range=(0.05, 0.05), 
+            rail_height_range=(0.2, 0.2),
+            platform_width=2.0,
+        ),
+    }
+)
+
 
 FLOATING_CAR_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(10.0, 10.0),       # 整个 terrain tile 尺寸

@@ -313,18 +313,18 @@ class CUHKLRLSiriusWSlipFlatEnvCfg(LocomotionVelocityRoughEnvCfg):
             "pose_range": {
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
-                "z": (0.0, 0.2),
+                "z": (0.0, 0.05),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
                 "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.5, 0.5),
-                "roll": (-0.5, 0.5),
-                "pitch": (-0.5, 0.5),
-                "yaw": (-0.5, 0.5),
+                "x": (-0.1, 0.1),
+                "y": (-0.1, 0.1),
+                "z": (-0.1, 0.1),
+                "roll": (-0.1, 0.1),
+                "pitch": (-0.1, 0.1),
+                "yaw": (-0.1, 0.1),
             },
         }
         self.events.randomize_rigid_body_mass.params["asset_cfg"].body_names = [self.base_link_name]
