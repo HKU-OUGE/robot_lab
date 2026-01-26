@@ -161,19 +161,19 @@ class ObservationsCfg:
         # observation terms (order preserved)
         base_lin_vel = ObsTerm(
             func=mdp.base_lin_vel,
-            noise=Unoise(n_min=-0.1, n_max=0.1),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-100.0, 100.0),
             scale=1.0,
         )
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel,
-            noise=Unoise(n_min=-0.2, n_max=0.2),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-100.0, 100.0),
             scale=1.0,
         )
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
-            noise=Unoise(n_min=-0.05, n_max=0.05),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-100.0, 100.0),
             scale=1.0,
         )
@@ -185,14 +185,14 @@ class ObservationsCfg:
         )
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            noise=Unoise(n_min=-0.01, n_max=0.01),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            noise=Unoise(n_min=-0.2, n_max=0.2),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
@@ -205,7 +205,7 @@ class ObservationsCfg:
         height_scan = ObsTerm(
             func=mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner_base")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
+            noise=Unoise(n_min=0.0, n_max=0.0),
             clip=(-1.0, 1.0),
             scale=1.0,
         )

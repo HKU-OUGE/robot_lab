@@ -367,11 +367,24 @@ def feet_air_time(
     env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float
 ) -> torch.Tensor:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    # 获取触地信号
     first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    
+    # 计算基础奖励
     reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
-    reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
+    
+    # [修复] 获取完整命令 (vx, vy, wz)
+    cmd = env.command_manager.get_command(command_name)
+    
+    # 检查是否有 线速度(前2维) OR 角速度(第3维)
+    lin_vel_norm = torch.norm(cmd[:, :2], dim=1)
+    ang_vel_abs = torch.abs(cmd[:, 2])
+    
+    # 只要动起来（走或者转），就允许获得奖励
+    is_moving = (lin_vel_norm > 0.1) | (ang_vel_abs > 0.1)
+    reward *= is_moving
+    
     return reward
 
 def feet_air_time_positive_biped(env, command_name: str, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
