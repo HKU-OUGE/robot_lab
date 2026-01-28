@@ -176,14 +176,14 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0
-        self.rewards.track_ang_vel_z_exp.weight = 4.0
+        self.rewards.track_lin_vel_xy_exp.weight = 9.0
+        self.rewards.track_ang_vel_z_exp.weight = 9.0
 
         # Others
         self.rewards.feet_air_time.weight = 4.0
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_contact.weight = -4
+        self.rewards.feet_contact.weight = -1
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
