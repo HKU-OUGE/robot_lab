@@ -176,8 +176,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 9.0
-        self.rewards.track_ang_vel_z_exp.weight = 9.0
+        self.rewards.track_lin_vel_xy_exp.weight = 14.0
+        self.rewards.track_ang_vel_z_exp.weight = 5.0
 
         # Others
         self.rewards.feet_air_time.weight = 4.0
