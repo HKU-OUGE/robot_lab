@@ -142,7 +142,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ang_vel_xy_l2.weight = -0.5
         self.rewards.flat_orientation_l2.weight = -2.0
         self.rewards.base_height_l2.weight = -4.5
-        self.rewards.base_height_l2.params["target_height"] = 0.35
+        self.rewards.base_height_l2.params["target_height"] = 0.44
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -165,7 +165,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -0.1
+        self.rewards.undesired_contacts.weight = -0.4
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             "base", "trunk", ".*_hip", ".*_thigh", ".*calf"
         ]
@@ -183,7 +183,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_air_time.weight = 3.0
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_contact.weight = -0.005
+        self.rewards.feet_contact.weight = -0.01
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -202,7 +202,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
         self.rewards.rotate_joint_pos_penalty.weight = -0.4
-        self.rewards.prismatic_joint_pos_penalty.weight = -0.9
+        self.rewards.prismatic_joint_pos_penalty.weight = -0.4
         self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.12
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [

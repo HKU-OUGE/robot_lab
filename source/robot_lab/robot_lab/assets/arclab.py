@@ -40,12 +40,12 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.35),
+        pos=(0.0, 0.0, 0.44),
         joint_pos={
-            "FL_hip_joint": 0.10,
-            "FR_hip_joint": -0.10,
-            "RL_hip_joint": 0.10,
-            "RR_hip_joint": -0.10,
+            "FL_hip_joint": 0.0,
+            "FR_hip_joint": -0.0,
+            "RL_hip_joint": 0.0,
+            "RR_hip_joint": -0.0,
             "FL_thigh_joint": 0.60,
             "FR_thigh_joint": 0.60,
             "RL_thigh_joint": 0.60,
