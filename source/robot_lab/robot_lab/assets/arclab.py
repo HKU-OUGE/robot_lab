@@ -24,7 +24,7 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 
 ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg_fixed_joint/arcdog_adjustable_leg_fixed_joint.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg/arcdog_adjustable_leg.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -54,10 +54,10 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
             "FR_calf_joint": -0.95,
             "RL_calf_joint": -0.95,
             "RR_calf_joint": -0.95,
-            # "FL_box_joint": 0.09,
-            # "FR_box_joint": 0.09,
-            # "RL_box_joint": 0.09,
-            # "RR_box_joint": 0.09,
+            "FL_box_joint": 0.14,
+            "FR_box_joint": 0.14,
+            "RL_box_joint": 0.14,
+            "RR_box_joint": 0.14,
         },
         joint_vel={".*": 0.0},
     ),
@@ -90,15 +90,15 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
             damping=2.0,
             friction=0.1,
         ),
-        # "extensions": DCMotorCfg(
-        #     joint_names_expr=[".*_box_joint"],  
-        #     effort_limit=200.0,
-        #     saturation_effort=200.0,
-        #     velocity_limit=1.0,
-        #     stiffness=900.0,
-        #     damping=2.0,
-        #     friction=0.0,
-        # ),
+        "extensions": DCMotorCfg(
+            joint_names_expr=[".*_box_joint"],  
+            effort_limit=200.0,
+            saturation_effort=200.0,
+            velocity_limit=1.0,
+            stiffness=60.0,
+            damping=2.0,
+            friction=0.1,
+        ),
     },
 )
 

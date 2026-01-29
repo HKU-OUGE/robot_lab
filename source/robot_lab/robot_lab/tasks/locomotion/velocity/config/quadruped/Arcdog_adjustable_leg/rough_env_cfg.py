@@ -65,7 +65,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         "RR_hip_joint", "FL_thigh_joint", "FR_thigh_joint",
         "RL_thigh_joint", "RR_thigh_joint", "FL_calf_joint",
         "FR_calf_joint", "RL_calf_joint", "RR_calf_joint",
-        # "FL_box_joint", "FR_box_joint", "RL_box_joint", "RR_box_joint",
+        "FL_box_joint", "FR_box_joint", "RL_box_joint", "RR_box_joint",
     ]
     # fmt: on
 
@@ -110,10 +110,10 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         
         # reduce action scale
         self.actions.joint_pos.scale = 0.1
-        # self.actions.joint_pos.scale = {
-        #     ".*_box_joint": 0.014, 
-        #     ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
-        # }
+        self.actions.joint_pos.scale = {
+            ".*_box_joint": 0.014, 
+            ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
+        }
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names
 
@@ -202,7 +202,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
         self.rewards.rotate_joint_pos_penalty.weight = -0.4
-        # self.rewards.prismatic_joint_pos_penalty.weight = -10.0
+        self.rewards.prismatic_joint_pos_penalty.weight = -0.9
         self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.12
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
