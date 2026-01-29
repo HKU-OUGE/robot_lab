@@ -138,7 +138,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -20
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -3.0
+        self.rewards.lin_vel_z_l2.weight = -1.5
         self.rewards.ang_vel_xy_l2.weight = -0.3
         self.rewards.flat_orientation_l2.weight = -4
         self.rewards.base_height_l2.weight = -9
@@ -161,7 +161,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.weight = -1
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.04
+        self.rewards.action_rate_l2.weight = -0.03
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
@@ -231,8 +231,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Terminations------------------------------
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
-            self.base_link_name,
-            self.trunk_link_name,
+            # self.base_link_name,
+            # self.trunk_link_name,
             # self.abad_link_name,
             # self.knee_link_name,
             # self.hip_link_name,
