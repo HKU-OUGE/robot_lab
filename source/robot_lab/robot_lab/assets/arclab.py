@@ -105,7 +105,7 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
         "extensions": IdealPDActuatorCfg(
             joint_names_expr=[".*_box_joint"],  
             effort_limit=1000.0,
-            velocity_limit=0.2,
+            velocity_limit=0.13,
             stiffness=3000.0,
             damping=200.0,
             armature=0.4,  
