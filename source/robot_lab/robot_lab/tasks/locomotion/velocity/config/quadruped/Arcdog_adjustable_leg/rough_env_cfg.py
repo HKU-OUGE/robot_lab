@@ -158,7 +158,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_acc_l2.weight = -1.0e-7
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
-        self.rewards.joint_vel_limits.weight = -0.05
+        self.rewards.joint_vel_limits.weight = -0.3
 
         # Action penalties
         self.rewards.action_rate_l2.weight = -0.04
