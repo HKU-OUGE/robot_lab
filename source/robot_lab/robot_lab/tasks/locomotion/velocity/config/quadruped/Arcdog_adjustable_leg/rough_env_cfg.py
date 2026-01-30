@@ -109,9 +109,9 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # }
         
         # reduce action scale
-        self.actions.joint_pos.scale = 0.1
+        # self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.scale = {
-            ".*_box_joint": 0.014, 
+            ".*_box_joint": 0.02, 
             ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
         }
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
@@ -138,10 +138,10 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -20
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -1.0
-        self.rewards.ang_vel_xy_l2.weight = -0.5
+        self.rewards.lin_vel_z_l2.weight = -0.3
+        self.rewards.ang_vel_xy_l2.weight = -0.2
         self.rewards.flat_orientation_l2.weight = -2.0
-        self.rewards.base_height_l2.weight = -7
+        self.rewards.base_height_l2.weight = -4
         self.rewards.base_height_l2.params["target_height"] = 0.44
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
@@ -161,7 +161,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.weight = -0.05
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.01
+        self.rewards.action_rate_l2.weight = -0.04
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
@@ -176,7 +176,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 4
+        self.rewards.track_lin_vel_xy_exp.weight = 8
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
@@ -201,8 +201,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.rotate_joint_pos_penalty.weight = -0.4
-        self.rewards.prismatic_joint_pos_penalty.weight = -0.4
+        self.rewards.rotate_joint_pos_penalty.weight = -0.6
+        self.rewards.prismatic_joint_pos_penalty.weight = -0.9
         self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.12
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
