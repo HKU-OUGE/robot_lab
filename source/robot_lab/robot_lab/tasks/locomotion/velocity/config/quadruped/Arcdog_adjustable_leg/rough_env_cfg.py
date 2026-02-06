@@ -205,7 +205,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.rotate_joint_pos_penalty.weight = -0.6
         self.rewards.prismatic_joint_pos_penalty.weight = -5
         self.rewards.feet_height_exp.weight = 2.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.12
+        self.rewards.feet_height_exp.params["target_height"] = 0.18
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
