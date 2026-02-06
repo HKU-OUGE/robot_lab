@@ -333,6 +333,25 @@ class EventCfg:
         },
     )
 
+    randomize_screw_joints = EventTerm(
+    func=mdp.randomize_joint_parameters_with_damping,
+    mode="reset",
+    params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
+        "operation": "scale",
+        "distribution": "uniform",
+        
+        # 1. 摩擦力 (N)
+        "friction_distribution_params": (0.75, 1.25),
+        
+        # 2. 阻尼 (Ns/m)
+        "damping_distribution_params": (0.5, 2.0),
+        
+        # 3. 惯量
+        "armature_distribution_params": (0.9, 1.1),
+    },
+    )
+
     # randomize_joint_limits = EventTerm(
     #     func=mdp.randomize_joint_parameters,
     #     mode="reset",

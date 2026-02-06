@@ -132,6 +132,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.events.randomize_rigid_body_material.params["asset_cfg"].body_names = [
         #     self.foot_link_name
         # ]
+        self.events.randomize_screw_joints.params["asset_cfg"].joint_names = [".*_box_joint"]
 
         # ------------------------------Rewards------------------------------
         # General

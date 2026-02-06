@@ -14,6 +14,11 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 from isaaclab.utils import math as math_utils
 
+from isaaclab.managers import EventTermCfg
+from isaaclab.managers import ManagerTermBase
+# if TYPE_CHECKING:
+#     from isaaclab.envs import ManagerBasedRLEnv
+
 def randomize_rigid_body_inertia(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -348,3 +353,194 @@ def set_discrete_basevel_ranges(
     if idx_back.numel() > 0:
         cfg.ranges.lin_vel_x = (-float(speed_abs), -float(speed_abs))  # 离散 -speed_abs
         term.reset(idx_back.tolist())
+
+class randomize_joint_parameters_with_damping(ManagerTermBase):
+    """Randomize the simulated joint parameters including independent damping control.
+
+    This term allows independent randomization of:
+    1. Friction (Static & Dynamic)
+    2. Damping (Viscous Friction) - NEW!
+    3. Armature
+    4. Joint Limits
+    """
+
+    def __init__(self, cfg: EventTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        # extract the used quantities
+        self.asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: RigidObject | Articulation = env.scene[self.asset_cfg.name]
+        
+        # 简单的参数校验
+        if cfg.params.get("operation") == "scale":
+            # 这里只做简单的存在性检查，具体范围检查略去以保持代码简洁
+            pass
+        elif cfg.params.get("operation") not in ("abs", "add", "scale", None):
+             # 注意：None 是为了容错，默认值通常在 __call__ 处理
+             pass
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        env_ids: torch.Tensor | None,
+        asset_cfg: SceneEntityCfg,
+        friction_distribution_params: tuple[float, float] | None = None,
+        damping_distribution_params: tuple[float, float] | None = None,  # <--- 新增参数
+        armature_distribution_params: tuple[float, float] | None = None,
+        lower_limit_distribution_params: tuple[float, float] | None = None,
+        upper_limit_distribution_params: tuple[float, float] | None = None,
+        operation: Literal["add", "scale", "abs"] = "abs",
+        distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+    ):
+        # resolve environment ids
+        if env_ids is None:
+            env_ids = torch.arange(env.scene.num_envs, device=self.asset.device)
+
+        # resolve joint indices
+        if self.asset_cfg.joint_ids == slice(None):
+            joint_ids = slice(None)
+        else:
+            joint_ids = torch.tensor(self.asset_cfg.joint_ids, dtype=torch.int, device=self.asset.device)
+
+        # ==================================================================================
+        # 1. 处理 摩擦力 (Static/Dynamic) 和 阻尼 (Viscous/Damping)
+        # ==================================================================================
+        # 只要有任意一个参数需要随机化，我们就需要调用 write_joint_friction_coefficient_to_sim
+        if friction_distribution_params is not None or damping_distribution_params is not None:
+            
+            # --- A. 准备基础数据 (从默认值克隆) ---
+            # 我们先获取所有相关的默认值，确保如果不修改某项，它保持原样
+            static_friction = self.asset.data.default_joint_friction_coeff.clone()
+            viscous_friction = self.asset.data.default_joint_viscous_friction_coeff.clone()
+            
+            # 检查 Isaac Sim 版本以决定是否处理 Dynamic Friction
+            major_version = int(env.sim.get_version()[0])
+            if major_version >= 5:
+                dynamic_friction = self.asset.data.default_joint_dynamic_friction_coeff.clone()
+            else:
+                dynamic_friction = None
+
+            # --- B. 随机化 摩擦力 (Static & Dynamic) ---
+            if friction_distribution_params is not None:
+                # 1. 随机化 Static Friction
+                static_friction = _randomize_prop_by_op(
+                    static_friction,
+                    friction_distribution_params,
+                    env_ids,
+                    joint_ids,
+                    operation=operation,
+                    distribution=distribution,
+                )
+                static_friction = torch.clamp(static_friction, min=0.0)
+
+                # 2. 随机化 Dynamic Friction (仅限 Isaac Sim 5.0+)
+                if dynamic_friction is not None:
+                    dynamic_friction = _randomize_prop_by_op(
+                        dynamic_friction,
+                        friction_distribution_params, # 通常动摩擦和静摩擦使用相同的随机分布参数
+                        env_ids,
+                        joint_ids,
+                        operation=operation,
+                        distribution=distribution,
+                    )
+                    dynamic_friction = torch.clamp(dynamic_friction, min=0.0)
+                    # 物理约束：动摩擦 <= 静摩擦
+                    dynamic_friction = torch.minimum(dynamic_friction, static_friction)
+
+            # --- C. 随机化 阻尼 (Viscous/Damping) ---
+            # 这是解耦的关键：使用独立的 damping_distribution_params
+            if damping_distribution_params is not None:
+                viscous_friction = _randomize_prop_by_op(
+                    viscous_friction,
+                    damping_distribution_params, # <--- 使用独立的阻尼参数
+                    env_ids,
+                    joint_ids,
+                    operation=operation,
+                    distribution=distribution,
+                )
+                viscous_friction = torch.clamp(viscous_friction, min=0.0)
+
+            # --- D. 提取切片并写入仿真 ---
+            # _randomize_prop_by_op 是原地修改全量 tensor 的，但 write 函数通常需要针对 env_ids 的切片
+            # 或者我们可以直接把全量传进去，但为了性能和标准做法，我们提取切片
+            
+            # 注意：如果 joint_ids 是 slice(None)，我们需要处理维度
+            # 为了通用性，我们统一提取 [env_ids, joint_ids] 的数据进行写入
+            
+            s_f_slice = static_friction[env_ids[:, None], joint_ids]
+            v_f_slice = viscous_friction[env_ids[:, None], joint_ids]
+            d_f_slice = dynamic_friction[env_ids[:, None], joint_ids] if dynamic_friction is not None else None
+
+            self.asset.write_joint_friction_coefficient_to_sim(
+                joint_friction_coeff=s_f_slice,
+                joint_dynamic_friction_coeff=d_f_slice,
+                joint_viscous_friction_coeff=v_f_slice,
+                joint_ids=joint_ids,
+                env_ids=env_ids,
+            )
+
+        # ==================================================================================
+        # 2. 处理 关节惯量 (Armature) - 保持原有逻辑
+        # ==================================================================================
+        if armature_distribution_params is not None:
+            armature = self.asset.data.default_joint_armature.clone()
+            armature = _randomize_prop_by_op(
+                armature,
+                armature_distribution_params,
+                env_ids,
+                joint_ids,
+                operation=operation,
+                distribution=distribution,
+            )
+            # 写入
+            self.asset.write_joint_armature_to_sim(
+                armature[env_ids[:, None], joint_ids], 
+                joint_ids=joint_ids, 
+                env_ids=env_ids
+            )
+
+        # ==================================================================================
+        # 3. 处理 关节限位 (Limits) - 保持原有逻辑
+        # ==================================================================================
+        if lower_limit_distribution_params is not None or upper_limit_distribution_params is not None:
+            joint_pos_limits = self.asset.data.default_joint_pos_limits.clone()
+            
+            if lower_limit_distribution_params is not None:
+                # 针对第0维 (lower limit)
+                # 注意：_randomize_prop_by_op 处理的是二维数据 (env, joint)，
+                # limits 是 (env, joint, 2)。我们需要先提取出来处理，再放回去。
+                lower_limits = joint_pos_limits[..., 0]
+                lower_limits = _randomize_prop_by_op(
+                    lower_limits,
+                    lower_limit_distribution_params,
+                    env_ids,
+                    joint_ids,
+                    operation=operation,
+                    distribution=distribution,
+                )
+                joint_pos_limits[..., 0] = lower_limits
+
+            if upper_limit_distribution_params is not None:
+                upper_limits = joint_pos_limits[..., 1]
+                upper_limits = _randomize_prop_by_op(
+                    upper_limits,
+                    upper_limit_distribution_params,
+                    env_ids,
+                    joint_ids,
+                    operation=operation,
+                    distribution=distribution,
+                )
+                joint_pos_limits[..., 1] = upper_limits
+
+            # 检查合法性
+            limits_slice = joint_pos_limits[env_ids[:, None], joint_ids]
+            if (limits_slice[..., 0] > limits_slice[..., 1]).any():
+                raise ValueError(
+                    "Randomization resulted in lower limits > upper limits."
+                )
+
+            self.asset.write_joint_position_limit_to_sim(
+                limits_slice, 
+                joint_ids=joint_ids, 
+                env_ids=env_ids, 
+                warn_limit_violation=False
+            )
