@@ -111,7 +111,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         # self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.scale = {
-            ".*_box_joint": 0.02, 
+            ".*_box_joint": 0.0, 
             ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
         }
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
