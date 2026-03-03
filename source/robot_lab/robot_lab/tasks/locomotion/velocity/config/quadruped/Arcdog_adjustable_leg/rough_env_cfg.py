@@ -45,6 +45,24 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         },
     )
 
+    # 惩罚伸缩腿的剧烈加速度 (震荡的主要特征)
+    box_joint_acc_penalty = RewTerm(
+        func=mdp.joint_acc_l2,
+        weight=0.0, # 在 EnvCfg 中激活
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
+        },
+    )
+    
+    # 针对伸缩腿的关节速度惩罚
+    box_joint_vel_penalty = RewTerm(
+        func=mdp.joint_vel_l2,  # 使用关节速度，它支持 asset_cfg
+        weight=-0.01,           # 权重建议：从 -0.01 到 -0.05 开始尝试，太大会导致腿动不了
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
+        },
+    )
+
 
 @configclass
 class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
@@ -111,7 +129,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         # self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.scale = {
-            ".*_box_joint": 0.0, 
+            ".*_box_joint": 0.02, 
             ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
         }
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
@@ -141,7 +159,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -0.3
         self.rewards.ang_vel_xy_l2.weight = -0.2
-        self.rewards.flat_orientation_l2.weight = -2.0
+        self.rewards.flat_orientation_l2.weight = -5.0
         self.rewards.base_height_l2.weight = -4
         self.rewards.base_height_l2.params["target_height"] = 0.40
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
@@ -156,7 +174,9 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_torques_l2.weight = -2.5e-6
         # 测试 暂时取消此惩罚
         self.rewards.joint_vel_l2.weight = -0.005
+        self.rewards.box_joint_vel_penalty.weight = -0.01 
         self.rewards.joint_acc_l2.weight = -1.0e-7
+        self.rewards.box_joint_acc_penalty.weight = -1.0e-5 # 伸缩关节的加速度惩罚，建议比全局高 1-2 个数量级 
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
         self.rewards.joint_vel_limits.weight = -0.3
