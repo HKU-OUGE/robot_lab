@@ -1098,4 +1098,34 @@ def climb_progress_dyn_pbrs(env, asset_cfg=SceneEntityCfg("robot"),
     env._phi_prev = phi
     return rew
 
+def stand_still_flat_orientation_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Provides an extra reward for keeping the body flat specifically when the robot 
+    is commanded to stand still. This helps stabilization on slopes.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    
+    # 1. Check if the command is "stand still"
+    cmd_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    is_static_cmd = cmd_norm < command_threshold
+    
+    # 2. Calculate flatness reward (same as above)
+    gravity_b = asset.data.projected_gravity_b
+    flat_error = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
+    flat_reward = torch.exp(-flat_error / std**2)
+    
+    # 3. Apply reward only when static
+    reward = flat_reward * is_static_cmd.float()
+    
+    # Survival gating
+    reward *= torch.clamp(-gravity_b[:, 2], 0.0, 0.7) / 0.7
+    
+    return reward
+
 
