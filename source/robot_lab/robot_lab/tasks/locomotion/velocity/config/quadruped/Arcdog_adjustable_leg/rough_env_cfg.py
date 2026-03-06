@@ -28,7 +28,7 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         weight=0.0,
         params={
             "command_name": "base_velocity",
-            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_(hip_joint|thigh_joint|calf_joint)$"),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*_(thigh_joint|calf_joint)$"),
             "stand_still_scale": 1.8,
             "velocity_threshold": 0.3,
         },
@@ -213,7 +213,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 5
+        self.rewards.track_lin_vel_xy_exp.weight = 6
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
@@ -238,7 +238,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.rotate_joint_pos_penalty.weight = -0.01
+        self.rewards.rotate_joint_pos_penalty.weight = -0.03
         self.rewards.prismatic_joint_pos_penalty.weight = -3
         self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.18
@@ -250,7 +250,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
         #     self.foot_link_name
         # ]
-        self.rewards.feet_gait.weight = 4.0
+        self.rewards.feet_gait.weight = 2.0
         self.rewards.feet_gait.params["velocity_threshold"] = 0.5
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
@@ -281,6 +281,6 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.resampling_time_range = (5.0, 10.0)
