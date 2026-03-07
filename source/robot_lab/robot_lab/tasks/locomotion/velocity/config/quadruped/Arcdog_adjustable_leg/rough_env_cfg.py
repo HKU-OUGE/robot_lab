@@ -50,7 +50,7 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         weight=0.0,  # 默认权重设为0，在 EnvCfg 中具体配置
         params={
             "command_name": "base_velocity",
-            "std": 0.1,               # 控制对倾斜的敏感度，越小越严格
+            "std": 0.3,               # 控制对倾斜的敏感度，越小越严格
             "command_threshold": 0.1,  # 速度指令小于此值视为静止
             "asset_cfg": SceneEntityCfg("robot"),
         },
@@ -171,13 +171,13 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -0.3
         self.rewards.ang_vel_xy_l2.weight = -0.2
-        self.rewards.flat_orientation_l2.weight = -5.0
+        self.rewards.flat_orientation_l2.weight = -2.0
         self.rewards.base_height_l2.weight = -3
         self.rewards.base_height_l2.params["target_height"] = 0.40
         # 设置静止水平奖励的权重
         # 这是一个正向奖励(Bonus)，所以权重为正。
         # 建议值: 0.5 ~ 2.0。如果机器人在坡上静止时还是歪的，可以调大这个值。
-        self.rewards.stand_still_flat.weight = 3.0 
+        self.rewards.stand_still_flat.weight = 0.5 
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -238,7 +238,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.rotate_joint_pos_penalty.weight = -0.03
+        self.rewards.rotate_joint_pos_penalty.weight = -0.3
         self.rewards.prismatic_joint_pos_penalty.weight = -3
         self.rewards.feet_height_exp.weight = 2.0
         self.rewards.feet_height_exp.params["target_height"] = 0.18
