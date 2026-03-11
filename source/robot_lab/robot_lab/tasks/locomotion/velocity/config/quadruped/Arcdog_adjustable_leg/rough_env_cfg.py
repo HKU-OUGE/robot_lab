@@ -169,15 +169,15 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -20
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -0.3
+        self.rewards.lin_vel_z_l2.weight = -0.05
         self.rewards.ang_vel_xy_l2.weight = -0.2
-        self.rewards.flat_orientation_l2.weight = -2.0
-        self.rewards.base_height_l2.weight = -3
+        self.rewards.flat_orientation_l2.weight = -0.3
+        self.rewards.base_height_l2.weight = -1
         self.rewards.base_height_l2.params["target_height"] = 0.40
         # 设置静止水平奖励的权重
         # 这是一个正向奖励(Bonus)，所以权重为正。
         # 建议值: 0.5 ~ 2.0。如果机器人在坡上静止时还是歪的，可以调大这个值。
-        self.rewards.stand_still_flat.weight = 0.5 
+        self.rewards.stand_still_flat.weight = 0.1
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -202,9 +202,9 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -1.5
+        self.rewards.undesired_contacts.weight = -0.2
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            "base", "trunk", ".*_hip", ".*_thigh", ".*calf"
+            "base", "trunk", ".*_hip", ".*_thigh", ".*_calf"
         ]
 
         # self.rewards.contact_forces.weight = -0.005
@@ -224,7 +224,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
-        self.rewards.feet_stumble.weight = -0.05
+        self.rewards.feet_stumble.weight = -0.01
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -233,15 +233,15 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         # self.rewards.joint_power.weight = -2e-5
         # 测试 暂时取消
-        self.rewards.joint_power.weight = -2e-6
+        self.rewards.joint_power.weight = 0.0
         self.rewards.stand_still_without_cmd.weight = -3.5
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.rotate_joint_pos_penalty.weight = -0.3
-        self.rewards.prismatic_joint_pos_penalty.weight = -3
-        self.rewards.feet_height_exp.weight = 2.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.18
+        self.rewards.rotate_joint_pos_penalty.weight = -0.15
+        self.rewards.prismatic_joint_pos_penalty.weight = -4
+        self.rewards.feet_height_exp.weight = 1.0
+        self.rewards.feet_height_exp.params["target_height"] = 0.40
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -267,14 +267,14 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.disable_zero_weight_rewards()
 
         # ------------------------------Terminations------------------------------
-        self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
-            self.base_link_name,
-            self.trunk_link_name,
-            # self.abad_link_name,
-            # self.knee_link_name,
-            # self.hip_link_name,
-        ]
-        # self.terminations.illegal_contact = None
+        # self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
+        #     # self.base_link_name,
+        #     # self.trunk_link_name,
+        #     # self.abad_link_name,
+        #     # self.knee_link_name,
+        #     # self.hip_link_name,
+        # ]
+        self.terminations.illegal_contact = None
         # ------------------------------Curriculums------------------------------
         self.curriculum.command_levels.params["range_multiplier"] = (0.1,1.0)
 
