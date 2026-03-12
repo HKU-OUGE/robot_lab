@@ -1128,4 +1128,41 @@ def stand_still_flat_orientation_bonus(
     
     return reward
 
+def blind_climbing_vel_z_bonus(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    pitch_threshold: float = 0.05, 
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    盲走爬台阶奖励：当机器人被指令向前移动，且车头抬起时，奖励其向上的 Z 轴速度。
+    """
+    # 获取机器人实体数据
+    robot = env.scene[asset_cfg.name]
+
+    # 1. 获取向前的速度指令 (X轴)
+    commands = env.command_manager.get_command(command_name)
+    cmd_vel_x = commands[:, 0]
+
+    # 2. 估算机身仰角 (Pitch)
+    # projected_gravity_b 是世界坐标系的重力向量 [0, 0, -1] 在机身局部坐标系下的投影。
+    # 当车头抬起 (Nose up) 时，重力在机身局部坐标系下会指向斜后方，即局部 X 轴分量为负。
+    # 因此，-projected_gravity_b[:, 0] 是一个正值，近似代表仰角的正弦值 (sin(pitch))。
+    projected_gravity = robot.data.projected_gravity_b
+    pitch_approx = -projected_gravity[:, 0]
+
+    # 3. 获取世界坐标系下的实际 Z 轴线速度
+    vel_z = robot.data.root_lin_vel_w[:, 2]
+
+    # 4. 判断是否处于“爬台阶”状态：
+    # 条件 A: 接收到足够大的向前指令 (例如 > 0.2 m/s)
+    # 条件 B: 车头抬起超过一定阈值 (pitch_threshold 0.05 大约是 3 度)
+    is_climbing = torch.logical_and(cmd_vel_x > 0.2, pitch_approx > pitch_threshold)
+
+    # 5. 计算奖励：只奖励向上的速度 (vel_z > 0)，且只有在爬台阶状态下才给奖励
+    climbing_vel_z = torch.clamp(vel_z, min=0.0)
+    
+    # 返回奖励值 (非爬台阶状态下，此项奖励为 0)
+    return climbing_vel_z * is_climbing.float()
+
 
