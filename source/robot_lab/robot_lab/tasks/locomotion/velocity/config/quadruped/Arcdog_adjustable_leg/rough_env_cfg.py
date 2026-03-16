@@ -59,7 +59,7 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
 
     blind_climbing_bonus = RewTerm(
         func=mdp.blind_climbing_vel_z_bonus, 
-        weight=2.0,  # 权重可以从 1.0 到 3.0 之间尝试
+        weight=0.0,  # 权重可以从 1.0 到 3.0 之间尝试
         params={
             "command_name": "base_velocity",
             "pitch_threshold": 0.05, # 仰角阈值，0.05 约等于 3度。如果台阶很陡可以调大到 0.1
@@ -79,9 +79,30 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
     # 针对伸缩腿的关节速度惩罚
     box_joint_vel_penalty = RewTerm(
         func=mdp.joint_vel_l2,  # 使用关节速度，它支持 asset_cfg
-        weight=-0.01,           # 权重建议：从 -0.01 到 -0.05 开始尝试，太大会导致腿动不了
+        weight=0.0,           # 权重建议：从 -0.01 到 -0.05 开始尝试，太大会导致腿动不了
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
+        },
+    )
+
+
+    # 1. 扬身动作奖励 (重赏)
+    pitch_up_on_obstacle = RewTerm(
+        func=mdp.climbing_pitch_up_bonus,
+        weight=0.0,  # 权重给到 10.0，让它明确知道遇到障碍必须抬头
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
+    # 2. 前腿搭高台奖励 (重赏)
+    front_legs_reach = RewTerm(
+        func=mdp.front_legs_reach_bonus,
+        weight=0.0,   # 权重给到 8.0，鼓励前脚拼命往上够
+        params={
+            # 必须精准指定前脚的 body_names，请确认你的前脚 link 名字是 FL_foot 和 FR_foot
+            "asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot"]), 
         },
     )
 
@@ -181,8 +202,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -0.001
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -0.01
-        self.rewards.base_height_l2.weight = -0.01
+        self.rewards.flat_orientation_l2.weight = -0.5
+        self.rewards.base_height_l2.weight = -0.0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         # 设置静止水平奖励的权重
         # 这是一个正向奖励(Bonus)，所以权重为正。
@@ -197,6 +218,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.body_lin_acc_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
+        self.rewards.pitch_up_on_obstacle.weight = 4.0
+        self.rewards.front_legs_reach.weight = 4.0
 
         # Joint penaltie
         # self.rewards.joint_torques_l2.weight = -2.5e-6
@@ -210,11 +233,11 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_vel_limits.weight = -0.3
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.08
+        self.rewards.action_rate_l2.weight = -0.1
         # UNUESD self.rewards.action_l2.weight = 0.0
 
         # Contact sensor
-        self.rewards.undesired_contacts.weight = -0.05
+        self.rewards.undesired_contacts.weight = -0.03
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
             "base", "trunk"
         ]
@@ -229,14 +252,14 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
-        self.rewards.feet_air_time.weight = 3.0
+        self.rewards.feet_air_time.weight = 1.0
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact.weight = -0.01
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
-        self.rewards.feet_stumble.weight = -0.01
+        self.rewards.feet_stumble.weight = -0.0
         self.rewards.feet_stumble.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -250,10 +273,10 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.rotate_joint_pos_penalty.weight = -0.1
-        self.rewards.prismatic_joint_pos_penalty.weight = -4
-        self.rewards.feet_height_exp.weight = 1.5
-        self.rewards.feet_height_exp.params["target_height"] = 0.45
+        self.rewards.rotate_joint_pos_penalty.weight = -0.0
+        self.rewards.prismatic_joint_pos_penalty.weight = -3.0
+        self.rewards.feet_height_exp.weight = 1.0
+        self.rewards.feet_height_exp.params["target_height"] = 0.50
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]

@@ -1165,4 +1165,78 @@ def blind_climbing_vel_z_bonus(
     # 返回奖励值 (非爬台阶状态下，此项奖励为 0)
     return climbing_vel_z * is_climbing.float()
 
+def climbing_pitch_up_bonus(env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    【改进版：扬身奖励】
+    鼓励机器人在遇到障碍物受阻时抬起前身，但防止其在平地起步时原地“翘头”作弊。
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # 1. 获取指令和实际速度
+    cmd_vel_x = env.command_manager.get_command(command_name)[:, 0]
+    actual_vel_x = robot.data.root_lin_vel_b[:, 0]
+    actual_vel_z = robot.data.root_lin_vel_b[:, 2]  # 获取 Z 轴（上下）速度
+    
+    # 2. 计算 Pitch 角的替代指标 (抬头时为正)
+    pitch_metric = -robot.data.projected_gravity_b[:, 0]
+    
+    # 3. 核心逻辑修改：增加多重限制条件
+    
+    # 条件 A: 强烈的向前意图
+    intent_forward = cmd_vel_x > 0.4
+    
+    # 条件 B: 实际速度受阻，但必须大于一个下限！(防起步作弊核心)
+    # actual_vel_x > 0.05: 确保机器人已经“动起来了”，而不是刚出生在原地静止。
+    # actual_vel_x < 0.3: 速度明显低于预期，说明被障碍物挡住了。
+    is_resisted = (actual_vel_x > 0.05) & (actual_vel_x < 0.3)
+    
+    # 条件 C: 确保机器人没有在往下掉 (防止下坡或下台阶时误触发抬头)
+    not_falling = actual_vel_z > -0.1
+    
+    # 条件 D: 限制最大奖励值 (防后空翻核心)
+    # 如果不限制，机器人会为了追求无限大的奖励而直接向后翻倒。
+    # 限制最大值为 0.4 (大约对应 pitch 角 23.5 度，sin(23.5°) ≈ 0.4)
+    # 将上限提高到 0.85，允许机器人仰角达到约 60 度时获得最大奖励
+    capped_pitch = torch.clamp(pitch_metric, min=0.0, max=0.85)
+
+    # 【新增】防翻车熔断锁：如果仰角超过约 75 度 (sin(75°) ≈ 0.96)，说明快要后空翻了，直接判定为不安全
+    is_safe_pitch = pitch_metric < 0.95
+    
+    # 4. 组合所有条件：必须同时满足才给奖励，且要求已经有轻微的抬头趋势 (>0.05)
+    # 必须满足：想往前走 + 速度受阻 + 没在下落 + 仰角大于0.05 + 仰角在安全范围内
+    valid_climbing_state = intent_forward & is_resisted & not_falling & (pitch_metric > 0.05) & is_safe_pitch
+    
+    # 5. 发放奖励
+    reward = torch.where(valid_climbing_state, capped_pitch, torch.zeros_like(pitch_metric))
+    
+    return reward
+
+def front_legs_reach_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    【前腿搭台奖励】
+    当机器人处于抬头状态时，奖励前腿（Z轴）抬高。
+    鼓励它把前脚尽可能举高，去够高台的台面。
+    """
+    robot = env.scene[asset_cfg.name]
+    
+    # 获取前脚在世界坐标系下的 Z 轴高度
+    # 注意：这里依赖于在 params 中传入 asset_cfg=SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot"])
+    front_feet_indices = asset_cfg.body_ids
+    front_feet_z = robot.data.body_pos_w[:, front_feet_indices, 2] # shape: (num_envs, 2)
+    mean_front_z = torch.mean(front_feet_z, dim=1)
+    
+    # 获取机身高度
+    root_z = robot.data.root_pos_w[:, 2]
+    
+    # 计算前脚相对于机身的高度差 (鼓励前脚比机身抬得更高)
+    relative_z = mean_front_z - root_z
+    
+    # 触发条件：机身必须处于抬头状态 (pitch_metric > 0.05，约 3度以上)
+    pitch_metric = -robot.data.projected_gravity_b[:, 0]
+    is_pitching = pitch_metric > 0.05 
+    
+    # 当抬头且前脚抬起时，奖励其相对高度
+    reward = torch.where(is_pitching & (relative_z > -0.1), relative_z + 0.1, torch.zeros_like(relative_z))
+    return reward
+
 
