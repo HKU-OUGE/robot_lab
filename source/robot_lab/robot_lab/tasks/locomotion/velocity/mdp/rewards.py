@@ -1239,4 +1239,132 @@ def front_legs_reach_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) ->
     reward = torch.where(is_pitching & (relative_z > -0.1), relative_z + 0.1, torch.zeros_like(relative_z))
     return reward
 
+# ==========================================
+# 1. 像马一样扬身 (Horse Rearing Posture)
+# ==========================================
+def horse_rearing_posture_bonus(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    asset_cfg: SceneEntityCfg, 
+    front_foot_names: list,
+    rear_foot_names: list,
+    pitch_threshold: float = 0.3
+) -> torch.Tensor:
+    """
+    当机器人试图向前走时，极大地奖励身体的 Pitch（仰角）以及前脚相对后脚的高度差，
+    鼓励机器人像马一样扬起前身。
+    """
+    asset = env.scene[asset_cfg.name]
+    
+    # 获取速度指令
+    velocity_command = env.command_manager.get_command(command_name)
+    cmd_x = velocity_command[:, 0]
+    
+    # 获取当前 Pitch 角 (基于重力投影)
+    projected_gravity = asset.data.projected_gravity_b
+    current_pitch_sin = -projected_gravity[:, 0] 
+    
+    # 1. 找到前脚和后脚的索引
+    front_foot_ids = asset.find_bodies(front_foot_names)[0]
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    
+    # 2. 获取前脚和后脚的 Z 轴高度 (取两只脚的平均高度)
+    # 这里真正用到了 body_pos_w 的 Z 轴数据
+    front_feet_z = asset.data.body_pos_w[:, front_foot_ids, 2].mean(dim=1)
+    rear_feet_z = asset.data.body_pos_w[:, rear_foot_ids, 2].mean(dim=1)
+    
+    # 3. 计算前脚相对后脚的高度差
+    height_diff = front_feet_z - rear_feet_z
+    
+    # 判定条件：向前走 且 仰角大于阈值
+    is_moving_forward = cmd_x > 0.1
+    is_pitching_up = current_pitch_sin > torch.sin(torch.tensor(pitch_threshold, device=env.device))
+    
+    # 综合奖励：仰角越大 + 前脚比后脚越高，奖励越多 (过滤掉高度差为负的情况)
+    bonus = (current_pitch_sin + torch.clamp(height_diff, min=0.0)) * is_moving_forward * is_pitching_up
+    
+    return bonus
+
+# ==========================================
+# 2. 前腿搭台后锁死 (Front Legs Quiet on Step) - 修改版
+# ==========================================
+def front_legs_quiet_on_step_penalty(
+    env: ManagerBasedRLEnv, 
+    asset_cfg: SceneEntityCfg, 
+    front_foot_names: list, 
+    front_knee_names: list,
+    step_height_threshold: float = 0.30
+) -> torch.Tensor:
+    """
+    当【两只前脚同时】接触到高于地面的平台时，严厉惩罚前腿膝盖（calf）的运动，迫使其“锁死”或保持稳定。
+    """
+    asset = env.scene[asset_cfg.name]
+    
+    # 找到前脚和前膝盖的索引
+    front_foot_ids = asset.find_bodies(front_foot_names)[0]
+    front_knee_ids = asset.find_joints(front_knee_names)[0]
+    
+    # 获取前脚的高度 (Z坐标)，形状为 (num_envs, 2)
+    front_foot_z = asset.data.body_pos_w[:, front_foot_ids, 2]
+    
+    # 判定条件：两只前脚的高度【同时】大于绝对值 step_height_threshold
+    # 使用 .all(dim=1) 确保两个脚都满足条件
+    both_feet_on_step = (front_foot_z > step_height_threshold).all(dim=1)
+    
+    # 获取前膝盖的速度
+    front_knee_vel = asset.data.joint_vel[:, front_knee_ids]
+    
+    # 如果双腿都搭上了高台，惩罚前膝盖的速度平方
+    penalty = torch.sum(torch.square(front_knee_vel), dim=1) * both_feet_on_step
+    return penalty
+
+
+# ==========================================
+# 3. 后腿发力蹬踏 (Rear Legs Power Drive) - 修改版
+# ==========================================
+def rear_legs_power_drive_bonus(
+    env: ManagerBasedRLEnv, 
+    asset_cfg: SceneEntityCfg, 
+    rear_drive_joint_names: list
+) -> torch.Tensor:
+    """
+    当机器人处于扬身状态时，奖励后腿的 thigh 和 calf 关节输出巨大的扭矩/功率，
+    鼓励后腿把身体“推”上去。
+    """
+    asset = env.scene[asset_cfg.name]
+    
+    # 找到后腿发力关节（thigh 和 calf）的索引
+    rear_joint_ids = asset.find_joints(rear_drive_joint_names)[0]
+    
+    # 获取当前 Pitch 角
+    projected_gravity = asset.data.projected_gravity_b
+    is_pitching_up = -projected_gravity[:, 0] > 0.1 # 仰角大于约5度
+    
+    # 获取后腿指定关节的输出扭矩和速度
+    rear_torques = asset.data.applied_torque[:, rear_joint_ids]
+    rear_vel = asset.data.joint_vel[:, rear_joint_ids]
+    
+    # 机械功率 = 扭矩 * 速度。我们奖励做正功（发力伸展）
+    power = rear_torques * rear_vel
+    # 过滤掉负功，只奖励正向发力
+    positive_power = torch.clamp(power, min=0.0)
+    
+    # 只有在抬头爬升时，才奖励后腿发力
+    bonus = torch.sum(positive_power, dim=1) * is_pitching_up
+    return bonus
+
+# ==========================================
+# 4. 仅惩罚 Roll 和 Yaw，放开 Pitch (Roll-Yaw Only Penalty)
+# ==========================================
+def roll_yaw_orientation_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    替代原来的 flat_orientation_l2。
+    允许机器人抬头(Pitch)，但严厉惩罚左右侧翻(Roll)和不必要的偏航(Yaw)。
+    """
+    asset = env.scene[asset_cfg.name]
+    # projected_gravity_b = [sin(pitch), -sin(roll)*cos(pitch), -cos(roll)*cos(pitch)]
+    # 我们只惩罚 Y 轴分量 (对应 Roll)
+    roll_penalty = torch.square(asset.data.projected_gravity_b[:, 1])
+    return roll_penalty
+
 

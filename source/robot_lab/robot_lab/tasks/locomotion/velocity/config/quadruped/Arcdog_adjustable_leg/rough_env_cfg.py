@@ -106,6 +106,48 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         },
     )
 
+    # 1. 扬身动作奖励 (像马一样翘起)
+    horse_rearing_bonus = RewTerm(
+        func=mdp.horse_rearing_posture_bonus, # 替换为你实际的函数路径
+        weight=0.0, # 在 EnvCfg 中激活
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "front_foot_names": ["FL_foot", "FR_foot"],
+            "rear_foot_names": ["RL_foot", "RR_foot"],
+            "pitch_threshold": 0.1, # 约 15 度开始给奖励
+        },
+    )
+
+    # 2. 前腿搭台后锁死惩罚 (前膝盖不要乱蹬)
+    front_legs_quiet_penalty = RewTerm(
+        func=mdp.front_legs_quiet_on_step_penalty,
+        weight=0.0, # 注意这里是负数，表示惩罚
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "front_foot_names": ["FL_foot", "FR_foot"],
+            "front_knee_names": ["FL_calf_joint", "FR_calf_joint"],
+            "step_height_threshold": 0.30, # 可以根据你的台阶高度微调
+        },
+    )
+
+    # 3. 后腿发力蹬踏奖励
+    rear_legs_drive_bonus = RewTerm(
+        func=mdp.rear_legs_power_drive_bonus,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "rear_drive_joint_names": ["RL_thigh_joint", "RR_thigh_joint", "RL_calf_joint", "RR_calf_joint"],
+        },
+    )
+
+    # 4. 替代原有的 flat_orientation，释放 Pitch 自由度
+    roll_yaw_orientation_penalty = RewTerm(
+        func=mdp.roll_yaw_orientation_penalty,
+        weight=0.0,
+        params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
 
 @configclass
 class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
@@ -202,7 +244,8 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -0.001
         self.rewards.ang_vel_xy_l2.weight = -0.05
-        self.rewards.flat_orientation_l2.weight = -0.5
+        self.rewards.flat_orientation_l2.weight = -0.0
+        self.rewards.roll_yaw_orientation_penalty.weight = -1.0
         self.rewards.base_height_l2.weight = -0.0
         self.rewards.base_height_l2.params["target_height"] = 0.40
         # 设置静止水平奖励的权重
@@ -219,14 +262,17 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.base_link_name
         ]
         self.rewards.pitch_up_on_obstacle.weight = 4.0
+        self.rewards.horse_rearing_bonus.weight = 5.0  # 重赏扬身动作
         self.rewards.front_legs_reach.weight = 4.0
+        self.rewards.front_legs_quiet_penalty.weight = -0.1 # 惩罚前腿搭台后乱蹬
+        self.rewards.rear_legs_drive_bonus.weight = 0.003    # 奖励后腿做正功发力 (数值需根据你的扭矩大小微调)
 
         # Joint penaltie
         # self.rewards.joint_torques_l2.weight = -2.5e-6
         # 测试 暂时取消此惩罚
-        self.rewards.joint_vel_l2.weight = -0.005
+        self.rewards.joint_vel_l2.weight = -0.001
         self.rewards.box_joint_vel_penalty.weight = -0.01 
-        self.rewards.joint_acc_l2.weight = -1.0e-7
+        self.rewards.joint_acc_l2.weight = -1.0e-8
         self.rewards.box_joint_acc_penalty.weight = -1.0e-5 # 伸缩关节的加速度惩罚，建议比全局高 1-2 个数量级 
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
@@ -252,7 +298,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
-        self.rewards.feet_air_time.weight = 1.0
+        self.rewards.feet_air_time.weight = 0.5
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact.weight = -0.01
