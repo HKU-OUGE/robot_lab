@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import torch
+import math
 from typing import TYPE_CHECKING
 
 import isaaclab.utils.math as math_utils
@@ -1240,7 +1241,7 @@ def front_legs_reach_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) ->
     return reward
 
 # ==========================================
-# 1. 像马一样扬身 (Horse Rearing Posture)
+# 1. 像马一样扬身 (Horse Rearing Posture) - 防破解版
 # ==========================================
 def horse_rearing_posture_bonus(
     env: ManagerBasedRLEnv, 
@@ -1248,40 +1249,50 @@ def horse_rearing_posture_bonus(
     asset_cfg: SceneEntityCfg, 
     front_foot_names: list,
     rear_foot_names: list,
-    pitch_threshold: float = 0.3
+    target_pitch_deg: float = 35.0,  # 目标仰角：35度 (不要让它竖直)
+    target_height_diff: float = 0.35 # 目标高度差：0.35米 (根据你的台阶高度调整)
 ) -> torch.Tensor:
     """
-    当机器人试图向前走时，极大地奖励身体的 Pitch（仰角）以及前脚相对后脚的高度差，
-    鼓励机器人像马一样扬起前身。
+    鼓励机器人扬起前身，但限制最大角度，并强制要求实际向前移动。
     """
     asset = env.scene[asset_cfg.name]
     
-    # 获取速度指令
+    # 1. 获取指令速度 和 真实速度
     velocity_command = env.command_manager.get_command(command_name)
     cmd_x = velocity_command[:, 0]
+    # 获取机器人基座在机身坐标系下的真实线速度
+    actual_vel_x = asset.data.root_lin_vel_b[:, 0] 
     
-    # 获取当前 Pitch 角 (基于重力投影)
+    # 2. 计算当前 Pitch 的 sin 值
     projected_gravity = asset.data.projected_gravity_b
     current_pitch_sin = -projected_gravity[:, 0] 
     
-    # 1. 找到前脚和后脚的索引
+    # 将目标角度转换为 sin 值
+    target_pitch_rad = math.radians(target_pitch_deg)
+    target_pitch_sin = math.sin(target_pitch_rad)
+    
+    # 3. 计算高度差
     front_foot_ids = asset.find_bodies(front_foot_names)[0]
     rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
-    
-    # 2. 获取前脚和后脚的 Z 轴高度 (取两只脚的平均高度)
-    # 这里真正用到了 body_pos_w 的 Z 轴数据
     front_feet_z = asset.data.body_pos_w[:, front_foot_ids, 2].mean(dim=1)
     rear_feet_z = asset.data.body_pos_w[:, rear_foot_ids, 2].mean(dim=1)
-    
-    # 3. 计算前脚相对后脚的高度差
     height_diff = front_feet_z - rear_feet_z
     
-    # 判定条件：向前走 且 仰角大于阈值
-    is_moving_forward = cmd_x > 0.1
-    is_pitching_up = current_pitch_sin > torch.sin(torch.tensor(pitch_threshold, device=env.device))
+    # ================= 核心修改区 =================
+    # 使用高斯核函数 (exp(-x^2))：越接近目标值，奖励越接近 1.0；偏离越远，奖励越趋近于 0
     
-    # 综合奖励：仰角越大 + 前脚比后脚越高，奖励越多 (过滤掉高度差为负的情况)
-    bonus = (current_pitch_sin + torch.clamp(height_diff, min=0.0)) * is_moving_forward * is_pitching_up
+    # 仰角奖励：控制在目标角度附近
+    pitch_reward = torch.exp(-5.0 * torch.square(current_pitch_sin - target_pitch_sin))
+    
+    # 高度差奖励：控制在目标高度差附近
+    height_reward = torch.exp(-5.0 * torch.square(height_diff - target_height_diff))
+    
+    # 判定条件：有前进指令 且 真实速度也在前进 (防止原地罚站)
+    is_commanding_forward = cmd_x > 0.1
+    is_actually_moving = actual_vel_x > 0.15 # 必须有真实的向前速度
+    
+    # 综合奖励
+    bonus = pitch_reward * height_reward * is_commanding_forward * is_actually_moving
     
     return bonus
 

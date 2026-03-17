@@ -115,7 +115,8 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
             "asset_cfg": SceneEntityCfg("robot"),
             "front_foot_names": ["FL_foot", "FR_foot"],
             "rear_foot_names": ["RL_foot", "RR_foot"],
-            "pitch_threshold": 0.1, # 约 15 度开始给奖励
+            "target_pitch_deg": 35.0,     # <==== 新参数：目标仰角(度)
+            "target_height_diff": 0.35,   # <==== 新参数：目标高度差(米)
         },
     )
 
@@ -262,7 +263,7 @@ class ArclabArcdogAdjustableLegRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.base_link_name
         ]
         self.rewards.pitch_up_on_obstacle.weight = 4.0
-        self.rewards.horse_rearing_bonus.weight = 5.0  # 重赏扬身动作
+        self.rewards.horse_rearing_bonus.weight = 3.0  # 重赏扬身动作
         self.rewards.front_legs_reach.weight = 4.0
         self.rewards.front_legs_quiet_penalty.weight = -0.1 # 惩罚前腿搭台后乱蹬
         self.rewards.rear_legs_drive_bonus.weight = 0.003    # 奖励后腿做正功发力 (数值需根据你的扭矩大小微调)
