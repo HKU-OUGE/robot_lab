@@ -36,5 +36,9 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.bodyflat_env_cfg:ArclabArcdogAdjustableLegBodyflatEnvCfg",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:ArclabArcdogAdjustableLegBodyflatPPORunnerCfg",
+        # ==========================================================
+        # 🌟 新增下面这一行，将 symmetric_ppo_cfg 映射到你的自定义配置类
+        # ==========================================================
+        "symmetric_ppo_cfg": f"{agents.__name__}.symmetric_ppo_cfg:ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg",
     },
 )

@@ -43,7 +43,13 @@ parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy 
 parser.add_argument("--recovery_mode", action="store_true", default=False, help="Whether to use recovery mode.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
 parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes.")
-parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
+
+# ==========================================
+# 🌟 修改点：在 argparse 中明确 agent 的 choices
+# ==========================================
+parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", 
+                    help="Name of the RL agent configuration entry point. Can be 'symmetric_ppo_cfg'.")
+
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -446,13 +452,31 @@ class ActorCriticSN(_BaseActorCritic):
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
+    
+    # =========================================================================
+    # 🌟 修改点：根据 args_cli.agent 动态拦截并覆盖 agent_cfg
+    # =========================================================================
+    if args_cli.agent == "symmetric_ppo_cfg":
+        print("[INFO] Using Symmetric PPO Algorithm and Config!")
+        from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo_cfg import ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg
+        
+        # 覆盖 config
+        agent_cfg = ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg()
+        # 强制指定 class_name，以便后续逻辑识别
+        agent_cfg.class_name = "SymmetricOnPolicyRunner"
+    else:
+        print("[INFO] Using Standard RSL-RL Config!")
+    # =========================================================================
+
     if IS_DISTRIBUTED:
         env_cfg.sim.device = f"cuda:{LOCAL_RANK}"
         agent_cfg.device = f"cuda:{LOCAL_RANK}"
         seed = (agent_cfg.seed or 0) + LOCAL_RANK
         env_cfg.seed = seed
         agent_cfg.seed = seed
+        
     # override configurations with non-hydra CLI arguments
+    # 注意：因为我们在上面覆盖了 agent_cfg，这里的 cli_args.update_rsl_rl_cfg 依然能正常工作！
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     agent_cfg.max_iterations = (
@@ -542,12 +566,27 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = CustomRecordVideo(env, **video_kwargs)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     # create runner from rsl-rl
-    if agent_cfg.class_name == "OnPolicyRunner":
+    
+    # =========================================================================
+    # 🌟 修改点：动态切换 RunnerClass 
+    # =========================================================================
+    if args_cli.agent == "symmetric_ppo_cfg" or agent_cfg.class_name == "SymmetricOnPolicyRunner":
+        from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo import SymmetricOnPolicyRunner
+        runner = SymmetricOnPolicyRunner(
+            env, 
+            agent_cfg.to_dict(), 
+            config=env_cfg,       # <==== 补充缺失的 config 参数！
+            log_dir=log_dir, 
+            device=agent_cfg.device
+        )
+    elif agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+    # =========================================================================
+
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     # load the checkpoint

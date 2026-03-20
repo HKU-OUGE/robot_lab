@@ -311,6 +311,22 @@ def main():
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlBaseRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    
+    # =========================================================================
+    # 🌟 修改点 1：拦截并覆盖 agent_cfg (针对 symmetric_ppo_cfg)
+    # =========================================================================
+    if args_cli.agent == "symmetric_ppo_cfg":
+        print("[INFO] Using Symmetric PPO Algorithm and Config for Playback!")
+        from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo_cfg import ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg
+        
+        agent_cfg = ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg()
+        agent_cfg.class_name = "SymmetricOnPolicyRunner"
+        
+        # 如果需要重新应用 CLI 参数覆盖，可以取消下面这行的注释
+        # if hasattr(cli_args, 'update_rsl_rl_cfg'):
+        #     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    # =========================================================================
+
     if args_cli.moe:
         import rsl_rl.modules.actor_critic as ac
         ac.ActorCriticMoE = ActorCriticMoE
@@ -441,12 +457,27 @@ def main():
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
-    if agent_cfg.class_name == "OnPolicyRunner":
+    
+    # =========================================================================
+    # 🌟 修改点 2：动态切换 RunnerClass (针对 SymmetricOnPolicyRunner)
+    # =========================================================================
+    if agent_cfg.class_name == "SymmetricOnPolicyRunner":
+        from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo import SymmetricOnPolicyRunner
+        runner = SymmetricOnPolicyRunner(
+            env, 
+            agent_cfg.to_dict(), 
+            log_dir=None, 
+            device=agent_cfg.device,
+            config=env_cfg  # 传入自定义需要的 config 参数
+        )
+    elif agent_cfg.class_name == "OnPolicyRunner":
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     elif agent_cfg.class_name == "DistillationRunner":
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
+    # =========================================================================
+    
     runner.load(resume_path)
 
     # obtain the trained policy for inference
@@ -710,8 +741,8 @@ def main():
             # Exit the play loop after recording one video
             if timestep == args_cli.video_length:
                 break
-        if args_cli.keyboard:
-            rsl_rl_utils.camera_follow(env)
+        # if args_cli.keyboard:
+        #     rsl_rl_utils.camera_follow(env)
 
         # time delay for real-time evaluation
         sleep_time = dt - (time.time() - start_time)
