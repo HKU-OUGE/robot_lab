@@ -40,7 +40,7 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
-            "stand_still_scale": 5.0,
+            "stand_still_scale": 3.0,
             "velocity_threshold": 0.5,
         },
     )
@@ -141,10 +141,14 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         # reduce action scale
         # self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.scale = {
-            ".*_box_joint": 0.02, 
+            ".*_box_joint": 0.03, 
             ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
         }
-        self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
+        # self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
+        self.actions.joint_pos.clip = {
+            ".*_box_joint": (-1.0, 1.0),  #伸缩腿的原始动作只能在 [-1.0, 1.0] 之间
+            ".*_(hip_joint|thigh_joint|calf_joint)$": (-60.0, 60.0) # 旋转关节保持宽松限制
+        }
         self.actions.joint_pos.joint_names = self.joint_names
 
         # ------------------------------Events------------------------------
@@ -169,15 +173,15 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.is_terminated.weight = -20
 
         # Root penalties
-        self.rewards.lin_vel_z_l2.weight = -0.3
-        self.rewards.ang_vel_xy_l2.weight = -0.2
+        self.rewards.lin_vel_z_l2.weight = -1.0
+        self.rewards.ang_vel_xy_l2.weight = -0.5
         self.rewards.flat_orientation_l2.weight = -5.0
-        self.rewards.base_height_l2.weight = -3
-        self.rewards.base_height_l2.params["target_height"] = 0.40
+        self.rewards.base_height_l2.weight = -1.0
+        self.rewards.base_height_l2.params["target_height"] = 0.44
         # 设置静止水平奖励的权重
         # 这是一个正向奖励(Bonus)，所以权重为正。
         # 建议值: 0.5 ~ 2.0。如果机器人在坡上静止时还是歪的，可以调大这个值。
-        self.rewards.stand_still_flat.weight = 3.0 
+        self.rewards.stand_still_flat.weight = 3.0
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -190,9 +194,9 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_torques_l2.weight = -2.5e-6
         # 测试 暂时取消此惩罚
         self.rewards.joint_vel_l2.weight = -0.005
-        self.rewards.box_joint_vel_penalty.weight = -0.01 
+        self.rewards.box_joint_vel_penalty.weight = -0.05
         self.rewards.joint_acc_l2.weight = -1.0e-7
-        self.rewards.box_joint_acc_penalty.weight = -1.0e-5 # 伸缩关节的加速度惩罚，建议比全局高 1-2 个数量级 
+        self.rewards.box_joint_acc_penalty.weight = -1.0e-4 # 伸缩关节的加速度惩罚，建议比全局高 1-2 个数量级 
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
         self.rewards.joint_vel_limits.weight = -0.3
@@ -204,7 +208,7 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Contact sensor
         self.rewards.undesired_contacts.weight = -1.5
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = [
-            "base", "trunk", ".*_hip", ".*_thigh", ".*_calf"
+            "base", "trunk", ".*_hip", ".*_thigh", ".*calf"
         ]
 
         # self.rewards.contact_forces.weight = -0.005
@@ -217,8 +221,8 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.track_ang_vel_z_exp.weight = 2.0
 
         # Others
-        self.rewards.feet_air_time.weight = 3.0
-        self.rewards.feet_air_time.params["threshold"] = 0.4
+        self.rewards.feet_air_time.weight = 0.3
+        self.rewards.feet_air_time.params["threshold"] = 0.25
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
         self.rewards.feet_contact.weight = -0.01
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
@@ -233,15 +237,15 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         # self.rewards.joint_power.weight = -2e-5
         # 测试 暂时取消
-        self.rewards.joint_power.weight = -2e-6
+        self.rewards.joint_power.weight = -2e-5
         self.rewards.stand_still_without_cmd.weight = -3.5
         # self.rewards.joint_position_penalty.weight = -0.9
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
         self.rewards.rotate_joint_pos_penalty.weight = -0.03
-        self.rewards.prismatic_joint_pos_penalty.weight = -3
-        self.rewards.feet_height_exp.weight = 2.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.18
+        self.rewards.prismatic_joint_pos_penalty.weight = -4.0
+        self.rewards.feet_height_exp.weight = 1.5
+        self.rewards.feet_height_exp.params["target_height"] = 0.12
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -250,8 +254,8 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
         #     self.foot_link_name
         # ]
-        self.rewards.feet_gait.weight = 2.0
-        self.rewards.feet_gait.params["velocity_threshold"] = 0.5
+        self.rewards.feet_gait.weight = 5.0
+        self.rewards.feet_gait.params["velocity_threshold"] = 0.1
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
             ("FL_foot", "RR_foot"),

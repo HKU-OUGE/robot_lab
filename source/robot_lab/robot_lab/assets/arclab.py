@@ -25,7 +25,8 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 
 ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg/arcdog_adjustable_leg.usd",
+        usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg_short_limit/arcdog_adjustable_leg_short_limit.usd",
+        # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg/arcdog_adjustable_leg.usd",
         # usd_path=f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/Arclab/Arcdog_adjustable_leg_fixed_joint/arcdog_adjustable_leg_fixed_joint.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -42,7 +43,7 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.40),
+        pos=(0.0, 0.0, 0.44),
         # pos=(0.0, 0.0, 0.35), #for fixed joint
         joint_pos={
             "FL_hip_joint": 0.0,
@@ -57,10 +58,10 @@ ARCLAB_ARCDOG_ADJUSTABLE_LEG_CFG = ArticulationCfg(
             "FR_calf_joint": -1.3,
             "RL_calf_joint": -1.3,
             "RR_calf_joint": -1.3,
-            "FL_box_joint": 0.1,
-            "FR_box_joint": 0.1,
-            "RL_box_joint": 0.1,
-            "RR_box_joint": 0.1,
+            "FL_box_joint": 0.03,
+            "FR_box_joint": 0.03,
+            "RL_box_joint": 0.03,
+            "RR_box_joint": 0.03,
         },
         joint_vel={".*": 0.0},
     ),
