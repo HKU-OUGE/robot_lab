@@ -66,6 +66,6 @@ class ArclabArcdogAdjustableLegBodyflatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
-        desired_kl=0.02,
+        desired_kl=0.01,
         max_grad_norm=1.0,
     )
