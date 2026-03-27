@@ -1379,3 +1379,21 @@ def roll_yaw_orientation_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityC
     return roll_penalty
 
 
+def action_rate_l2_by_name(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    通过 SceneEntityCfg 指定关节名称，只惩罚这些关节的动作变化率。
+    """
+    # 获取机器人资产
+    asset = env.scene[asset_cfg.name]
+    
+    # 根据传入的正则表达式解析出具体的关节索引
+    # 注意：这里获取的是在驱动关节列表中的索引，通常与 action 的索引一一对应
+    joint_indices, _ = asset.find_joints(asset_cfg.joint_names)
+    
+    # 切片提取特定关节的动作
+    current_action = env.action_manager.action[:, joint_indices]
+    prev_action = env.action_manager.prev_action[:, joint_indices]
+    
+    return torch.sum(torch.square(current_action - prev_action), dim=1)
+
+
