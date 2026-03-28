@@ -216,14 +216,14 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.joint_pos_limits.params["asset_cfg"] = SceneEntityCfg(
             "robot", joint_names=".*_(hip|thigh|calf)_joint"
         )
-        self.rewards.box_joint_pos_limits.weight = -4.0 
+        self.rewards.box_joint_pos_limits.weight = -10.0 
         # 禁止超速
         self.rewards.joint_vel_limits.weight = -0.3
 
         # Action penalties
         self.rewards.action_rate_l2.weight = -0.08
         # UNUESD self.rewards.action_l2.weight = 0.0
-        self.rewards.box_joint_action_rate.weight = -0.2
+        self.rewards.box_joint_action_rate.weight = -0.4
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -1.5
