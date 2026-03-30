@@ -40,7 +40,7 @@ class ArcdogAdjustableLegRewardsCfg(RewardsCfg):
         params={
             "command_name": "base_velocity",
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
-            "stand_still_scale": 5.0,
+            "stand_still_scale": 1.25,
             "velocity_threshold": 0.5,
         },
     )
@@ -264,7 +264,7 @@ class ArclabArcdogAdjustableLegBodyflatEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
         # self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
         self.rewards.rotate_joint_pos_penalty.weight = -0.03
-        self.rewards.prismatic_joint_pos_penalty.weight = -15
+        self.rewards.prismatic_joint_pos_penalty.weight = -20
         self.rewards.feet_height_exp.weight = 1.5
         self.rewards.feet_height_exp.params["target_height"] = 0.08
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
