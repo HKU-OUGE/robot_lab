@@ -537,7 +537,7 @@ def action_sync(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, joint_groups:
 
 
 def feet_air_time(
-    env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float
+    env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float, command_threshold: float = 0.25 # 新增：指令速度阈值
 ) -> torch.Tensor:
     """Reward long steps taken by the feet using L2-kernel.
 
@@ -554,7 +554,7 @@ def feet_air_time(
     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
     reward = torch.sum((last_air_time - threshold) * first_contact, dim=1)
     # no reward for zero command
-    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > command_threshold
     reward *= torch.clamp(-env.scene["robot"].data.projected_gravity_b[:, 2], 0, 0.7) / 0.7
     return reward
 
@@ -1396,4 +1396,80 @@ def action_rate_l2_by_name(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) ->
     
     return torch.sum(torch.square(current_action - prev_action), dim=1)
 
+def stand_still_joint_vel_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    自定义惩罚：当机器人收到静止指令时，严厉惩罚任何关节的速度（即摇晃和抽搐）。
+    不影响移动时的步态，也不限制静止时的具体关节角度。
+    """
+    # 获取机器人实体
+    robot = env.scene[asset_cfg.name]
+    
+    # 获取速度指令 (通常是 [lin_x, lin_y, ang_z])
+    command = env.command_manager.get_command(command_name)
+    
+    # 计算指令速度的绝对大小 (L2 Norm)
+    # 取前三个维度计算模长，代表整体的运动意图
+    command_norm = torch.norm(command[:, :3], dim=1)
+    
+    # 判断是否处于“静止状态” (指令速度小于阈值)
+    is_standing_still = command_norm < command_threshold
+    
+    # 计算所有关节速度的平方和 (dof_vel^2)
+    # 速度越大，平方后的惩罚越重
+    joint_vel_sq = torch.sum(torch.square(robot.data.joint_vel), dim=1)
+    
+    # 只有在静止时才输出惩罚值，移动时输出 0
+    return is_standing_still.float() * joint_vel_sq
+
+def stand_still_base_ang_vel_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    惩罚静止时的机身角速度。
+    允许机器人以任何姿态站立，但严厉惩罚机身的晃动（Roll, Pitch, Yaw 的变化率）。
+    这能有效迫使策略学会“柔和纠正”，增加系统的阻尼，防止真机震荡发散。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    
+    # 判断是否处于静止指令
+    command_norm = torch.norm(command[:, :3], dim=1)
+    is_standing_still = command_norm < command_threshold
+    
+    # 获取机身在世界坐标系下的角速度 (root_ang_vel_w)
+    # 也可以使用相对于机身坐标系的角速度 (root_ang_vel_b)，效果类似
+    base_ang_vel_sq = torch.sum(torch.square(asset.data.root_ang_vel_w), dim=1)
+    
+    return is_standing_still.float() * base_ang_vel_sq
+
+
+def stand_still_base_lin_vel_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """
+    惩罚静止时的机身线速度。
+    抑制机身的 X, Y, Z 平移晃动（例如前后左右平移或上下起伏）。
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    
+    # 判断是否处于静止指令
+    command_norm = torch.norm(command[:, :3], dim=1)
+    is_standing_still = command_norm < command_threshold
+    
+    # 获取机身在世界坐标系下的线速度的平方和
+    base_lin_vel_sq = torch.sum(torch.square(asset.data.root_lin_vel_w), dim=1)
+    
+    return is_standing_still.float() * base_lin_vel_sq
 

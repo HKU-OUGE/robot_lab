@@ -492,7 +492,8 @@ class RewardsCfg:
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=""),
-            "threshold": 0.5,
+            "threshold": 0.5,           # 滞空时间要求
+            "command_threshold": 0.25,  # ！！！真正的指令死区 add since policy 2026-04-04_22-00-28
         },
     )
 
