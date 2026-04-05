@@ -48,7 +48,14 @@ class SymmetricPPO(PPO):
                     original_action_mean = self.net.actor(flat_obs)
                     
                 original_action_mirrored = self.symmetry_tool.mirror_action(original_action_mean)
-                sym_loss = nn.functional.mse_loss(mirrored_action_mean, original_action_mirrored)
+                # sym_loss = nn.functional.mse_loss(mirrored_action_mean, original_action_mirrored)
+                # 【关键修改】：只对前 12 个关节（Hip, Thigh, Calf）计算对称性 Loss
+                # 忽略最后 4 个 box_joint，让它们自由发挥以适应地形
+                sym_loss = nn.functional.mse_loss(
+                    mirrored_action_mean[:, :12], 
+                    original_action_mirrored[:, :12]
+                )
+                
                 
                 # 反向传播：这会将对称性梯度【叠加】到原版 PPO 的梯度上
                 (self.symmetry_coef * sym_loss).backward()
