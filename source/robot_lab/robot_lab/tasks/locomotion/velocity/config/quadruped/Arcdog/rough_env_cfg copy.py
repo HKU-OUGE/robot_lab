@@ -3,10 +3,8 @@
 
 from isaaclab.utils import configclass
 from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.managers import SceneEntityCfg, TerminationTermCfg 
-import robot_lab.tasks.locomotion.velocity.mdp as mdp
 from robot_lab.tasks.locomotion.velocity.velocity_env_cfg import (
-    LocomotionVelocityRoughEnvCfg, RewardsCfg,
+    LocomotionVelocityRoughEnvCfg,
 )
 
 ##
@@ -20,42 +18,7 @@ from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort:skip
 
 
 @configclass
-class ArcdogRewardsCfg(RewardsCfg):
-    """Reward terms for the MDP."""
-
-    # =====================================================================
-    # 新增：对角腿对称性惩罚 (解决单腿异常抬高 / 强制 Trot 步态)
-    # =====================================================================
-    gait_symmetry_penalty = RewTerm(
-        func=mdp.diagonal_gait_symmetry_penalty, # 指向我们在第一步写的底层函数
-        weight=0.0, # 默认设为 0，在主 EnvCfg 中激活
-        params={
-            # 使用正则表达式匹配 4 个足端刚体
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-        },
-    )
-
-    # =====================================================================
-    # 新增：动作二阶导数 (动作加速度) 惩罚，用于提高动作平滑度
-    # =====================================================================
-    action_acceleration_penalty = RewTerm(
-        func=mdp.action_acceleration_l2,
-        weight=0.0, # 默认设为 0，在主 EnvCfg 中激活
-    )
-
-    feet_stance_width = RewTerm(
-        func=mdp.feet_stance_width_adaptive_penalty, 
-        weight= 0.0,  # 建议保持在 -1.0 到 -2.0 之间
-        params={
-            "min_width": 0.32,               
-            "command_speed_threshold": 0.25,  # 【关键】阈值调小！指令速度低于 0.15m/s 就视为“准备静止”，开始张开腿
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-        },
-    )
-
-@configclass
 class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
-    rewards: ArcdogRewardsCfg = ArcdogRewardsCfg()
     base_link_name = "base"
     trunk_link_name = "trunk"
     hip_link_name = ".*_hip"
@@ -99,7 +62,7 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Actions------------------------------
         # reduce action scale
-        self.actions.joint_pos.scale = 0.25
+        self.actions.joint_pos.scale = 0.1
         self.actions.joint_pos.clip = {".*": (-60.0, 60.0)}
         self.actions.joint_pos.joint_names = self.joint_names
 
@@ -123,9 +86,9 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Root penalties
         self.rewards.lin_vel_z_l2.weight = -1.0
         self.rewards.ang_vel_xy_l2.weight = -0.5
-        self.rewards.flat_orientation_l2.weight = -4.0
-        self.rewards.base_height_l2.weight = -10.0
-        self.rewards.base_height_l2.params["target_height"] = 0.365
+        self.rewards.flat_orientation_l2.weight = -2.0
+        self.rewards.base_height_l2.weight = -4.5
+        self.rewards.base_height_l2.params["target_height"] = 0.35
         self.rewards.base_height_l2.params["asset_cfg"].body_names = [
             self.base_link_name
         ]
@@ -138,15 +101,14 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # self.rewards.joint_torques_l2.weight = -2.5e-6
         # 测试 暂时取消此惩罚
         self.rewards.joint_vel_l2.weight = -0.005
-        # self.rewards.joint_acc_l2.weight = -1.0e-6
+        self.rewards.joint_acc_l2.weight = -1.0e-7
         self.rewards.joint_pos_limits.weight = -0.05
         # 禁止超速
         self.rewards.joint_vel_limits.weight = -0.05
 
         # Action penalties
-        self.rewards.action_rate_l2.weight = -0.5
+        self.rewards.action_rate_l2.weight = -0.04
         # UNUESD self.rewards.action_l2.weight = 0.0
-        self.rewards.action_acceleration_penalty.weight = -0.06
 
         # Contact sensor
         self.rewards.undesired_contacts.weight = -0.1
@@ -160,14 +122,14 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # ]
 
         # Velocity-tracking rewards
-        self.rewards.track_lin_vel_xy_exp.weight = 8.0
-        self.rewards.track_ang_vel_z_exp.weight = 2.5
+        self.rewards.track_lin_vel_xy_exp.weight = 3.5
+        self.rewards.track_ang_vel_z_exp.weight = 3.0
 
         # Others
-        self.rewards.feet_air_time.weight = 4.0
+        self.rewards.feet_air_time.weight = 3.0
         self.rewards.feet_air_time.params["threshold"] = 0.4
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = [self.foot_link_name]
-        self.rewards.feet_contact.weight = -0.05
+        self.rewards.feet_contact.weight = -0.1
         self.rewards.feet_contact.params["sensor_cfg"].body_names = [
             self.foot_link_name
         ]
@@ -180,23 +142,23 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.feet_slide.params["asset_cfg"].body_names = [self.foot_link_name]
         # self.rewards.joint_power.weight = -2e-5
         # 测试 暂时取消
-        self.rewards.joint_power.weight = -2e-7
-        self.rewards.stand_still_without_cmd.weight = -4.0
-        self.rewards.joint_position_penalty.weight = -0.8
-        self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.5
+        self.rewards.joint_power.weight = -2e-6
+        self.rewards.stand_still_without_cmd.weight = -3.5
+        self.rewards.joint_position_penalty.weight = -0.4
+        self.rewards.joint_position_penalty.params["stand_still_scale"] = 1.8
         self.rewards.joint_position_penalty.params["velocity_threshold"] = 0.3
-        self.rewards.feet_height_exp.weight = 1.0
-        self.rewards.feet_height_exp.params["target_height"] = 0.12
+        self.rewards.feet_height_exp.weight = 2.0
+        self.rewards.feet_height_exp.params["target_height"] = 0.10
         self.rewards.feet_height_exp.params["asset_cfg"].body_names = [
             self.foot_link_name
         ]  
-        self.rewards.feet_height_body_exp.weight = -0.5
-        self.rewards.feet_height_body_exp.params["target_height"] = -0.23
-        self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
-            self.foot_link_name
-        ]
-        self.rewards.feet_gait.weight = 5.0
-        self.rewards.feet_gait.params["velocity_threshold"] = 0.5
+        # self.rewards.feet_height_body_exp.weight = -0.5
+        # self.rewards.feet_height_body_exp.params["target_height"] = -0.23
+        # self.rewards.feet_height_body_exp.params["asset_cfg"].body_names = [
+        #     self.foot_link_name
+        # ]
+        self.rewards.feet_gait.weight = 4.0
+        self.rewards.feet_gait.params["velocity_threshold"] = 0.1
         # trotting
         self.rewards.feet_gait.params["synced_feet_pair_names"] = (
             ("FL_foot", "RR_foot"),
@@ -207,8 +169,6 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #     ("FL_foot", "FR_foot"),
         #     ("RR_foot", "RL_foot"),
         # ) 
-        # self.rewards.gait_symmetry_penalty.weight = -3.0
-        self.rewards.feet_stance_width.weight = -5.0
         # If the weight of rewards is 0, set rewards to None
         if self.__class__.__name__ == "ArclabArcdogRoughEnvCfg":
             self.disable_zero_weight_rewards()
@@ -217,9 +177,9 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.illegal_contact.params["sensor_cfg"].body_names = [
             self.base_link_name,
             self.trunk_link_name,
-            # self.abad_link_name,
-            # self.knee_link_name,
-            # self.hip_link_name,
+            self.abad_link_name,
+            self.knee_link_name,
+            self.hip_link_name,
         ]
         # self.terminations.illegal_contact = None
         # ------------------------------Curriculums------------------------------
@@ -228,6 +188,6 @@ class ArclabArcdogRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # ------------------------------Commands------------------------------
         self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.lin_vel_y = (-0.8, 0.8)
+        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
         self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.resampling_time_range = (5.0, 10.0)
