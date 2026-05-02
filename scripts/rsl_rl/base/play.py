@@ -362,6 +362,13 @@ def main():
         env_cfg.terminations.time_out = None
         env_cfg.commands.base_velocity.debug_vis = True
 
+         # =========================================================================
+        # 🌟 新增：彻底禁用环境自带的随机速度指令重采样，防止与键盘冲突
+        # =========================================================================
+        if hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "base_velocity"):
+            env_cfg.commands.base_velocity.resampling_time_range = (1000000.0, 1000000.0)
+        # =========================================================================
+
         kb_cfg = Se2KeyboardCfg(
             v_x_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_x[1]),
             v_y_sensitivity=float(env_cfg.commands.base_velocity.ranges.lin_vel_y[1]),
@@ -370,9 +377,19 @@ def main():
         )
         controller = Se2Keyboard(kb_cfg)  # ← 用配置类构造
 
-        # 返回形状 [1, 3] 的 (vx, vy, wz)
+        # # 返回形状 [1, 3] 的 (vx, vy, wz)
+        # env_cfg.observations.policy.velocity_commands = ObsTerm(
+        #     func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+        # )
+
+        # 获取原配置中的历史长度设置，防止被覆盖丢失
+        old_history_len = getattr(env_cfg.observations.policy.velocity_commands, "history_length", 0)
+        old_flatten = getattr(env_cfg.observations.policy.velocity_commands, "flatten_history_dim", False)
+
         env_cfg.observations.policy.velocity_commands = ObsTerm(
             func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+            history_length=old_history_len,       # 把历史长度加回来！
+            flatten_history_dim=old_flatten       # 保持原有的展平设置
         )
 
 
@@ -619,18 +636,40 @@ def main():
             print(f"[WARN] Observation manager terms not accessible: {e}", flush=True)
         print("======================================================\n", flush=True)
 
-        # print action space vector
-        print("\n====== [Action Vector Mapping] ======", flush=True)
+        # print action space vector and mapped targets
+        print("\n====== [Action & Target Mapping] ======", flush=True)
         idx = 0
         for group_name, term in env.unwrapped.action_manager._terms.items():
             print(f"[ACTION GROUP] {group_name}", flush=True)
+            
+            # 获取关节名称
             joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-            term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-            for i, val in enumerate(term_actions):
+            
+            # 1. 获取网络输出的原始动作 (Raw Action)
+            raw_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+            
+            # 2. 获取真正传给机器人的映射后目标位置 (Mapped Target Pos)
+            # 在 IsaacLab 中，处理后的目标动作通常存在 processed_actions 或类似属性中
+            mapped_targets = None
+            if hasattr(term, "processed_actions"):
+                mapped_targets = term.processed_actions[0].cpu().numpy()
+            elif hasattr(term, "target_joint_pos"): # 兼容不同版本的 IsaacLab/Orbit
+                mapped_targets = term.target_joint_pos[0].cpu().numpy()
+            
+            # 遍历打印对比
+            for i, val in enumerate(raw_actions):
                 joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                
+                if mapped_targets is not None:
+                    target_val = mapped_targets[i]
+                    print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  ==>  Mapped Target: {target_val:>+7.4f}", flush=True)
+                else:
+                    # 如果找不到 processed_actions 属性，尝试打印 scale 帮助分析
+                    scale_val = term.action_scale[i].item() if hasattr(term, "action_scale") else "unknown"
+                    print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  (Scale: {scale_val})", flush=True)
+                    
             idx += term.action_dim
-        print("=====================================\n", flush=True)
+        print("=======================================\n", flush=True)
 
         debug_print = True
         time.sleep(0.1)  # avoid stdout loss
@@ -645,17 +684,40 @@ def main():
     while simulation_app.is_running():
         # print action space vector
         if args_cli.debug and args_cli.keyboard:
-            print("\n====== [Action Vector Mapping] ======", flush=True)
+            # print action space vector and mapped targets
+            print("\n====== [Action & Target Mapping] ======", flush=True)
             idx = 0
             for group_name, term in env.unwrapped.action_manager._terms.items():
                 print(f"[ACTION GROUP] {group_name}", flush=True)
+                
+                # 获取关节名称
                 joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-                term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-                for i, val in enumerate(term_actions):
+                
+                # 1. 获取网络输出的原始动作 (Raw Action)
+                raw_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+                
+                # 2. 获取真正传给机器人的映射后目标位置 (Mapped Target Pos)
+                # 在 IsaacLab 中，处理后的目标动作通常存在 processed_actions 或类似属性中
+                mapped_targets = None
+                if hasattr(term, "processed_actions"):
+                    mapped_targets = term.processed_actions[0].cpu().numpy()
+                elif hasattr(term, "target_joint_pos"): # 兼容不同版本的 IsaacLab/Orbit
+                    mapped_targets = term.target_joint_pos[0].cpu().numpy()
+                
+                # 遍历打印对比
+                for i, val in enumerate(raw_actions):
                     joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+                    
+                    if mapped_targets is not None:
+                        target_val = mapped_targets[i]
+                        print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  ==>  Mapped Target: {target_val:>+7.4f}", flush=True)
+                    else:
+                        # 如果找不到 processed_actions 属性，尝试打印 scale 帮助分析
+                        scale_val = term.action_scale[i].item() if hasattr(term, "action_scale") else "unknown"
+                        print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  (Scale: {scale_val})", flush=True)
+                        
                 idx += term.action_dim
-            print("=====================================\n", flush=True)
+            print("=======================================\n", flush=True)
             # === NEW: also print root_pos_w & (optional) ground/adjusted target
             _print_root_and_target(env)
             # # 取出并打印某个 env 的 height_scan（这里以 env_id = 0 为例）
@@ -727,6 +789,29 @@ def main():
                     print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
                 idx += term.action_dim
             print("=====================================\n", flush=True)
+
+        # =========================================================================
+        # 🌟 新增：将键盘/手柄的指令同步给 CommandManager，让绿色箭头动起来！
+        # =========================================================================
+        if args_cli.keyboard or args_cli.se2_gamepad:
+            try:
+                # 获取环境中的 base_velocity 指令项
+                cmd_term = env.unwrapped.command_manager._terms.get("base_velocity")
+                if cmd_term is not None:
+                    # 获取当前控制器的最新指令
+                    if args_cli.keyboard:
+                        cur_cmd = controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
+                    else:
+                        cur_cmd = se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
+                    
+                    # 强行覆盖 CommandManager 的内部指令状态 (IsaacLab 中通常是 vel_command_b)
+                    if hasattr(cmd_term, "vel_command_b"):
+                        cmd_term.vel_command_b[:] = cur_cmd
+                    elif hasattr(cmd_term, "command"):
+                        cmd_term.command[:] = cur_cmd
+            except Exception as e:
+                pass
+        # =========================================================================
 
         start_time = time.time()
         # run everything in inference mode
