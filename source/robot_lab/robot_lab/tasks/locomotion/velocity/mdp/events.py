@@ -19,6 +19,104 @@ from isaaclab.managers import ManagerTermBase
 # if TYPE_CHECKING:
 #     from isaaclab.envs import ManagerBasedRLEnv
 
+
+def reset_root_state_highstep_approach(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    pose_range: dict[str, tuple[float, float]],
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    flat_patch_key: str = "target",
+    high_origin_threshold: float = 0.035,
+    low_patch_z_margin: float = 0.04,
+    approach_ratio: float = 0.75,
+    approach_distance_range: tuple[float, float] = (1.65, 2.65),
+    approach_yaw_noise_range: tuple[float, float] = (-0.25, 0.25),
+):
+    """Reset high-step training episodes near climb approaches when possible.
+
+    Standard mesh ``box`` and ``pyramid_stairs`` terrains place their terrain
+    origin on the high central platform. A uniform reset around that origin
+    mostly creates "walk down/from top" episodes. For high-step training, a
+    subset of high-origin terrains is reset on lower flat patches and yawed
+    toward the origin, while inverse/pit/flat terrains keep the usual reset.
+    """
+    asset: RigidObject | Articulation = env.scene[asset_cfg.name]
+
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device)
+
+    root_states = asset.data.default_root_state[env_ids].clone()
+    env_origins = env.scene.env_origins[env_ids]
+    num_envs = len(env_ids)
+
+    # Default Isaac Lab style uniform reset around env origin.
+    range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    ranges = torch.tensor(range_list, device=asset.device)
+    pose_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (num_envs, 6), device=asset.device)
+    positions = root_states[:, 0:3] + env_origins + pose_samples[:, 0:3]
+
+    terrain = getattr(env.scene, "terrain", None)
+    flat_patches = None if terrain is None else terrain.flat_patches.get(flat_patch_key)
+    terrain_levels = None if terrain is None else getattr(terrain, "terrain_levels", None)
+    terrain_types = None if terrain is None else getattr(terrain, "terrain_types", None)
+
+    if flat_patches is not None and terrain_levels is not None and terrain_types is not None:
+        levels = terrain_levels[env_ids]
+        types = terrain_types[env_ids]
+        patches = flat_patches[levels, types]  # (N, num_patches, 3), world-frame surface positions
+
+        high_origin = env_origins[:, 2] > high_origin_threshold
+        if approach_ratio < 1.0:
+            high_origin &= torch.rand(num_envs, device=asset.device) < approach_ratio
+
+        if torch.any(high_origin):
+            patch_z = patches[:, :, 2]
+            low_patch_mask = patch_z < (env_origins[:, 2:3] - low_patch_z_margin)
+
+            patch_xy = patches[:, :, :2]
+            origin_xy = env_origins[:, None, :2]
+            dist_to_origin = torch.norm(patch_xy - origin_xy, dim=-1)
+            target_dist = math_utils.sample_uniform(
+                approach_distance_range[0],
+                approach_distance_range[1],
+                (num_envs,),
+                device=asset.device,
+            )
+            score = torch.abs(dist_to_origin - target_dist[:, None])
+            score = torch.where(low_patch_mask, score, torch.full_like(score, 1.0e6))
+
+            # If the patch sampler did not find a lower patch for a tile, fall
+            # back to the lowest available flat patch instead of spawning on top.
+            no_low_patch = ~torch.any(low_patch_mask, dim=1)
+            score = torch.where(no_low_patch[:, None], patch_z, score)
+            selected_patch_ids = torch.argmin(score, dim=1)
+            selected_patches = patches[torch.arange(num_envs, device=asset.device), selected_patch_ids]
+
+            positions[high_origin] = selected_patches[high_origin] + root_states[high_origin, 0:3]
+
+            direction = env_origins[:, :2] - selected_patches[:, :2]
+            approach_yaw = torch.atan2(direction[:, 1], direction[:, 0])
+            yaw_noise = math_utils.sample_uniform(
+                approach_yaw_noise_range[0],
+                approach_yaw_noise_range[1],
+                (num_envs,),
+                device=asset.device,
+            )
+            pose_samples[high_origin, 5] = approach_yaw[high_origin] + yaw_noise[high_origin]
+
+    orientations_delta = math_utils.quat_from_euler_xyz(pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5])
+    orientations = math_utils.quat_mul(root_states[:, 3:7], orientations_delta)
+
+    range_list = [velocity_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    ranges = torch.tensor(range_list, device=asset.device)
+    velocity_samples = math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (num_envs, 6), device=asset.device)
+    velocities = root_states[:, 7:13] + velocity_samples
+
+    asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
+    asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
+
+
 def randomize_rigid_body_inertia(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,

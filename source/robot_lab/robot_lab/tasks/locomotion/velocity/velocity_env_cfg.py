@@ -149,6 +149,113 @@ class ActionsCfg:
         asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True, clip=None, preserve_order=True
     )
 
+# @configclass
+# class ObservationsCfg:
+#     """Observation specifications for the MDP."""
+
+#     @configclass
+#     class PolicyCfg(ObsGroup):
+#         """Observations for policy group."""
+
+#         # observation terms (order preserved)
+#         base_lin_vel = ObsTerm(
+#             func=mdp.base_lin_vel,
+#             noise=Unoise(n_min=-0.1, n_max=0.1),
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+#         base_ang_vel = ObsTerm(
+#             func=mdp.base_ang_vel,
+#             noise=Unoise(n_min=-0.2, n_max=0.2),
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+#         projected_gravity = ObsTerm(
+#             func=mdp.projected_gravity,
+#             noise=Unoise(n_min=-0.05, n_max=0.05),
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+#         velocity_commands = ObsTerm(
+#             func=mdp.generated_commands,
+#             params={"command_name": "base_velocity"},
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+#         joint_pos = ObsTerm(
+#             func=mdp.joint_pos_rel,
+#             noise=Unoise(n_min=-0.01, n_max=0.01),
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+#             history_length=10,
+#         )
+#         joint_vel = ObsTerm(
+#             func=mdp.joint_vel_rel,
+#             noise=Unoise(n_min=-0.2, n_max=0.2),
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+#             history_length=10,
+#         )
+#         actions = ObsTerm(
+#             func=mdp.last_action,
+#             clip=(-100.0, 100.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+#         height_scan = ObsTerm(
+#             func=mdp.height_scan,
+#             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+#             noise=Unoise(n_min=-0.1, n_max=0.1),
+#             clip=(-1.0, 1.0),
+#             scale=1.0,
+#             history_length=10,
+#         )
+
+#         def __post_init__(self):
+#             self.enable_corruption = True
+#             self.concatenate_terms = True
+
+#     @configclass
+#     class CriticCfg(ObsGroup):
+#         """Observations for critic group."""
+
+#         # observation terms (order preserved)
+#         base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=1.0, clip=(-100.0, 100.0))
+#         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=1.0, clip=(-100.0, 100.0))
+#         projected_gravity = ObsTerm(func=mdp.projected_gravity, scale=1.0, clip=(-100.0, 100.0))
+#         velocity_commands = ObsTerm(
+#             func=mdp.generated_commands, params={"command_name": "base_velocity"}, scale=1.0, clip=(-100.0, 100.0)
+#         )
+#         joint_pos = ObsTerm(
+#             func=mdp.joint_pos_rel,
+#             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+#             scale=1.0,
+#             clip=(-100.0, 100.0),
+#         )
+#         joint_vel = ObsTerm(
+#             func=mdp.joint_vel_rel,
+#             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+#             scale=1.0,
+#             clip=(-100.0, 100.0),
+#         )
+#         actions = ObsTerm(func=mdp.last_action, scale=1.0, clip=(-100.0, 100.0))
+#         height_scan = ObsTerm(
+#             func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
+#         )
+
+#         def __post_init__(self):
+#             self.enable_corruption = False
+#             self.concatenate_terms = True
+
+#     # observation groups
+#     policy: PolicyCfg = PolicyCfg()
+#     critic: CriticCfg = CriticCfg()
 
 @configclass
 class ObservationsCfg:
@@ -156,36 +263,29 @@ class ObservationsCfg:
 
     @configclass
     class PolicyCfg(ObsGroup):
-        """Observations for policy group."""
+        """给 Actor 的单帧观测 (不含线速度，无历史)"""
 
         # observation terms (order preserved)
-        base_lin_vel = ObsTerm(
-            func=mdp.base_lin_vel,
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-100.0, 100.0),
-            scale=1.0,
-            history_length=10, 
-        )
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel,
             noise=Unoise(n_min=-0.2, n_max=0.2),
             clip=(-100.0, 100.0),
             scale=1.0,
-            history_length=10, 
+            history_length=10,
         )
         projected_gravity = ObsTerm(
             func=mdp.projected_gravity,
             noise=Unoise(n_min=-0.05, n_max=0.05),
             clip=(-100.0, 100.0),
             scale=1.0,
-            history_length=10, 
+            history_length=10,
         )
         velocity_commands = ObsTerm(
             func=mdp.generated_commands,
             params={"command_name": "base_velocity"},
             clip=(-100.0, 100.0),
             scale=1.0,
-            history_length=10, 
+            history_length=10,
         )
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
@@ -193,7 +293,7 @@ class ObservationsCfg:
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-            history_length=10, 
+            history_length=10,
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
@@ -201,21 +301,13 @@ class ObservationsCfg:
             clip=(-100.0, 100.0),
             scale=1.0,
             params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-            history_length=10, 
+            history_length=10,
         )
         actions = ObsTerm(
             func=mdp.last_action,
             clip=(-100.0, 100.0),
             scale=1.0,
-            history_length=10, 
-        )
-        height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-            scale=1.0,
-            history_length=10, 
+            history_length=10,
         )
 
         def __post_init__(self):
@@ -223,39 +315,114 @@ class ObservationsCfg:
             self.concatenate_terms = True
 
     @configclass
-    class CriticCfg(ObsGroup):
-        """Observations for critic group."""
+    class EstimatorCfg(ObsGroup):
+        """给 VAE 的历史观测 (包含过去 10 帧，无噪声)"""
 
-        # observation terms (order preserved)
-        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, scale=1.0, clip=(-100.0, 100.0))
-        base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=1.0, clip=(-100.0, 100.0))
-        projected_gravity = ObsTerm(func=mdp.projected_gravity, scale=1.0, clip=(-100.0, 100.0))
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            history_length=10,
+        )
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            history_length=10,
+        )
         velocity_commands = ObsTerm(
-            func=mdp.generated_commands, params={"command_name": "base_velocity"}, scale=1.0, clip=(-100.0, 100.0)
+            func=mdp.generated_commands,
+            params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            history_length=10,
         )
         joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-            scale=1.0,
             clip=(-100.0, 100.0),
+            scale=1.0,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+            history_length=10,
         )
         joint_vel = ObsTerm(
             func=mdp.joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
-            scale=1.0,
             clip=(-100.0, 100.0),
+            scale=1.0,
+            history_length=10,
         )
-        actions = ObsTerm(func=mdp.last_action, scale=1.0, clip=(-100.0, 100.0))
-        height_scan = ObsTerm(
-            func=mdp.height_scan, params={"sensor_cfg": SceneEntityCfg("height_scanner")}, scale=1.0, clip=(-1.0, 1.0)
+        actions = ObsTerm(
+            func=mdp.last_action,
+            scale=1.0,
+            history_length=10,
         )
 
         def __post_init__(self):
             self.enable_corruption = False
             self.concatenate_terms = True
 
-    # observation groups
+    @configclass
+    class CriticCfg(ObsGroup):
+        """给 Critic 的特权观测 (包含真实线速度，无历史)"""
+
+        # 【非常重要】：base_lin_vel 必须放在第一个，作为 VAE 的 Target！
+        base_lin_vel = ObsTerm(
+            func=mdp.base_lin_vel,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        base_ang_vel = ObsTerm(
+            func=mdp.base_ang_vel,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        projected_gravity = ObsTerm(
+            func=mdp.projected_gravity,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        velocity_commands = ObsTerm(
+            func=mdp.generated_commands,
+            params={"command_name": "base_velocity"},
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        joint_pos = ObsTerm(
+            func=mdp.joint_pos_rel,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=".*", preserve_order=True)},
+        )
+        joint_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            clip=(-100.0, 100.0),
+            scale=1.0,
+        )
+        actions = ObsTerm(
+            func=mdp.last_action,
+            scale=1.0,
+        )
+
+        # ==========================================
+        # 【核心修复】：加回 height_scan！
+        # 证明有效性：加上这个后，Teacher 才能真正提取地形特征，Critic 才能在粗糙地形下正确收敛。
+        # 你可以通过观察 WandB 上的 `Loss/value_function` 曲线，
+        # 加上 height_scan 后，Value Loss 会显著下降且更平稳，不再出现剧烈震荡崩溃。
+        # ==========================================
+        height_scan = ObsTerm(
+            func=mdp.height_scan,
+            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
+            scale=1.0,
+            clip=(-1.0, 1.0)
+        )
+
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = True
+
+    # 注册这三个组
     policy: PolicyCfg = PolicyCfg()
+    estimator: EstimatorCfg = EstimatorCfg()
     critic: CriticCfg = CriticCfg()
 
 
@@ -348,13 +515,13 @@ class EventCfg:
         "asset_cfg": SceneEntityCfg("robot", joint_names=".*_box_joint"),
         "operation": "scale",
         "distribution": "uniform",
-        
+
         # 1. 摩擦力 (N)
         "friction_distribution_params": (0.75, 1.25),
-        
+
         # 2. 阻尼 (Ns/m)
         "damping_distribution_params": (0.5, 2.0),
-        
+
         # 3. 惯量
         "armature_distribution_params": (0.9, 1.1),
     },
@@ -392,7 +559,7 @@ class EventCfg:
     randomize_push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(10.0, 15.0),
+        interval_range_s=(5.0, 10.0),
         params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
     )
 
@@ -771,12 +938,12 @@ class LocomotionVelocityRoughEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         # self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
         # GPU 碰撞内存配置
-        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024 
-        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024 
-        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024 
-        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024 
-        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024 
-        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024 
+        self.sim.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024
+        self.sim.physx.gpu_max_rigid_patch_count = 4 * 1024 * 1024
+        self.sim.physx.gpu_found_lost_pairs_capacity = 8 * 1024 * 1024
+        self.sim.physx.gpu_heap_capacity = 64 * 1024 * 1024
+        self.sim.physx.gpu_temp_buffer_capacity = 64 * 1024 * 1024
+        self.sim.physx.gpu_collision_stack_size = 128 * 1024 * 1024
 
         # update sensor update periods
         # we tick all the sensors based on the smallest update period (physics update period)

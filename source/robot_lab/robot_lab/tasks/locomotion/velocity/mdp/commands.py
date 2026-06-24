@@ -21,7 +21,11 @@ class UniformThresholdVelocityCommand(mdp.UniformVelocityCommand):
     def _resample_command(self, env_ids: Sequence[int]):
         super()._resample_command(env_ids)
         # set small commands to zero
-        self.vel_command_b[env_ids, :2] *= (torch.norm(self.vel_command_b[env_ids, :2], dim=1) > 0.3).unsqueeze(1)
+        threshold = self.cfg.lin_vel_threshold
+        if threshold > 0.0:
+            self.vel_command_b[env_ids, :2] *= (
+                torch.norm(self.vel_command_b[env_ids, :2], dim=1) > threshold
+            ).unsqueeze(1)
 
 
 @configclass
@@ -29,6 +33,9 @@ class UniformThresholdVelocityCommandCfg(mdp.UniformVelocityCommandCfg):
     """Configuration for the uniform threshold velocity command generator."""
 
     class_type: type = UniformThresholdVelocityCommand
+    lin_vel_threshold: float = 0.3
+
+
 class DiscreteCommandController(CommandTerm):
     """
     Command generator that assigns discrete commands to environments.

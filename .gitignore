@@ -11,12 +11,32 @@
 /outputs/
 env_cfg_debug.json
 
+# Local experiment notes, memory, and scratch analysis
+/docs/
+/analysis/
+/RL_memory_start.md
+/my_log.txt
+/play_py.txt
+/real_time_command_debug.txt
+/os
+
 # Robot lab build and egg-info
 /source/robot_lab/robot_lab.egg-info/
 
 # Simulation/visualization outputs
 /_out_sdrec/
 _out_sdrec/*.png
+
+# Local source snapshots kept beside the edited files
+**/__backups__/
+
+# Local helper scripts generated for one-off training inspection
+/scripts/rsl_rl/base/highstep_autoresume_monitor.sh
+/scripts/tools/render_highstep_single_terrain_tiles.py
+/scripts/tools/render_highstep_training_terrain.py
+/scripts/tools/render_highstep_training_terrain_numpy.py
+/scripts/tools/render_paper_extra_terrain_tiles.py
+/scripts/tools/train_monitor.py
 
 /build
 /install

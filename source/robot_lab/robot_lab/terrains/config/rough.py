@@ -590,6 +590,131 @@ STAIR_TERRAINS_CFG = TerrainGeneratorCfg(
     },
 )
 
+HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    curriculum=False,
+    use_cache=False,
+    sub_terrains={
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.25,
+            step_height_range=(0.04, 0.22),
+            step_width=0.30,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.12,
+            step_height_range=(0.04, 0.22),
+            step_width=0.30,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "box": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
+            proportion=0.31,
+            box_height_range=(0.08, 0.35),
+            platform_width=3.0,
+            double_box=False,
+            size=(8.0, 8.0),
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "box_hard": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
+            proportion=0.08,
+            box_height_range=(0.30, 0.38),
+            platform_width=3.0,
+            double_box=False,
+            size=(8.0, 8.0),
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
+            proportion=0.12,
+            pit_depth_range=(0.04, 0.35),
+            platform_width=3.0,
+            double_pit=False,
+            size=(8.0, 8.0),
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.025,
+            slope_range=(0.0, 0.30),
+            platform_width=2.0,
+            border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.025,
+            slope_range=(0.0, 0.30),
+            platform_width=2.0,
+            border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.07,
+            noise_range=(0.01, 0.04),
+            noise_step=0.005,
+            border_width=0.25,
+            flat_patch_sampling={
+                "target": FlatPatchSamplingCfg(
+                    num_patches=50,
+                    patch_radius=0.15,
+                    max_height_diff=0.05,
+                )
+            },
+        ),
+    },
+)
+
 PLANE_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(20.0, 10.0),
     border_width=2.0,

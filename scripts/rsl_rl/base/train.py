@@ -47,7 +47,7 @@ parser.add_argument("--distributed", action="store_true", default=False, help="R
 # ==========================================
 # 🌟 修改点：在 argparse 中明确 agent 的 choices
 # ==========================================
-parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", 
+parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point",
                     help="Name of the RL agent configuration entry point. Can be 'symmetric_ppo_cfg'.")
 
 # append RSL-RL cli arguments
@@ -334,7 +334,7 @@ class CustomRecordVideo(RecordVideo):
         )
         # Gymnasium  RecordVideoV0 will set self.frames_per_sec（if fps=None， env.metadata.render_fps & 30）
         if fps is not None:
-            self.frames_per_sec = fps  
+            self.frames_per_sec = fps
 
         self.enable_wandb = bool(enable_wandb and (wandb is not None))
         self.wandb_key = wandb_key
@@ -373,7 +373,7 @@ class CustomRecordVideo(RecordVideo):
             logger.warn("Ignored saving a video as there were zero frames to save.")
         else:
             try:
-                # PyAV 
+                # PyAV
                 self._write_with_pyav(self.recorded_frames, path)
             except Exception:
                 # Roll back to moviepy
@@ -449,17 +449,39 @@ class ActorCriticSN(_BaseActorCritic):
 # 这样 eval("ActorCriticSN") 也能解析到这个类。
 # === End Add ===
 
+# =========================================================================
+# 🌟 注册 VAEActorCritic 和 VAEPPO 到 RSL-RL 命名空间
+# =========================================================================
+try:
+    # 1. 从你的实际路径导入 VAEActorCritic 和 VAEPPO
+    from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.vae_ppo import VAEActorCritic, VAEPPO
+
+    # 2. 导入 rsl_rl 的相关模块
+    import rsl_rl.modules.actor_critic as _ac
+    import rsl_rl.algorithms.ppo as _ppo
+    import rsl_rl.runners.on_policy_runner as _opr
+
+    # 3. 强行注入到 rsl_rl 的命名空间中，这样 eval() 就能找到它们了！
+    _ac.VAEActorCritic = VAEActorCritic
+    _ppo.VAEPPO = VAEPPO
+    _opr.VAEActorCritic = VAEActorCritic
+    _opr.VAEPPO = VAEPPO
+    print("[INFO] Successfully registered VAEActorCritic and VAEPPO to RSL-RL.")
+except ImportError as e:
+    print(f"[WARN] Could not import VAE classes: {e}")
+# =========================================================================
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
-    
+
     # =========================================================================
     # 🌟 修改点：根据 args_cli.agent 动态拦截并覆盖 agent_cfg
     # =========================================================================
     if args_cli.agent == "symmetric_ppo_cfg":
         print("[INFO] Using Symmetric PPO Algorithm and Config!")
         from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo_cfg import ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg
-        
+
         # 覆盖 config
         agent_cfg = ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg()
         # 强制指定 class_name，以便后续逻辑识别
@@ -474,7 +496,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         seed = (agent_cfg.seed or 0) + LOCAL_RANK
         env_cfg.seed = seed
         agent_cfg.seed = seed
-        
+
     # override configurations with non-hydra CLI arguments
     # 注意：因为我们在上面覆盖了 agent_cfg，这里的 cli_args.update_rsl_rl_cfg 依然能正常工作！
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
@@ -482,6 +504,52 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
+    if agent_cfg.resume and args_cli.task == "RobotLab-Isaac-Velocity-Highstep-ArcdogAdjustableLeg-v0":
+        command_curriculum = getattr(env_cfg.curriculum, "command_levels", None)
+        command_params = getattr(command_curriculum, "params", None)
+        if isinstance(command_params, dict) and "terrain_gate_level" in command_params:
+            old_gate = command_params["terrain_gate_level"]
+            command_params["terrain_gate_level"] = 0.0
+            print(
+                "[INFO] Highstep resume/refine: relaxing command terrain gate "
+                f"from {old_gate} to {command_params['terrain_gate_level']}."
+            )
+        reward_terms = getattr(env_cfg, "rewards", None)
+        staged_reward_names = (
+            "blind_climbing_bonus",
+            "pitch_up_on_obstacle",
+            "front_legs_reach",
+            "front_feet_highstep_clearance",
+            "rear_feet_highstep_clearance",
+            "rear_feet_under_step_after_commit",
+            "rear_second_foot_highstep_clearance",
+            "highstep_forward_progress",
+            "highstep_body_lift",
+            "highstep_base_advance_lift",
+            "highstep_leg_support_contact",
+            "horse_rearing_bonus",
+            "rear_legs_drive_bonus",
+            "highstep_rear_push_posture",
+            "highstep_rear_box_push",
+            "highstep_bridge_stall_penalty",
+            "highstep_box_phase_prior",
+        )
+        relaxed_rewards = []
+        if reward_terms is not None:
+            for reward_name in staged_reward_names:
+                reward_term = getattr(reward_terms, reward_name, None)
+                reward_params = getattr(reward_term, "params", None)
+                if isinstance(reward_params, dict) and "stage_start_update" in reward_params:
+                    old_start = reward_params.get("stage_start_update")
+                    old_ramp = reward_params.get("stage_ramp_updates")
+                    reward_params["stage_start_update"] = 0
+                    reward_params["stage_ramp_updates"] = 1
+                    relaxed_rewards.append(f"{reward_name}:{old_start}/{old_ramp}->0/1")
+        if relaxed_rewards:
+            print(
+                "[INFO] Highstep resume/refine: opening staged highstep rewards immediately: "
+                + ", ".join(relaxed_rewards)
+            )
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -547,7 +615,41 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # save resume path before creating a new log_dir
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        # =================================================================
+        # ====== [DEBUG-CURVE: CHECKPOINT PATH RESOLUTION] ======
+        # 实时查看路径解析数据，证明修改是否有效
+        # =================================================================
+        print("\n" + "="*65)
+        print("====== [DEBUG-CURVE: CHECKPOINT PATH RESOLUTION] ======")
+        print(f"  [Data Point 1] Target log_root_path: {log_root_path}")
+        print(f"  [Data Point 2] Input checkpoint arg: {agent_cfg.load_checkpoint}")
+
+        _is_abs = agent_cfg.load_checkpoint and os.path.isabs(str(agent_cfg.load_checkpoint))
+        print(f"  [Data Point 3] Is absolute path?   : {_is_abs}")
+
+        if _is_abs:
+            # 修改核心 1：如果是绝对路径（跨目录读取 Teacher），直接绕过 get_checkpoint_path
+            resume_path = agent_cfg.load_checkpoint
+            print(f"  [Data Point 4] Action Taken      : Bypassed get_checkpoint_path, using absolute path directly.")
+        else:
+            # 修改核心 2：如果是相对路径，确保 log_root_path 存在，防止 os.scandir 崩溃
+            if not os.path.exists(log_root_path):
+                os.makedirs(log_root_path, exist_ok=True)
+                print(f"  [Data Point 4] Action Taken      : Created missing log_root_path to prevent FileNotFoundError.")
+            else:
+                print(f"  [Data Point 4] Action Taken      : log_root_path exists, proceeding with standard scan.")
+
+            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+
+        print(f"  [Data Point 5] Final resume_path : {resume_path}")
+
+        _path_exists = os.path.exists(resume_path)
+        print(f"  [Data Point 6] Path exists on disk?: {'✅ YES' if _path_exists else '❌ NO'}")
+        if _path_exists:
+            _file_size_mb = os.path.getsize(resume_path) / (1024 * 1024)
+            print(f"  [Data Point 7] Checkpoint Size   : {_file_size_mb:.2f} MB (Validating file integrity)")
+        print("=================================================================\n")
+        # =================================================================
 
     # wrap for video recording
     if args_cli.video and IS_MASTER:
@@ -566,17 +668,38 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = CustomRecordVideo(env, **video_kwargs)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     # create runner from rsl-rl
-    
-    # =========================================================================
-    # 🌟 修改点：动态切换 RunnerClass 
+
+    # # =========================================================================
+    # # [Sim-to-Real 安全补丁] 强制修复 Action Clip (Hard Clip)
+    # # =========================================================================
+    # if hasattr(env.unwrapped, "action_manager"):
+    #     for group_name, action_term in env.unwrapped.action_manager._terms.items():
+    #         if hasattr(action_term, "_joint_names"):
+    #             # 如果底层没有初始化 clip tensor，则先初始化为无限制
+    #             if not hasattr(action_term, "_clip_min") or action_term._clip_min is None:
+    #                 action_term._clip_min = torch.full((1, action_term.action_dim), -float('inf'), device=env.unwrapped.device)
+    #                 action_term._clip_max = torch.full((1, action_term.action_dim), float('inf'), device=env.unwrapped.device)
+
+    #             # 动态寻找包含 "box_joint" 的关节索引
+    #             box_indices = [i for i, name in enumerate(action_term._joint_names) if "box_joint" in name]
+
+    #             if box_indices:
+    #                 # 强制写入绝对安全的 Raw Action 截断范围 [-1.0, 1.0]
+    #                 action_term._clip_min[:, box_indices] = -1.0
+    #                 action_term._clip_max[:, box_indices] = 1.0
+    #                 print(f"\n!!! [SAFETY WARNING] 已强制锁定 {group_name} 中的 box_joint (索引: {box_indices}) 的动作范围为 [-1.0, 1.0] !!!\n", flush=True)
+    # # =========================================================================
+
+    # # =========================================================================
+    # 🌟 修改点：动态切换 RunnerClass
     # =========================================================================
     if args_cli.agent == "symmetric_ppo_cfg" or agent_cfg.class_name == "SymmetricOnPolicyRunner":
         from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo import SymmetricOnPolicyRunner
         runner = SymmetricOnPolicyRunner(
-            env, 
-            agent_cfg.to_dict(), 
+            env,
+            agent_cfg.to_dict(),
             config=env_cfg,       # <==== 补充缺失的 config 参数！
-            log_dir=log_dir, 
+            log_dir=log_dir,
             device=agent_cfg.device
         )
     elif agent_cfg.class_name == "OnPolicyRunner":

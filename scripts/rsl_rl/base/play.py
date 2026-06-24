@@ -45,6 +45,24 @@ parser.add_argument("--real-time", action="store_true", default=False, help="Run
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
 parser.add_argument("--se2_gamepad", action="store_true", default=False, help="Whether to use se2_gamepad.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
+parser.add_argument(
+    "--play_terrain_level",
+    type=int,
+    default=None,
+    help="Force env0 to start on a specific terrain row for play. Higher is harder.",
+)
+parser.add_argument(
+    "--play_terrain_type",
+    type=str,
+    default=None,
+    help="Force env0 to start on a named terrain type for play, e.g. box or pyramid_stairs.",
+)
+parser.add_argument(
+    "--disable_action_prior",
+    action="store_true",
+    default=False,
+    help="Replace custom action-prior action terms with plain joint-position actions during play.",
+)
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
 parser.add_argument("--moe", action="store_true", default=False, help="Whether to use MoE.")
 # append RSL-RL cli arguments
@@ -69,6 +87,7 @@ simulation_app = app_launcher.app
 import gymnasium as gym
 import time
 import torch
+import numpy as np
 
 import rsl_rl_utils
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
@@ -81,8 +100,27 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
-from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg 
+from isaaclab.devices.keyboard.se2_keyboard import Se2KeyboardCfg
 import robot_lab.tasks  # noqa: F401
+
+# =========================================================================
+# 🌟 注册 VAEActorCritic 和 VAEPPO 到 RSL-RL 命名空间
+# =========================================================================
+try:
+    from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.vae_ppo import VAEActorCritic, VAEPPO
+    import rsl_rl.modules.actor_critic as _ac
+    import rsl_rl.algorithms.ppo as _ppo
+    import rsl_rl.runners.on_policy_runner as _opr
+
+    _ac.VAEActorCritic = VAEActorCritic
+    _ppo.VAEPPO = VAEPPO
+    _opr.VAEActorCritic = VAEActorCritic
+    _opr.VAEPPO = VAEPPO
+    print("[INFO] Successfully registered VAEActorCritic and VAEPPO to RSL-RL.")
+except ImportError as e:
+    print(f"[WARN] Could not import VAE classes: {e}")
+# =========================================================================
+
 # --- MoE Actor that can drop-in replace the base policy's actor MLP ---
 import torch
 import torch.nn as nn
@@ -99,6 +137,61 @@ def _make_mlp(in_dim: int, hidden: list[int], out_dim: int, act: nn.Module):
         last = h
     layers += [nn.Linear(last, out_dim)]
     return nn.Sequential(*layers)
+
+
+def _terrain_column_for_name(terrain_generator_cfg, terrain_name: str) -> int:
+    """Return a deterministic curriculum column for a named sub-terrain."""
+    if terrain_generator_cfg is None or not hasattr(terrain_generator_cfg, "sub_terrains"):
+        raise ValueError("--play_terrain_type requires a terrain generator with sub_terrains.")
+    terrain_name = terrain_name.strip()
+    sub_terrains = terrain_generator_cfg.sub_terrains
+    if terrain_name not in sub_terrains:
+        available = ", ".join(sub_terrains.keys())
+        raise ValueError(f"Unknown --play_terrain_type '{terrain_name}'. Available: {available}")
+
+    names = list(sub_terrains.keys())
+    proportions = np.array([float(sub_terrains[name].proportion) for name in names], dtype=np.float64)
+    proportions /= np.sum(proportions)
+    cumulative = np.cumsum(proportions)
+    num_cols = int(terrain_generator_cfg.num_cols)
+    for col in range(num_cols):
+        sub_index = int(np.min(np.where(col / num_cols + 0.001 < cumulative)[0]))
+        if names[sub_index] == terrain_name:
+            return col
+    raise ValueError(f"No generated column found for terrain type '{terrain_name}'.")
+
+
+def _apply_play_terrain_selection(env, level: int | None, terrain_type: str | None):
+    """Move env0 to a selected generated terrain cell before the wrapper reset."""
+    if level is None and terrain_type is None:
+        return
+    unwrapped = env.unwrapped
+    terrain = unwrapped.scene.terrain
+    if not all(hasattr(terrain, name) for name in ("terrain_origins", "terrain_levels", "terrain_types", "env_origins")):
+        print("[WARN] --play_terrain_* requested, but this terrain does not expose curriculum origins.")
+        return
+
+    origins = terrain.terrain_origins
+    max_level = int(origins.shape[0]) - 1
+    max_type = int(origins.shape[1]) - 1
+    selected_level = int(level) if level is not None else int(terrain.terrain_levels[0].item())
+    selected_level = max(0, min(selected_level, max_level))
+
+    if terrain_type is None:
+        selected_type = int(terrain.terrain_types[0].item())
+    else:
+        selected_type = _terrain_column_for_name(unwrapped.cfg.scene.terrain.terrain_generator, terrain_type)
+    selected_type = max(0, min(selected_type, max_type))
+
+    device = terrain.terrain_levels.device
+    env_ids = torch.arange(unwrapped.num_envs, device=device)
+    terrain.terrain_levels[env_ids] = selected_level
+    terrain.terrain_types[env_ids] = selected_type
+    terrain.env_origins[env_ids] = origins[selected_level, selected_type]
+    print(
+        "[INFO] Play terrain selection: "
+        f"level={selected_level}/{max_level}, type_col={selected_type}/{max_type}, requested_type={terrain_type}"
+    )
 
 class _MoEActor(nn.Module):
     """Deterministic MoE actor head: softmax routing over expert MLPs.
@@ -311,17 +404,39 @@ def main():
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlBaseRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
-    
+
+    if args_cli.disable_action_prior:
+        from robot_lab.tasks.locomotion.velocity import mdp as velocity_mdp
+
+        if hasattr(env_cfg, "actions") and hasattr(env_cfg.actions, "joint_pos"):
+            old_action_cfg = env_cfg.actions.joint_pos
+            joint_names = getattr(old_action_cfg, "joint_names", getattr(env_cfg, "joint_names", None))
+            if joint_names is None:
+                raise ValueError("--disable_action_prior requires env_cfg.joint_names or actions.joint_pos.joint_names.")
+
+            env_cfg.actions.joint_pos = velocity_mdp.JointPositionActionCfg(
+                asset_name=getattr(old_action_cfg, "asset_name", "robot") or "robot",
+                joint_names=joint_names,
+                scale=getattr(old_action_cfg, "scale", 0.1),
+                offset=getattr(old_action_cfg, "offset", 0.0),
+                preserve_order=getattr(old_action_cfg, "preserve_order", False),
+                use_default_offset=getattr(old_action_cfg, "use_default_offset", True),
+                clip=getattr(old_action_cfg, "clip", None),
+            )
+            print("[INFO] Disabled action prior for play: using plain JointPositionActionCfg.")
+        else:
+            print("[WARN] --disable_action_prior requested, but env_cfg.actions.joint_pos was not found.")
+
     # =========================================================================
     # 🌟 修改点 1：拦截并覆盖 agent_cfg (针对 symmetric_ppo_cfg)
     # =========================================================================
     if args_cli.agent == "symmetric_ppo_cfg":
         print("[INFO] Using Symmetric PPO Algorithm and Config for Playback!")
         from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo_cfg import ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg
-        
+
         agent_cfg = ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg()
         agent_cfg.class_name = "SymmetricOnPolicyRunner"
-        
+
         # 如果需要重新应用 CLI 参数覆盖，可以取消下面这行的注释
         # if hasattr(cli_args, 'update_rsl_rl_cfg'):
         #     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
@@ -345,9 +460,20 @@ def main():
     env_cfg.scene.terrain.max_init_terrain_level = None
     # reduce the number of terrains to save memory
     if env_cfg.scene.terrain.terrain_generator is not None:
-        env_cfg.scene.terrain.terrain_generator.num_rows = 5
-        env_cfg.scene.terrain.terrain_generator.num_cols = 5
-        env_cfg.scene.terrain.terrain_generator.curriculum = False
+        if args_cli.play_terrain_level is not None or args_cli.play_terrain_type is not None:
+            env_cfg.scene.terrain.terrain_generator.num_rows = max(
+                int(env_cfg.scene.terrain.terrain_generator.num_rows),
+                int(args_cli.play_terrain_level or 0) + 1,
+            )
+            env_cfg.scene.terrain.terrain_generator.num_cols = max(
+                int(env_cfg.scene.terrain.terrain_generator.num_cols),
+                20,
+            )
+            env_cfg.scene.terrain.terrain_generator.curriculum = True
+        else:
+            env_cfg.scene.terrain.terrain_generator.num_rows = 5
+            env_cfg.scene.terrain.terrain_generator.num_cols = 5
+            env_cfg.scene.terrain.terrain_generator.curriculum = False
 
     # disable randomization for play
     env_cfg.observations.policy.enable_corruption = False
@@ -382,15 +508,24 @@ def main():
         #     func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
         # )
 
-        # 获取原配置中的历史长度设置，防止被覆盖丢失
-        old_history_len = getattr(env_cfg.observations.policy.velocity_commands, "history_length", 0)
-        old_flatten = getattr(env_cfg.observations.policy.velocity_commands, "flatten_history_dim", False)
+        # =========================================================================
+        # 🌟 核心修复：必须将键盘指令同步注入到 Policy, Estimator 和 Critic 组！
+        # 否则 VAE (Estimator) 会吃到 0 指令，导致 Latent 向量与 Policy 观测冲突，机器狗原地抽搐！
+        # =========================================================================
+        for group_name in ["policy", "estimator", "critic"]:
+            if hasattr(env_cfg.observations, group_name):
+                obs_group = getattr(env_cfg.observations, group_name)
+                if hasattr(obs_group, "velocity_commands") and obs_group.velocity_commands is not None:
+                    # 获取原配置中的历史长度设置，防止被覆盖丢失
+                    old_history_len = getattr(obs_group.velocity_commands, "history_length", 0)
+                    old_flatten = getattr(obs_group.velocity_commands, "flatten_history_dim", False)
 
-        env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
-            history_length=old_history_len,       # 把历史长度加回来！
-            flatten_history_dim=old_flatten       # 保持原有的展平设置
-        )
+                    setattr(obs_group, "velocity_commands", ObsTerm(
+                        func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+                        history_length=old_history_len,       # 把历史长度加回来！
+                        flatten_history_dim=old_flatten       # 保持原有的展平设置
+                    ))
+        # =========================================================================
 
 
         def reset_env_callback():
@@ -414,23 +549,35 @@ def main():
         )
         se2_controller = Se2Gamepad(se2_gamepad_cfg)
 
-        # 设置速度命令
-        env_cfg.observations.policy.velocity_commands = ObsTerm(
-            func=lambda env: se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
-        )
+        # =========================================================================
+        # 🌟 核心修复：同样为手柄同步注入所有观测组
+        # =========================================================================
+        for group_name in ["policy", "estimator", "critic"]:
+            if hasattr(env_cfg.observations, group_name):
+                obs_group = getattr(env_cfg.observations, group_name)
+                if hasattr(obs_group, "velocity_commands") and obs_group.velocity_commands is not None:
+                    old_history_len = getattr(obs_group.velocity_commands, "history_length", 0)
+                    old_flatten = getattr(obs_group.velocity_commands, "flatten_history_dim", False)
+
+                    setattr(obs_group, "velocity_commands", ObsTerm(
+                        func=lambda env: se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+                        history_length=old_history_len,
+                        flatten_history_dim=old_flatten
+                    ))
+        # =========================================================================
 
         # 重置环境回调
         def reset_env_callback():
             print("[INFO] Resetting environment...")
             return env.reset()[0]  # 返回新的观测
-        
+
         se2_controller.add_callback(7, reset_env_callback)  # Start按钮
-        
+
         # 退出应用回调
         def exit_app_callback():
             print("[INFO] Exiting application...")
             exit(0)
-        
+
         se2_controller.add_callback(6, exit_app_callback)  # Back/Select按钮
 
 
@@ -443,15 +590,19 @@ def main():
         if not resume_path:
             print("[INFO] Unfortunately a pre-trained checkpoint is currently unavailable for this task.")
             return
-    elif args_cli.checkpoint:
+    elif args_cli.checkpoint and os.path.exists(args_cli.checkpoint):
+        # 如果传入的是完整的绝对路径，且文件存在，直接使用
         resume_path = retrieve_file_path(args_cli.checkpoint)
     else:
+        # 否则（比如只传了 model_7900.pt），统统交给 get_checkpoint_path 去 logs 目录里智能搜索
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     log_dir = os.path.dirname(resume_path)
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+
+    _apply_play_terrain_selection(env, args_cli.play_terrain_level, args_cli.play_terrain_type)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
@@ -474,16 +625,16 @@ def main():
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
-    
+
     # =========================================================================
     # 🌟 修改点 2：动态切换 RunnerClass (针对 SymmetricOnPolicyRunner)
     # =========================================================================
     if agent_cfg.class_name == "SymmetricOnPolicyRunner":
         from robot_lab.tasks.locomotion.velocity.config.quadruped.Arcdog_adjustable_leg.agents.symmetric_ppo import SymmetricOnPolicyRunner
         runner = SymmetricOnPolicyRunner(
-            env, 
-            agent_cfg.to_dict(), 
-            log_dir=None, 
+            env,
+            agent_cfg.to_dict(),
+            log_dir=None,
             device=agent_cfg.device,
             config=env_cfg  # 传入自定义需要的 config 参数
         )
@@ -494,7 +645,7 @@ def main():
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
     # =========================================================================
-    
+
     runner.load(resume_path)
 
     # obtain the trained policy for inference
@@ -536,8 +687,76 @@ def main():
 
     # 对策略网络做去参数化
     _deparametrize_all(policy_nn)
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx", verbose=True)
+
+    # =========================================================================
+    # 🌟 核心修改点：新增导出包含 Estimator 的完整 Student 策略
+    # =========================================================================
+    class StudentWrapper(torch.nn.Module):
+        def __init__(self, policy_nn):
+            super().__init__()
+            self.actor = policy_nn.actor
+            self.estimator = getattr(policy_nn, "estimator", None)
+
+        def forward(self, obs: torch.Tensor):
+            if self.estimator is not None:
+                est_out = self.estimator(obs)
+                # 兼容 VAE 返回值 (mu 通常是第3个返回值)
+                if isinstance(est_out, tuple) and len(est_out) >= 3:
+                    mu = est_out[2]
+                elif isinstance(est_out, torch.Tensor):
+                    mu = est_out
+                else:
+                    mu = torch.zeros((obs.shape[0], 64), device=obs.device)
+
+                safe_mu = torch.clamp(mu, min=-1.0, max=1.0)
+                actor_input = torch.cat([obs, safe_mu.detach()], dim=-1)
+            else:
+                actor_input = obs
+            return self.actor(actor_input)
+
+    try:
+        print("[INFO] Wrapping policy with StudentWrapper to include Estimator...")
+        student_model = StudentWrapper(policy_nn).to(env.unwrapped.device)
+        student_model.eval()
+
+        obs_dict = env.get_observations()
+
+        # 🌟 修复点：TensorDict 无法使用 isinstance(..., dict) 判断，必须安全提取纯 Tensor
+        if hasattr(obs_dict, "keys") and "policy" in obs_dict.keys():
+            dummy_obs = obs_dict["policy"]
+        elif hasattr(obs_dict, "policy"):
+            dummy_obs = obs_dict.policy
+        else:
+            dummy_obs = obs_dict
+
+        # 确保提取出来的是纯 torch.Tensor，防止 Tracer 再次报错
+        if not isinstance(dummy_obs, torch.Tensor):
+            print(f"[WARN] dummy_obs is still not a pure Tensor, type is {type(dummy_obs)}. Attempting to convert...")
+            if hasattr(dummy_obs, "contiguous"):
+                dummy_obs = dummy_obs.contiguous()
+
+        print(f"[Debug Proof] Extracted dummy_obs type: {type(dummy_obs)}, shape: {dummy_obs.shape}")
+
+        os.makedirs(export_model_dir, exist_ok=True)
+
+        jit_path = os.path.join(export_model_dir, "policy_student.pt")
+        traced_script_module = torch.jit.trace(student_model, dummy_obs)
+        traced_script_module.save(jit_path)
+        print(f"[Debug Proof] ✅ Successfully exported COMPLETE Student Policy (Estimator+Actor) to {jit_path}")
+
+    except Exception as e:
+        print(f"[WARN] Failed to export Student policy. Error: {e}")
+    # =========================================================================
+
+    # =========================================================================
+    # 🌟 修改点：加入 try-except，防止 VAE 的字典输入结构导致 JIT/ONNX 导出崩溃
+    # =========================================================================
+    try:
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx", verbose=True)
+    except Exception as e:
+        print(f"[WARN] Failed to export policy to JIT/ONNX. This is common for custom architectures like VAE. Error: {e}")
+    # =========================================================================
 
     dt = env.unwrapped.step_dt
 
@@ -590,7 +809,7 @@ def main():
                 print(f"[OBS] Total flattened shape: {flat_obs_shape} (from {len(obs)} components)", flush=True)
             else:
                 print(f"[OBS] shape: {tuple(obs.shape)}", flush=True)
-            
+
             # print action vector shape
             action_tensor = env.unwrapped.action_manager.action
             print(f"[ACTION] shape: {tuple(action_tensor.shape)}", flush=True)
@@ -641,13 +860,13 @@ def main():
         idx = 0
         for group_name, term in env.unwrapped.action_manager._terms.items():
             print(f"[ACTION GROUP] {group_name}", flush=True)
-            
+
             # 获取关节名称
             joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-            
+
             # 1. 获取网络输出的原始动作 (Raw Action)
             raw_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-            
+
             # 2. 获取真正传给机器人的映射后目标位置 (Mapped Target Pos)
             # 在 IsaacLab 中，处理后的目标动作通常存在 processed_actions 或类似属性中
             mapped_targets = None
@@ -655,11 +874,11 @@ def main():
                 mapped_targets = term.processed_actions[0].cpu().numpy()
             elif hasattr(term, "target_joint_pos"): # 兼容不同版本的 IsaacLab/Orbit
                 mapped_targets = term.target_joint_pos[0].cpu().numpy()
-            
+
             # 遍历打印对比
             for i, val in enumerate(raw_actions):
                 joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                
+
                 if mapped_targets is not None:
                     target_val = mapped_targets[i]
                     print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  ==>  Mapped Target: {target_val:>+7.4f}", flush=True)
@@ -667,7 +886,7 @@ def main():
                     # 如果找不到 processed_actions 属性，尝试打印 scale 帮助分析
                     scale_val = term.action_scale[i].item() if hasattr(term, "action_scale") else "unknown"
                     print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  (Scale: {scale_val})", flush=True)
-                    
+
             idx += term.action_dim
         print("=======================================\n", flush=True)
 
@@ -680,22 +899,39 @@ def main():
 
     # policy_jit = torch.jit.load(jit_path, map_location=env.unwrapped.device)
     # policy_jit.eval()
+
+    # # =========================================================================
+    # # 🌟 新增：用于控制 debug 打印频率的计时器，防止刷屏影响查看
+    # # =========================================================================
+    # last_debug_print_time = time.time()
+    # debug_print_interval = 0.1  # 每 0.1 秒打印一次，你可以根据需要调大或调小
+
     # simulate environment
     while simulation_app.is_running():
+
+        # # =========================================================================
+        # # 🌟 修改点：加入时间节流 (Throttling) 判断
+        # # =========================================================================
+        # current_time = time.time()
+        # should_print_debug = (current_time - last_debug_print_time) >= debug_print_interval
+        # if should_print_debug:
+        #     last_debug_print_time = current_time
+
         # print action space vector
+        # if args_cli.debug and args_cli.keyboard and should_print_debug:
         if args_cli.debug and args_cli.keyboard:
             # print action space vector and mapped targets
             print("\n====== [Action & Target Mapping] ======", flush=True)
             idx = 0
             for group_name, term in env.unwrapped.action_manager._terms.items():
                 print(f"[ACTION GROUP] {group_name}", flush=True)
-                
+
                 # 获取关节名称
                 joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-                
+
                 # 1. 获取网络输出的原始动作 (Raw Action)
                 raw_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-                
+
                 # 2. 获取真正传给机器人的映射后目标位置 (Mapped Target Pos)
                 # 在 IsaacLab 中，处理后的目标动作通常存在 processed_actions 或类似属性中
                 mapped_targets = None
@@ -703,11 +939,11 @@ def main():
                     mapped_targets = term.processed_actions[0].cpu().numpy()
                 elif hasattr(term, "target_joint_pos"): # 兼容不同版本的 IsaacLab/Orbit
                     mapped_targets = term.target_joint_pos[0].cpu().numpy()
-                
+
                 # 遍历打印对比
                 for i, val in enumerate(raw_actions):
                     joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                    
+
                     if mapped_targets is not None:
                         target_val = mapped_targets[i]
                         print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  ==>  Mapped Target: {target_val:>+7.4f}", flush=True)
@@ -715,11 +951,89 @@ def main():
                         # 如果找不到 processed_actions 属性，尝试打印 scale 帮助分析
                         scale_val = term.action_scale[i].item() if hasattr(term, "action_scale") else "unknown"
                         print(f"  {joint_name:>14s} | Raw Action: {val:>+7.4f}  (Scale: {scale_val})", flush=True)
-                        
+
                 idx += term.action_dim
             print("=======================================\n", flush=True)
+
             # === NEW: also print root_pos_w & (optional) ground/adjusted target
             _print_root_and_target(env)
+
+            # # =========================================================================
+            # # 🌟 核心修复：专门用于实时查看 vel_command_obs 的多组 Debug 面板
+            # # =========================================================================
+            # print("\n====== [REAL-TIME COMMAND DEBUG] ======", flush=True)
+            # try:
+            #     # 1. 打印键盘/手柄原始指令 (Controller Output) - 证明按键是否生效
+            #     raw_cmd = controller.advance().squeeze().cpu().numpy() if args_cli.keyboard else se2_controller.advance().squeeze().cpu().numpy()
+            #     print(f"  [Keyboard Cmd]    (vx, vy, wz): [{raw_cmd[0]:+.4f}, {raw_cmd[1]:+.4f}, {raw_cmd[2]:+.4f}]", flush=True)
+
+            #     # 2. 提取并打印各组的观测指令
+            #     obs_mgr = env.unwrapped.observation_manager
+
+            #     def extract_active_frame(flat_array):
+            #         if len(flat_array) > 0 and len(flat_array) % 3 == 0:
+            #             frames = flat_array.reshape(-1, 3)
+            #             max_norm = -1
+            #             active = frames[0]
+            #             for f in frames:
+            #                 norm = np.linalg.norm(f)
+            #                 if norm > max_norm:
+            #                     max_norm = norm
+            #                     active = f
+            #             return active.tolist()
+            #         elif len(flat_array) >= 3:
+            #             return flat_array[:3].tolist()
+            #         return flat_array.tolist()
+
+            #     def get_cmd_from_group(g_name):
+            #         if g_name in obs_mgr._group_obs_term_names:
+            #             t_names = obs_mgr._group_obs_term_names[g_name]
+            #             if "velocity_commands" in t_names:
+            #                 idx = t_names.index("velocity_commands")
+            #                 start_idx = 0
+            #                 for i in range(idx):
+            #                     shape = obs_mgr._group_obs_term_dim[g_name][i]
+            #                     dim = 1
+            #                     if isinstance(shape, (list, tuple)):
+            #                         for s in shape: dim *= int(s)
+            #                     else: dim = int(shape)
+            #                     start_idx += dim
+
+            #                 shape_cmd = obs_mgr._group_obs_term_dim[g_name][idx]
+            #                 dim_cmd = 1
+            #                 if isinstance(shape_cmd, (list, tuple)):
+            #                     for s in shape_cmd: dim_cmd *= int(s)
+            #                 else: dim_cmd = int(shape_cmd)
+
+            #                 group_obs = obs[g_name] if (hasattr(obs, "keys") and g_name in obs.keys()) else (obs[g_name] if isinstance(obs, dict) else obs)
+            #                 if isinstance(group_obs, torch.Tensor):
+            #                     vel_obs_block = group_obs[0, start_idx : start_idx + dim_cmd].cpu().numpy().flatten()
+            #                     return extract_active_frame(vel_obs_block)
+            #         return None
+
+            #     policy_cmd = get_cmd_from_group("policy")
+            #     estimator_cmd = get_cmd_from_group("estimator")
+
+            #     if policy_cmd:
+            #         print(f"  [Policy Input]    (vx, vy, wz): [{policy_cmd[0]:+.4f}, {policy_cmd[1]:+.4f}, {policy_cmd[2]:+.4f}]", flush=True)
+            #     # 🌟 核心证明点：如果这里打印的也是 +1.0000，说明 VAE 大脑分裂被治愈了！
+            #     if estimator_cmd:
+            #         print(f"  [Estimator Input] (vx, vy, wz): [{estimator_cmd[0]:+.4f}, {estimator_cmd[1]:+.4f}, {estimator_cmd[2]:+.4f}]", flush=True)
+
+            #     # 3. 打印机器人的真实物理速度 (Actual Robot Velocity) - 证明机器人真的在按指令运动！
+            #     try:
+            #         robot = env.unwrapped.scene["robot"]
+            #         lin_vel = robot.data.root_lin_vel_b[0].cpu().numpy()
+            #         ang_vel = robot.data.root_ang_vel_b[0].cpu().numpy()
+            #         print(f"  [Actual Robot]    (vx, vy, wz): [{lin_vel[0]:+.4f}, {lin_vel[1]:+.4f}, {ang_vel[2]:+.4f}]", flush=True)
+            #     except Exception as e:
+            #         print(f"  [Actual Robot]    N/A ({e})", flush=True)
+
+            # except Exception as e:
+            #     print(f"  [WARN] Failed to extract debug info: {e}", flush=True)
+            # print("=======================================\n", flush=True)
+            # # =========================================================================
+
             # # 取出并打印某个 env 的 height_scan（这里以 env_id = 0 为例）
             # env_id = 0
             # hs = obs[env_id, idx_map["height_scan"]].detach().cpu().numpy()
@@ -740,6 +1054,7 @@ def main():
 
 
 
+        # if args_cli.debug and args_cli.se2_gamepad and should_print_debug:
         if args_cli.debug and args_cli.se2_gamepad:
             print("\n====== [Observatiion Information] ======", flush=True)
             idx = 0
@@ -780,15 +1095,15 @@ def main():
                     # if term_names == "action":
             # act_mgr = env.unwrapped.action_manager
             # act_data = act_mgr[]
-            for group_name, term in env.unwrapped.action_manager._terms.items():
-                print(f"[ACTION GROUP] {group_name}", flush=True)
-                joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
-                term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
-                for i, val in enumerate(term_actions):
-                    joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
-                    print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
-                idx += term.action_dim
-            print("=====================================\n", flush=True)
+            # for group_name, term in env.unwrapped.action_manager._terms.items():
+            #     print(f"[ACTION GROUP] {group_name}", flush=True)
+            #     joint_names = term._joint_names if hasattr(term, "_joint_names") else [f"joint_{i}" for i in range(term.action_dim)]
+            #     term_actions = env.unwrapped.action_manager.action[0, idx : idx + term.action_dim].cpu().numpy()
+            #     for i, val in enumerate(term_actions):
+            #         joint_name = joint_names[i] if i < len(joint_names) else f"joint_{i}"
+            #         print(f"  action[{idx+i:02d}] {joint_name:>12s}: {val:+.4f}", flush=True)
+            #     idx += term.action_dim
+            # print("=====================================\n", flush=True)
 
         # =========================================================================
         # 🌟 新增：将键盘/手柄的指令同步给 CommandManager，让绿色箭头动起来！
@@ -803,12 +1118,12 @@ def main():
                         cur_cmd = controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
                     else:
                         cur_cmd = se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
-                    
-                    # 强行覆盖 CommandManager 的内部指令状态 (IsaacLab 中通常是 vel_command_b)
+
+                    # 同步给底层的命令管理器 (仅用于可视化箭头等，不影响网络实际吃到的指令)
+                    if hasattr(cmd_term, "command"):
+                        cmd_term.command[:] = cur_cmd
                     if hasattr(cmd_term, "vel_command_b"):
                         cmd_term.vel_command_b[:] = cur_cmd
-                    elif hasattr(cmd_term, "command"):
-                        cmd_term.command[:] = cur_cmd
             except Exception as e:
                 pass
         # =========================================================================

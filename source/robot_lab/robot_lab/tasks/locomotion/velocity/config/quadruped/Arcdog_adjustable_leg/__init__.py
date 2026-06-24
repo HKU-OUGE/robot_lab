@@ -42,3 +42,34 @@ gym.register(
         "symmetric_ppo_cfg": f"{agents.__name__}.symmetric_ppo_cfg:ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-BodyflatStudentNoPrior-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.bodyflat_env_cfg:ArclabArcdogAdjustableLegBodyflatStudentNoPriorEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:ArclabArcdogAdjustableLegBodyflatStudentNoPriorPPORunnerCfg",
+        "symmetric_ppo_cfg": f"{agents.__name__}.symmetric_ppo_cfg:ArclabArcdogAdjustableLegBodyflatSymmetricPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-Highstep-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.highstep_env_cfg:ArclabArcdogAdjustableLegHighstepEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:ArclabArcdogAdjustableLegHighstepPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-HighstepStudentNoPrior-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.highstep_env_cfg:ArclabArcdogAdjustableLegHighstepStudentNoPriorEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:ArclabArcdogAdjustableLegHighstepStudentNoPriorPPORunnerCfg",
+    },
+)

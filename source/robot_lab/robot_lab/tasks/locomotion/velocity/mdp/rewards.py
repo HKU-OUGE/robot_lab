@@ -274,6 +274,85 @@ def joint_position_penalty(
     # )
     # return torch.sum(reward, dim=1)
 
+
+def lateral_step_scaled_joint_position_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    stand_still_scale: float,
+    velocity_threshold: float,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    relief_scale: float,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+) -> torch.Tensor:
+    """Reduce default-position penalty when the robot is straddling a lateral step."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    penalty = joint_position_penalty(env, command_name, asset_cfg, stand_still_scale, velocity_threshold)
+    relief = _lateral_step_relief_scale(
+        env,
+        asset,
+        foot_body_names,
+        height_threshold,
+        gate_width,
+        relief_scale,
+        contact_sensor_cfg,
+        contact_threshold,
+        min_contacts_per_side,
+    )
+    return penalty * relief
+
+
+def joint_position_penalty_flat_terrain_gated(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    stand_still_scale: float,
+    flat_moving_scale: float,
+    obstacle_scale: float,
+    command_threshold: float = 0.1,
+    velocity_threshold: float = 0.5,
+    h_low: float = 0.06,
+    h_high: float = 0.18,
+    offset: float = 0.5,
+    ignore_yaw_command: bool = False,
+) -> torch.Tensor:
+    """Penalize default-joint deviation strongly on flat ground and weakly near obstacles."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_error = torch.linalg.norm(
+        asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids], dim=1
+    )
+
+    command = env.command_manager.get_command(command_name)
+    command_norm = _stand_still_command_norm(command, ignore_yaw_command)
+    body_vel = torch.linalg.norm(asset.data.root_com_lin_vel_b[:, :2], dim=1)
+    is_still = torch.logical_and(command_norm < command_threshold, body_vel < velocity_threshold)
+
+    flat_scale = torch.where(
+        is_still,
+        torch.full_like(joint_error, stand_still_scale),
+        torch.full_like(joint_error, flat_moving_scale),
+    )
+
+    try:
+        height = mdp.height_scan(env, sensor_cfg=sensor_cfg, offset=offset)
+        if height.ndim > 1:
+            obstacle_height = height.abs().max(dim=1).values
+        else:
+            obstacle_height = height.abs()
+        obstacle_gate = torch.clamp((obstacle_height - h_low) / (h_high - h_low + 1e-6), 0.0, 1.0)
+        obstacle_gate = obstacle_gate * obstacle_gate * (3.0 - 2.0 * obstacle_gate)
+    except (KeyError, AttributeError):
+        obstacle_gate = torch.zeros_like(joint_error)
+
+    scale = flat_scale * (1.0 - obstacle_gate) + obstacle_scale * obstacle_gate
+    return joint_error * scale
+
+
 def wheel_vel_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
@@ -596,6 +675,54 @@ def feet_contact(
     return reward
 
 
+def anti_pronk_contact_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    front_foot_names: tuple[str, str] = ("FL_foot", "FR_foot"),
+    rear_foot_names: tuple[str, str] = ("RL_foot", "RR_foot"),
+    command_threshold: float = 0.1,
+    velocity_threshold: float = 0.1,
+    contact_threshold: float = 1.0,
+    all_air_weight: float = 1.0,
+    all_contact_weight: float = 0.5,
+    same_side_pair_weight: float = 0.5,
+    include_yaw_command: bool = True,
+) -> torch.Tensor:
+    """Penalize contact patterns that lead to pronking/bounding instead of trotting."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    contact_forces = contact_sensor.data.net_forces_w
+    feet_contact = torch.linalg.norm(contact_forces[:, sensor_cfg.body_ids, :], dim=-1) > contact_threshold
+    contact_count = torch.sum(feet_contact.float(), dim=1)
+    num_feet = feet_contact.shape[1]
+
+    all_air = contact_count <= 0.5
+    all_contact = contact_count >= num_feet - 0.5
+    penalty = all_air_weight * all_air.float() + all_contact_weight * all_contact.float()
+
+    if not hasattr(env, "_anti_pronk_front_foot_ids") or not hasattr(env, "_anti_pronk_rear_foot_ids"):
+        env._anti_pronk_front_foot_ids = contact_sensor.find_bodies(front_foot_names)[0]
+        env._anti_pronk_rear_foot_ids = contact_sensor.find_bodies(rear_foot_names)[0]
+
+    body_contact = torch.linalg.norm(contact_forces, dim=-1) > contact_threshold
+    front_contact = body_contact[:, env._anti_pronk_front_foot_ids]
+    rear_contact = body_contact[:, env._anti_pronk_rear_foot_ids]
+    front_same_phase = front_contact[:, 0] == front_contact[:, 1]
+    rear_same_phase = rear_contact[:, 0] == rear_contact[:, 1]
+    same_side_pair = 0.5 * (front_same_phase.float() + rear_same_phase.float())
+    penalty = penalty + same_side_pair_weight * same_side_pair
+
+    command = env.command_manager.get_command(command_name)
+    command_slice = command if include_yaw_command else command[:, :2]
+    command_norm = torch.linalg.norm(command_slice, dim=1)
+    body_vel = torch.linalg.norm(asset.data.root_com_lin_vel_b[:, :2], dim=1)
+    is_moving = torch.logical_or(command_norm > command_threshold, body_vel > velocity_threshold)
+    return penalty * is_moving.float()
+
+
 def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> torch.Tensor:
     s = env.scene.sensors[sensor_cfg.name]
     forces = s.data.net_forces_w  # [N, num_bodies, 3]
@@ -608,13 +735,13 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
     alpha = 0.1  # 越小越强调“持续”；0.05~0.2 常用
     env.contact_ema = (1.0 - alpha) * env.contact_ema + alpha * contact  # [N, num_feet]
 
-    # —— 占空比阈值：每脚是否达到“贴地占空比”要求 —— 
+    # —— 占空比阈值：每脚是否达到“贴地占空比”要求 ——
     target_duty = 0.85  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
     slack = 0.05
     duty_ok = (env.contact_ema >= (target_duty - slack)).float()        # [N, num_feet]
     reward = duty_ok.mean(dim=1)                                        # [N], 0~1
 
-    # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
+    # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 ——
     cmd = env.command_manager.get_command(command_name)                 # [N, D]
     v_ref = 1.0  # 参考最大期望线速度，按你的命令分布调整
     w = (cmd[:, 0:2].norm(dim=1) / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
@@ -633,13 +760,13 @@ def feet_continue_contact(env, command_name, expect_contact_num, sensor_cfg) -> 
 #     alpha = 0.05  # 越小越强调“持续”；0.05~0.2 常用
 #     env.contact_ema = (1.0 - alpha) * env.contact_ema + alpha * contact  # [N, num_feet]
 
-#     # —— 占空比阈值：每脚是否达到“贴地占空比”要求 —— 
+#     # —— 占空比阈值：每脚是否达到“贴地占空比”要求 ——
 #     target_duty = 0.65  # 平地建议 0.75~0.85；爬箱子可放宽到 ~0.65
 #     slack = 0.05
 #     duty_ok = (env.contact_ema >= (target_duty - slack)).float()        # [N, num_feet]
 #     reward = duty_ok.mean(dim=1)                                        # [N], 0~1
 
-#     # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 —— 
+#     # —— 速度权重（替代硬门控）：慢速也能有奖励，但快一点更赚 ——
 #     cmd = env.command_manager.get_command(command_name)                 # [N, D]
 #     v_ref = 0.6  # 参考最大期望线速度，按你的命令分布调整
 #     w = (cmd[:, 0].abs() / (v_ref + 1e-6)).clamp(0.2, 1.0)     # 避免静止时全没奖励
@@ -1104,36 +1231,87 @@ def stand_still_flat_orientation_bonus(
     command_name: str,
     std: float,
     command_threshold: float = 0.1,
+    ignore_yaw_command: bool = True,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """
-    Provides an extra reward for keeping the body flat specifically when the robot 
+    Provides an extra reward for keeping the body flat specifically when the robot
     is commanded to stand still. This helps stabilization on slopes.
     """
     asset: RigidObject = env.scene[asset_cfg.name]
-    
+
     # 1. Check if the command is "stand still"
-    cmd_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    command = env.command_manager.get_command(command_name)
+    cmd_norm = _stand_still_command_norm(command, ignore_yaw_command)
     is_static_cmd = cmd_norm < command_threshold
-    
+
     # 2. Calculate flatness reward (same as above)
     gravity_b = asset.data.projected_gravity_b
     flat_error = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
     flat_reward = torch.exp(-flat_error / std**2)
-    
+
     # 3. Apply reward only when static
     reward = flat_reward * is_static_cmd.float()
-    
+
     # Survival gating
     reward *= torch.clamp(-gravity_b[:, 2], 0.0, 0.7) / 0.7
-    
+
     return reward
 
+def moving_flat_orientation_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    command_threshold: float = 0.12,
+    command_max: float = 0.8,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Reward a flat body when the command asks the robot to move.
+
+    This complements stand_still_flat_orientation_bonus: static commands get the
+    stand-still reward, while walking/turning commands get this term.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+
+    cmd_norm = torch.norm(command[:, :3], dim=1)
+    motion_scale = torch.clamp(
+        (cmd_norm - command_threshold) / max(command_max - command_threshold, 1e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    gravity_b = asset.data.projected_gravity_b
+    flat_error = torch.sum(torch.square(gravity_b[:, :2]), dim=1)
+    flat_reward = torch.exp(-flat_error / std**2)
+
+    reward = flat_reward * motion_scale
+    reward *= torch.clamp(-gravity_b[:, 2], 0.0, 0.7) / 0.7
+    return reward
+
+
+def _highstep_training_progress_gate(
+    env: ManagerBasedRLEnv,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Scalar gate used to stage high-step rewards during one continuous run."""
+    update_count = float(env.common_step_counter) / max(float(num_steps_per_update), 1.0)
+    progress = (update_count - float(stage_start_update)) / max(float(stage_ramp_updates), 1.0)
+    progress = max(0.0, min(1.0, progress))
+    return torch.as_tensor(progress, device=env.device)
+
+
 def blind_climbing_vel_z_bonus(
-    env: ManagerBasedRLEnv, 
-    command_name: str, 
-    pitch_threshold: float = 0.05, 
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    pitch_threshold: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
 ) -> torch.Tensor:
     """
     盲走爬台阶奖励：当机器人被指令向前移动，且车头抬起时，奖励其向上的 Z 轴速度。
@@ -1162,38 +1340,50 @@ def blind_climbing_vel_z_bonus(
 
     # 5. 计算奖励：只奖励向上的速度 (vel_z > 0)，且只有在爬台阶状态下才给奖励
     climbing_vel_z = torch.clamp(vel_z, min=0.0)
-    
-    # 返回奖励值 (非爬台阶状态下，此项奖励为 0)
-    return climbing_vel_z * is_climbing.float()
 
-def climbing_pitch_up_bonus(env: ManagerBasedRLEnv, command_name: str, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    # 返回奖励值 (非爬台阶状态下，此项奖励为 0)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return climbing_vel_z * is_climbing.float() * stage_gate
+
+def climbing_pitch_up_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.4,
+    min_actual_vel_x: float = 0.05,
+    max_actual_vel_x: float = 0.3,
+    min_pitch_metric: float = 0.05,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
     """
     【改进版：扬身奖励】
     鼓励机器人在遇到障碍物受阻时抬起前身，但防止其在平地起步时原地“翘头”作弊。
     """
     robot = env.scene[asset_cfg.name]
-    
+
     # 1. 获取指令和实际速度
     cmd_vel_x = env.command_manager.get_command(command_name)[:, 0]
     actual_vel_x = robot.data.root_lin_vel_b[:, 0]
     actual_vel_z = robot.data.root_lin_vel_b[:, 2]  # 获取 Z 轴（上下）速度
-    
+
     # 2. 计算 Pitch 角的替代指标 (抬头时为正)
     pitch_metric = -robot.data.projected_gravity_b[:, 0]
-    
+
     # 3. 核心逻辑修改：增加多重限制条件
-    
+
     # 条件 A: 强烈的向前意图
-    intent_forward = cmd_vel_x > 0.4
-    
+    intent_forward = cmd_vel_x > min_cmd_x
+
     # 条件 B: 实际速度受阻，但必须大于一个下限！(防起步作弊核心)
     # actual_vel_x > 0.05: 确保机器人已经“动起来了”，而不是刚出生在原地静止。
     # actual_vel_x < 0.3: 速度明显低于预期，说明被障碍物挡住了。
-    is_resisted = (actual_vel_x > 0.05) & (actual_vel_x < 0.3)
-    
+    is_resisted = (actual_vel_x > min_actual_vel_x) & (actual_vel_x < max_actual_vel_x)
+
     # 条件 C: 确保机器人没有在往下掉 (防止下坡或下台阶时误触发抬头)
     not_falling = actual_vel_z > -0.1
-    
+
     # 条件 D: 限制最大奖励值 (防后空翻核心)
     # 如果不限制，机器人会为了追求无限大的奖励而直接向后翻倒。
     # 限制最大值为 0.4 (大约对应 pitch 角 23.5 度，sin(23.5°) ≈ 0.4)
@@ -1202,14 +1392,15 @@ def climbing_pitch_up_bonus(env: ManagerBasedRLEnv, command_name: str, asset_cfg
 
     # 【新增】防翻车熔断锁：如果仰角超过约 75 度 (sin(75°) ≈ 0.96)，说明快要后空翻了，直接判定为不安全
     is_safe_pitch = pitch_metric < 0.95
-    
+
     # 4. 组合所有条件：必须同时满足才给奖励，且要求已经有轻微的抬头趋势 (>0.05)
     # 必须满足：想往前走 + 速度受阻 + 没在下落 + 仰角大于0.05 + 仰角在安全范围内
-    valid_climbing_state = intent_forward & is_resisted & not_falling & (pitch_metric > 0.05) & is_safe_pitch
-    
+    valid_climbing_state = intent_forward & is_resisted & not_falling & (pitch_metric > min_pitch_metric) & is_safe_pitch
+
     # 5. 发放奖励
-    reward = torch.where(valid_climbing_state, capped_pitch, torch.zeros_like(pitch_metric))
-    
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    reward = torch.where(valid_climbing_state, capped_pitch, torch.zeros_like(pitch_metric)) * stage_gate
+
     return reward
 
 def front_legs_reach_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -1219,90 +1410,938 @@ def front_legs_reach_bonus(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) ->
     鼓励它把前脚尽可能举高，去够高台的台面。
     """
     robot = env.scene[asset_cfg.name]
-    
+
     # 获取前脚在世界坐标系下的 Z 轴高度
     # 注意：这里依赖于在 params 中传入 asset_cfg=SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot"])
     front_feet_indices = asset_cfg.body_ids
     front_feet_z = robot.data.body_pos_w[:, front_feet_indices, 2] # shape: (num_envs, 2)
     mean_front_z = torch.mean(front_feet_z, dim=1)
-    
+
     # 获取机身高度
     root_z = robot.data.root_pos_w[:, 2]
-    
+
     # 计算前脚相对于机身的高度差 (鼓励前脚比机身抬得更高)
     relative_z = mean_front_z - root_z
-    
+
     # 触发条件：机身必须处于抬头状态 (pitch_metric > 0.05，约 3度以上)
     pitch_metric = -robot.data.projected_gravity_b[:, 0]
-    is_pitching = pitch_metric > 0.05 
-    
+    is_pitching = pitch_metric > 0.05
+
     # 当抬头且前脚抬起时，奖励其相对高度
     reward = torch.where(is_pitching & (relative_z > -0.1), relative_z + 0.1, torch.zeros_like(relative_z))
     return reward
+
+
+def front_legs_highstep_reach_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    sensor_cfg: SceneEntityCfg | None = None,
+    min_cmd_x: float = 0.08,
+    min_pitch_metric: float = 0.02,
+    min_height_diff: float = 0.05,
+    target_height_diff: float = 0.30,
+    relative_lift_min: float = -0.34,
+    relative_lift_target: float = -0.08,
+    min_front_x: float = 0.20,
+    target_front_x: float = 0.45,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    terrain_gate_floor: float = 0.25,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward front-leg lift/reach for high-step climbing before forward motion exists."""
+    robot = env.scene[asset_cfg.name]
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+
+    front_foot_ids = robot.find_bodies(front_foot_names)[0]
+    rear_foot_ids = robot.find_bodies(rear_foot_names)[0]
+    front_feet_z = robot.data.body_pos_w[:, front_foot_ids, 2].mean(dim=1)
+    rear_feet_z = robot.data.body_pos_w[:, rear_foot_ids, 2].mean(dim=1)
+    height_diff = front_feet_z - rear_feet_z
+
+    pitch_metric = -robot.data.projected_gravity_b[:, 0]
+    safe_pitch = pitch_metric < 0.95
+
+    denom = max(target_height_diff - min_height_diff, 1.0e-6)
+    height_score = torch.clamp((height_diff - min_height_diff) / denom, min=0.0, max=1.0)
+    root_z = robot.data.root_pos_w[:, 2]
+    relative_front_lift = front_feet_z - root_z
+    lift_score = torch.clamp(
+        (relative_front_lift - relative_lift_min) / max(relative_lift_target - relative_lift_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    front_rel_w = robot.data.body_pos_w[:, front_foot_ids, :].mean(dim=1) - robot.data.root_pos_w
+    front_rel_b = quat_apply_inverse(yaw_quat(robot.data.root_quat_w), front_rel_w)
+    front_x_score = torch.clamp(
+        (front_rel_b[:, 0] - min_front_x) / max(target_front_x - min_front_x, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    pitch_gate = torch.clamp((pitch_metric - min_pitch_metric) / 0.25, min=0.0, max=1.0)
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, min=0.0, max=1.0)
+    terrain_gate = torch.ones_like(cmd_gate)
+    if sensor_cfg is not None:
+        terrain_gate, _, _ = _forward_highstep_terrain_gate(
+            env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+        )
+    task_gate = torch.clamp(
+        terrain_gate_floor + (1.0 - terrain_gate_floor) * terrain_gate,
+        min=0.0,
+        max=1.0,
+    )
+    reach_score = 0.40 * lift_score * pitch_gate + 0.35 * height_score + 0.25 * front_x_score
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return task_gate * cmd_gate * safe_pitch * reach_score * stage_gate
+
+
+def _highstep_masked_ray_mean(values: torch.Tensor, mask: torch.Tensor, fallback: torch.Tensor) -> torch.Tensor:
+    if mask is None or not bool(torch.any(mask).item()):
+        return fallback
+    selected = values[:, mask]
+    valid = torch.isfinite(selected) & (torch.abs(selected) < 1.0e6)
+    valid_count = valid.float().sum(dim=1)
+    selected_sum = torch.where(valid, selected, torch.zeros_like(selected)).sum(dim=1)
+    mean = selected_sum / torch.clamp(valid_count, min=1.0)
+    return torch.where(valid_count > 0.0, mean, fallback)
+
+
+def _forward_highstep_terrain_gate(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    front_x_min: float,
+    rear_x_max: float,
+    max_abs_y: float,
+    height_threshold: float,
+    height_gate_width: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    sensor: RayCaster = env.scene[sensor_cfg.name]
+    ray_starts = sensor.ray_starts[0]
+    ray_x = ray_starts[:, 0]
+    ray_y = ray_starts[:, 1]
+    side_mask = torch.abs(ray_y) <= max_abs_y
+    front_mask = (ray_x >= front_x_min) & side_mask
+    rear_mask = (ray_x <= rear_x_max) & side_mask
+
+    ray_hits_z = sensor.data.ray_hits_w[..., 2]
+    sensor_z = sensor.data.pos_w[:, 2]
+    front_z = _highstep_masked_ray_mean(ray_hits_z, front_mask, sensor_z)
+    rear_z = _highstep_masked_ray_mean(ray_hits_z, rear_mask, front_z)
+    height_delta = front_z - rear_z
+    gate = torch.clamp((height_delta - height_threshold) / (height_gate_width + 1.0e-6), 0.0, 1.0)
+    gate = gate * gate * (3.0 - 2.0 * gate)
+    return gate, height_delta, front_z
+
+
+def highstep_box_default_position_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.10,
+    command_gate_width: float = 0.25,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    hold_scale: float = 16.0,
+    highstep_scale: float = 0.08,
+) -> torch.Tensor:
+    """Keep box joints at default except during an active forward high-step climb."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    box_error = torch.linalg.norm(
+        asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids],
+        dim=1,
+    )
+
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / max(command_gate_width, 1.0e-6), 0.0, 1.0)
+    highstep_gate = terrain_gate * cmd_gate
+
+    scale = hold_scale * (1.0 - highstep_gate) + highstep_scale * highstep_gate
+    return box_error * scale
+
+
+def _front_feet_highstep_commit_gate(
+    asset: RigidObject,
+    front_foot_names: list[str] | None,
+    rear_foot_names: list[str] | None,
+    min_height_diff: float = 0.08,
+    target_height_diff: float = 0.26,
+    min_front_x: float = 0.12,
+    target_front_x: float = 0.36,
+    min_pitch_metric: float = 0.02,
+    target_pitch_metric: float = 0.28,
+) -> torch.Tensor:
+    """Behavior gate for the moment when the front feet have committed onto a high step."""
+    if front_foot_names is None or rear_foot_names is None:
+        return torch.zeros(asset.data.root_pos_w.shape[0], device=asset.data.root_pos_w.device)
+
+    front_ids = asset.find_bodies(front_foot_names)[0]
+    rear_ids = asset.find_bodies(rear_foot_names)[0]
+
+    front_pos_w = asset.data.body_pos_w[:, front_ids, :].mean(dim=1)
+    rear_pos_w = asset.data.body_pos_w[:, rear_ids, :].mean(dim=1)
+    height_diff = front_pos_w[:, 2] - rear_pos_w[:, 2]
+    height_score = torch.clamp(
+        (height_diff - min_height_diff) / max(target_height_diff - min_height_diff, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    front_rel_w = front_pos_w - asset.data.root_pos_w
+    front_rel_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), front_rel_w)
+    front_x_score = torch.clamp(
+        (front_rel_b[:, 0] - min_front_x) / max(target_front_x - min_front_x, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    pitch_metric = -asset.data.projected_gravity_b[:, 0]
+    pitch_score = torch.clamp(
+        (pitch_metric - min_pitch_metric) / max(target_pitch_metric - min_pitch_metric, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    return height_score * (0.45 + 0.55 * front_x_score) * (0.35 + 0.65 * pitch_score)
+
+
+def _ensure_highstep_rear_branch_buffers(env: ManagerBasedRLEnv):
+    """Create per-env buffers used to diagnose rear-foot branch choice."""
+    needs_init = (
+        not hasattr(env, "_highstep_rear_branch_lead")
+        or env._highstep_rear_branch_lead.shape[0] != env.num_envs
+        or env._highstep_rear_branch_lead.device != env.device
+    )
+    if needs_init:
+        env._highstep_rear_branch_lead = torch.full(
+            (env.num_envs,), -1, dtype=torch.int64, device=env.device
+        )
+        env._highstep_rear_branch_commit_steps = torch.zeros(env.num_envs, device=env.device)
+        env._highstep_rear_branch_one_sided_steps = torch.zeros(env.num_envs, device=env.device)
+        env._highstep_rear_branch_second_clear_steps = torch.zeros(env.num_envs, device=env.device)
+
+
+def _update_highstep_rear_branch_state(
+    env: ManagerBasedRLEnv,
+    active_gate: torch.Tensor,
+    rear_clearance_score: torch.Tensor,
+    lead_threshold: float = 0.62,
+    second_clear_threshold: float = 0.72,
+    one_sided_gap: float = 0.22,
+) -> None:
+    """Track which rear foot leads and whether the other rear foot is left behind."""
+    _ensure_highstep_rear_branch_buffers(env)
+    active = active_gate > 0.15
+    if rear_clearance_score.shape[1] < 2:
+        return
+
+    rl_score = rear_clearance_score[:, 0]
+    rr_score = rear_clearance_score[:, 1]
+    rl_high = rl_score > lead_threshold
+    rr_high = rr_score > lead_threshold
+    lead_gap = 0.5 * one_sided_gap
+    no_lead = env._highstep_rear_branch_lead < 0
+
+    rl_first = active & no_lead & rl_high & ((rl_score - rr_score) > lead_gap)
+    rr_first = active & no_lead & rr_high & ((rr_score - rl_score) > lead_gap)
+    both_first = active & no_lead & (rl_high | rr_high) & (~rl_first) & (~rr_first)
+    env._highstep_rear_branch_lead = torch.where(
+        rl_first,
+        torch.zeros_like(env._highstep_rear_branch_lead),
+        env._highstep_rear_branch_lead,
+    )
+    env._highstep_rear_branch_lead = torch.where(
+        rr_first,
+        torch.ones_like(env._highstep_rear_branch_lead),
+        env._highstep_rear_branch_lead,
+    )
+    env._highstep_rear_branch_lead = torch.where(
+        both_first,
+        torch.full_like(env._highstep_rear_branch_lead, 2),
+        env._highstep_rear_branch_lead,
+    )
+
+    env._highstep_rear_branch_commit_steps += active.float()
+    max_score = torch.maximum(rl_score, rr_score)
+    min_score = torch.minimum(rl_score, rr_score)
+    one_sided = active & (max_score > lead_threshold) & ((max_score - min_score) > one_sided_gap)
+    second_clear = active & (min_score > second_clear_threshold)
+    env._highstep_rear_branch_one_sided_steps += one_sided.float()
+    env._highstep_rear_branch_second_clear_steps += second_clear.float()
+
+
+def front_feet_highstep_clearance_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.03,
+    clearance_window: float = 0.12,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward front feet clearing the high terrain detected in front of the robot."""
+    robot = env.scene[asset_cfg.name]
+    gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    front_foot_ids = robot.find_bodies(front_foot_names)[0]
+    front_feet_z = robot.data.body_pos_w[:, front_foot_ids, 2].mean(dim=1)
+    clearance = front_feet_z - (front_terrain_z + clearance_margin)
+    clearance_score = torch.clamp((clearance + clearance_window) / max(clearance_window, 1.0e-6), 0.0, 1.0)
+
+    pitch_metric = -robot.data.projected_gravity_b[:, 0]
+    safe_pitch = pitch_metric < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * clearance_score * safe_pitch * stage_gate
+
+
+def rear_feet_highstep_clearance_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = -0.03,
+    clearance_window: float = 0.22,
+    commit_gate_scale: float = 0.80,
+    single_rear_weight: float = 0.65,
+    min_rear_weight: float = 0.35,
+    single_rear_temperature: float = 0.12,
+    rear_x_min: float = -0.48,
+    rear_x_target: float = -0.08,
+    rear_x_weight: float = 0.25,
+    rear_x_single_weight: float = 0.35,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward rear feet beginning to climb after the front feet have committed to a high step."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_feet_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    rear_clearance = rear_feet_pos_w[..., 2] - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    single_rear_score = torch.max(rear_clearance_score, dim=1).values
+    min_rear_score = torch.min(rear_clearance_score, dim=1).values
+    both_rear_score = torch.mean(rear_clearance_score, dim=1)
+    single_w = max(0.0, min(single_rear_weight, 1.0))
+    min_w = max(0.0, min(min_rear_weight, 1.0 - single_w))
+    mean_w = 1.0 - single_w - min_w
+    rear_height_score = single_w * single_rear_score + min_w * min_rear_score + mean_w * both_rear_score
+
+    rear_rel_w = rear_feet_pos_w - asset.data.root_pos_w[:, None, :]
+    num_rear_feet = rear_rel_w.shape[1]
+    heading_quat = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, num_rear_feet, -1)
+    rear_rel_b = quat_apply_inverse(
+        heading_quat.reshape(-1, 4),
+        rear_rel_w.reshape(-1, 3),
+    ).reshape(rear_rel_w.shape)
+    rear_x_each_score = torch.clamp(
+        (rear_rel_b[..., 0] - rear_x_min) / max(rear_x_target - rear_x_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    rear_x_score = torch.max(rear_x_each_score, dim=1).values
+
+    score = (1.0 - rear_x_weight) * rear_height_score + rear_x_weight * rear_x_score
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * score * safe_pitch * stage_gate
+
+
+def rear_feet_under_step_after_commit_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.02,
+    under_window: float = 0.16,
+    commit_gate_floor: float = 0.25,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.16,
+    target_distance: float = 0.56,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.08,
+    min_forward_vel: float = 0.06,
+    relief_forward_vel: float = 0.22,
+    stall_floor: float = 0.0,
+    worst_rear_weight: float = 0.75,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize rear feet staying below the step only when the climb is stalled."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_z = asset.data.body_pos_w[:, rear_foot_ids, 2]
+    target_z = front_terrain_z[:, None] + clearance_margin
+    rear_under_score = torch.clamp((target_z - rear_z) / max(under_window, 1.0e-6), min=0.0, max=1.0)
+    mean_under_score = torch.mean(rear_under_score, dim=1)
+    worst_under_score = torch.max(rear_under_score, dim=1).values
+    worst_w = max(0.0, min(worst_rear_weight, 1.0))
+    under_score = worst_w * worst_under_score + (1.0 - worst_w) * mean_under_score
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    progress_score = distance_score * (0.40 + 0.60 * height_gain_score)
+    position_stall_gate = torch.clamp(1.0 - progress_score, 0.0, 1.0)
+
+    forward_vel = asset.data.root_lin_vel_b[:, 0]
+    velocity_stall_gate = torch.clamp(
+        (relief_forward_vel - forward_vel) / max(relief_forward_vel - min_forward_vel, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    stall_gate = torch.clamp(
+        stall_floor + (1.0 - stall_floor) * position_stall_gate * velocity_stall_gate,
+        min=0.0,
+        max=1.0,
+    )
+
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * under_score * stall_gate * safe_pitch * stage_gate
+
+
+def rear_second_foot_highstep_clearance_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    first_rear_gate_min: float = 0.55,
+    commit_gate_scale: float = 0.90,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.18,
+    target_distance: float = 0.60,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.08,
+    progress_floor: float = 0.20,
+    max_roll_metric: float = 0.24,
+    branch_lead_threshold: float = 0.62,
+    branch_second_clear_threshold: float = 0.72,
+    branch_one_sided_gap: float = 0.22,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the second rear foot clearing the step after either rear foot has reached the platform."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_feet_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    rear_clearance = rear_feet_pos_w[..., 2] - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    _update_highstep_rear_branch_state(
+        env,
+        cmd_gate * commit_gate,
+        rear_clearance_score,
+        lead_threshold=branch_lead_threshold,
+        second_clear_threshold=branch_second_clear_threshold,
+        one_sided_gap=branch_one_sided_gap,
+    )
+
+    first_rear_score = torch.max(rear_clearance_score, dim=1).values
+    second_rear_score = torch.min(rear_clearance_score, dim=1).values
+    first_rear_gate = torch.clamp(
+        (first_rear_score - first_rear_gate_min) / max(1.0 - first_rear_gate_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    progress_score = distance_score * (0.35 + 0.65 * height_gain_score)
+    progress_gate = torch.clamp(progress_floor + (1.0 - progress_floor) * progress_score, 0.0, 1.0)
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * first_rear_gate * second_rear_score * progress_gate * roll_gate * safe_pitch * stage_gate
+
+
+def highstep_forward_progress_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.08,
+    target_forward_vel: float = 0.35,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    front_foot_names: list[str] | None = None,
+    rear_foot_names: list[str] | None = None,
+    commit_gate_scale: float = 0.70,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward forward progress while a high step is detected in front."""
+    robot = env.scene[asset_cfg.name]
+    gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(robot, front_foot_names, rear_foot_names)
+    gate = torch.maximum(gate, commit_gate_scale * commit_gate)
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+    forward_progress = torch.clamp(robot.data.root_lin_vel_b[:, 0] / max(target_forward_vel, 1.0e-6), 0.0, 1.0)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * forward_progress * stage_gate
+
+
+def highstep_body_lift_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    min_lift: float = 0.02,
+    target_lift: float = 0.16,
+    front_foot_names: list[str] | None = None,
+    rear_foot_names: list[str] | None = None,
+    commit_gate_scale: float = 0.70,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward lifting the body relative to the lower terrain when a forward high step is present."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    gate, height_delta, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(gate, commit_gate_scale * commit_gate)
+    rear_terrain_z = front_terrain_z - height_delta
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    body_lift = asset.data.root_pos_w[:, 2] - (rear_terrain_z + nominal_base_height)
+    lift_score = torch.clamp(
+        (body_lift - min_lift) / max(target_lift - min_lift, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * lift_score * safe_pitch * stage_gate
+
+
+def highstep_base_advance_lift_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.25,
+    target_distance: float = 0.80,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.10,
+    distance_floor: float = 0.0,
+    front_foot_names: list[str] | None = None,
+    rear_foot_names: list[str] | None = None,
+    commit_gate_scale: float = 0.80,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the body actually advancing and lifting after committing to a high step."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    distance_floor_value = torch.clamp(torch.as_tensor(distance_floor, device=distance_score.device), 0.0, 1.0)
+    lift_gated_distance = distance_score * (distance_floor_value + (1.0 - distance_floor_value) * height_score)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * lift_gated_distance * safe_pitch * stage_gate
+
+
+def base_height_floor_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    min_height: float = 0.32,
+) -> torch.Tensor:
+    """Penalize crawling below a terrain-relative minimum body height."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    sensor: RayCaster = env.scene[sensor_cfg.name]
+
+    ray_hits_z = sensor.data.ray_hits_w[..., 2]
+    valid = torch.isfinite(ray_hits_z) & (torch.abs(ray_hits_z) < 1.0e6)
+    valid_count = valid.float().sum(dim=1)
+    lowest_hits = torch.where(valid, ray_hits_z, torch.full_like(ray_hits_z, float("inf"))).min(dim=1).values
+    ground_z = torch.where(valid_count > 0.0, lowest_hits, asset.data.root_pos_w[:, 2] - min_height)
+
+    body_height = asset.data.root_pos_w[:, 2] - ground_z
+    return torch.square(torch.clamp(min_height - body_height, min=0.0))
+
+
+def highstep_leg_support_contact_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    contact_sensor_cfg: SceneEntityCfg,
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    contact_threshold: float = 8.0,
+    contact_force_window: float = 60.0,
+    max_contact_score: float = 2.0,
+    front_foot_names: list[str] | None = None,
+    rear_foot_names: list[str] | None = None,
+    commit_gate_scale: float = 0.75,
+    support_body_names: list[str] | None = None,
+    support_pose_scale: float = 0.0,
+    support_x_min: float = 0.02,
+    support_x_target: float = 0.28,
+    support_height_margin: float = 0.10,
+    support_height_window: float = 0.18,
+    support_phase_floor: float = 0.40,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward useful thigh/calf support contacts or the posture that leads to them."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(gate, commit_gate_scale * commit_gate)
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    contact_sensor: ContactSensor = env.scene.sensors[contact_sensor_cfg.name]
+    forces = contact_sensor.data.net_forces_w[:, contact_sensor_cfg.body_ids, :]
+    force_norm = torch.linalg.norm(forces, dim=-1)
+    contact_score = torch.clamp(
+        (force_norm - contact_threshold) / max(contact_force_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    ).sum(dim=1)
+    contact_score = torch.clamp(contact_score, max=max_contact_score) / max(max_contact_score, 1.0e-6)
+
+    if support_body_names is not None and support_pose_scale > 0.0:
+        support_body_ids = asset.find_bodies(support_body_names)[0]
+        support_pos_w = asset.data.body_pos_w[:, support_body_ids, :]
+        support_rel_w = support_pos_w - asset.data.root_pos_w[:, None, :]
+        num_support_bodies = support_rel_w.shape[1]
+        heading_quat = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, num_support_bodies, -1)
+        support_rel_b = quat_apply_inverse(
+            heading_quat.reshape(-1, 4),
+            support_rel_w.reshape(-1, 3),
+        ).reshape(support_rel_w.shape)
+        support_x_score = torch.clamp(
+            (support_rel_b[..., 0] - support_x_min) / max(support_x_target - support_x_min, 1.0e-6),
+            min=0.0,
+            max=1.0,
+        )
+        _, _, front_terrain_z = _forward_highstep_terrain_gate(
+            env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+        )
+        support_height_score = torch.clamp(
+            (support_pos_w[..., 2] - (front_terrain_z[:, None] - support_height_margin))
+            / max(support_height_window, 1.0e-6),
+            min=0.0,
+            max=1.0,
+        )
+        support_pose_score = torch.max(support_x_score * support_height_score, dim=1).values
+        contact_score = torch.maximum(contact_score, support_pose_scale * support_pose_score)
+
+    forward_progress = torch.clamp(asset.data.root_lin_vel_b[:, 0] / 0.25, min=0.0, max=1.0)
+    support_phase = torch.clamp(
+        support_phase_floor + (1.0 - support_phase_floor) * forward_progress,
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * contact_score * support_phase * safe_pitch * stage_gate
+
+
+def non_forward_highstep_pitch_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    forward_cmd_threshold: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    pitch_deadband: float = 0.12,
+) -> torch.Tensor:
+    """Penalize pitch when the command is not a forward high-step climb."""
+    robot = env.scene[asset_cfg.name]
+    gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    forward_gate = torch.clamp((cmd_x - forward_cmd_threshold) / 0.25, 0.0, 1.0)
+    climb_gate = gate * forward_gate
+    pitch_metric = torch.abs(robot.data.projected_gravity_b[:, 0])
+    pitch_error = torch.clamp(pitch_metric - pitch_deadband, min=0.0)
+    return torch.square(pitch_error) * (1.0 - climb_gate)
+
+
+def backward_motion_pitch_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    min_backward_cmd: float = 0.05,
+    full_backward_cmd: float = 0.22,
+    pitch_deadband: float = 0.08,
+    pitch_limit: float = 0.32,
+    height_soft_limit: float = 0.56,
+    height_limit: float = 0.72,
+    height_weight: float = 0.40,
+) -> torch.Tensor:
+    """Penalize pitching and body lift when tracking a backward velocity command."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+
+    backward_gate = torch.clamp(
+        (-cmd_x - min_backward_cmd) / max(full_backward_cmd - min_backward_cmd, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    pitch_metric = torch.abs(asset.data.projected_gravity_b[:, 0])
+    pitch_score = torch.clamp(
+        (pitch_metric - pitch_deadband) / max(pitch_limit - pitch_deadband, 1.0e-6),
+        min=0.0,
+        max=2.0,
+    )
+
+    base_height = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2]
+    height_score = torch.clamp(
+        (base_height - height_soft_limit) / max(height_limit - height_soft_limit, 1.0e-6),
+        min=0.0,
+        max=2.0,
+    )
+    return backward_gate * (torch.square(pitch_score) + height_weight * torch.square(height_score))
 
 # ==========================================
 # 1. 像马一样扬身 (Horse Rearing Posture) - 防破解版
 # ==========================================
 def horse_rearing_posture_bonus(
-    env: ManagerBasedRLEnv, 
-    command_name: str, 
-    asset_cfg: SceneEntityCfg, 
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
     front_foot_names: list,
     rear_foot_names: list,
+    sensor_cfg: SceneEntityCfg | None = None,
     target_pitch_deg: float = 35.0,  # 目标仰角：35度 (不要让它竖直)
-    target_height_diff: float = 0.35 # 目标高度差：0.35米 (根据你的台阶高度调整)
+    target_height_diff: float = 0.35, # 目标高度差：0.35米 (根据你的台阶高度调整)
+    min_front_x: float = 0.18,
+    target_front_x: float = 0.42,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    terrain_gate_floor: float = 0.25,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
 ) -> torch.Tensor:
     """
-    鼓励机器人扬起前身，但限制最大角度，并强制要求实际向前移动。
+    鼓励机器人在前方高台前扬起并向前够台，而不是原地仰头刷姿态奖励。
     """
     asset = env.scene[asset_cfg.name]
-    
-    # 1. 获取指令速度 和 真实速度
+
     velocity_command = env.command_manager.get_command(command_name)
     cmd_x = velocity_command[:, 0]
-    # 获取机器人基座在机身坐标系下的真实线速度
-    actual_vel_x = asset.data.root_lin_vel_b[:, 0] 
-    
-    # 2. 计算当前 Pitch 的 sin 值
+
     projected_gravity = asset.data.projected_gravity_b
-    current_pitch_sin = -projected_gravity[:, 0] 
-    
-    # 将目标角度转换为 sin 值
+    current_pitch_sin = -projected_gravity[:, 0]
+
     target_pitch_rad = math.radians(target_pitch_deg)
     target_pitch_sin = math.sin(target_pitch_rad)
-    
-    # 3. 计算高度差
+
     front_foot_ids = asset.find_bodies(front_foot_names)[0]
     rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
     front_feet_z = asset.data.body_pos_w[:, front_foot_ids, 2].mean(dim=1)
     rear_feet_z = asset.data.body_pos_w[:, rear_foot_ids, 2].mean(dim=1)
     height_diff = front_feet_z - rear_feet_z
-    
-    # ================= 核心修改区 =================
-    # 使用高斯核函数 (exp(-x^2))：越接近目标值，奖励越接近 1.0；偏离越远，奖励越趋近于 0
-    
-    # 仰角奖励：控制在目标角度附近
-    pitch_reward = torch.exp(-5.0 * torch.square(current_pitch_sin - target_pitch_sin))
-    
-    # 高度差奖励：控制在目标高度差附近
-    height_reward = torch.exp(-5.0 * torch.square(height_diff - target_height_diff))
-    
-    # 判定条件：有前进指令 且 真实速度也在前进 (防止原地罚站)
-    is_commanding_forward = cmd_x > 0.1
-    is_actually_moving = actual_vel_x > 0.15 # 必须有真实的向前速度
-    
-    # 综合奖励
-    bonus = pitch_reward * height_reward * is_commanding_forward * is_actually_moving
-    
-    return bonus
+    front_rel_w = asset.data.body_pos_w[:, front_foot_ids, :].mean(dim=1) - asset.data.root_pos_w
+    front_rel_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), front_rel_w)
+    front_x_score = torch.clamp(
+        (front_rel_b[:, 0] - min_front_x) / max(target_front_x - min_front_x, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    cmd_gate = torch.clamp((cmd_x - 0.08) / 0.25, min=0.0, max=1.0)
+    pitch_score = torch.clamp((current_pitch_sin - 0.05) / max(target_pitch_sin - 0.05, 1.0e-6), 0.0, 1.0)
+    height_score = torch.clamp(height_diff / max(target_height_diff, 1.0e-6), 0.0, 1.0)
+    terrain_gate = torch.ones_like(cmd_gate)
+    if sensor_cfg is not None:
+        terrain_gate, _, _ = _forward_highstep_terrain_gate(
+            env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+        )
+    task_gate = torch.clamp(
+        terrain_gate_floor + (1.0 - terrain_gate_floor) * terrain_gate,
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = current_pitch_sin < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return task_gate * cmd_gate * safe_pitch * (0.45 * pitch_score + 0.35 * height_score + 0.20 * front_x_score) * stage_gate
 
 # ==========================================
 # 2. 前腿搭台后锁死 (Front Legs Quiet on Step) - 修改版
 # ==========================================
 def front_legs_quiet_on_step_penalty(
-    env: ManagerBasedRLEnv, 
-    asset_cfg: SceneEntityCfg, 
-    front_foot_names: list, 
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    front_foot_names: list,
     front_knee_names: list,
     step_height_threshold: float = 0.30
 ) -> torch.Tensor:
@@ -1310,21 +2349,21 @@ def front_legs_quiet_on_step_penalty(
     当【两只前脚同时】接触到高于地面的平台时，严厉惩罚前腿膝盖（calf）的运动，迫使其“锁死”或保持稳定。
     """
     asset = env.scene[asset_cfg.name]
-    
+
     # 找到前脚和前膝盖的索引
     front_foot_ids = asset.find_bodies(front_foot_names)[0]
     front_knee_ids = asset.find_joints(front_knee_names)[0]
-    
+
     # 获取前脚的高度 (Z坐标)，形状为 (num_envs, 2)
     front_foot_z = asset.data.body_pos_w[:, front_foot_ids, 2]
-    
+
     # 判定条件：两只前脚的高度【同时】大于绝对值 step_height_threshold
     # 使用 .all(dim=1) 确保两个脚都满足条件
     both_feet_on_step = (front_foot_z > step_height_threshold).all(dim=1)
-    
+
     # 获取前膝盖的速度
     front_knee_vel = asset.data.joint_vel[:, front_knee_ids]
-    
+
     # 如果双腿都搭上了高台，惩罚前膝盖的速度平方
     penalty = torch.sum(torch.square(front_knee_vel), dim=1) * both_feet_on_step
     return penalty
@@ -1334,35 +2373,420 @@ def front_legs_quiet_on_step_penalty(
 # 3. 后腿发力蹬踏 (Rear Legs Power Drive) - 修改版
 # ==========================================
 def rear_legs_power_drive_bonus(
-    env: ManagerBasedRLEnv, 
-    asset_cfg: SceneEntityCfg, 
-    rear_drive_joint_names: list
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    rear_drive_joint_names: list,
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    min_body_lift: float = 0.02,
+    target_positive_power: float = 120.0,
+    max_power_score: float = 1.0,
+    front_foot_names: list[str] | None = None,
+    rear_foot_names: list[str] | None = None,
+    commit_gate_scale: float = 0.75,
+    lift_gate_floor: float = 0.30,
+    use_abs_power: bool = False,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
 ) -> torch.Tensor:
     """
-    当机器人处于扬身状态时，奖励后腿的 thigh 和 calf 关节输出巨大的扭矩/功率，
-    鼓励后腿把身体“推”上去。
+    Reward rear-leg positive power only when it helps a detected forward high-step climb.
+
+    The reward is bounded so rear-leg flailing cannot dominate the real high-step progress terms.
     """
     asset = env.scene[asset_cfg.name]
-    
+    gate, height_delta, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    gate = torch.maximum(gate, commit_gate_scale * commit_gate)
+    rear_terrain_z = front_terrain_z - height_delta
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
     # 找到后腿发力关节（thigh 和 calf）的索引
     rear_joint_ids = asset.find_joints(rear_drive_joint_names)[0]
-    
+
     # 获取当前 Pitch 角
     projected_gravity = asset.data.projected_gravity_b
-    is_pitching_up = -projected_gravity[:, 0] > 0.1 # 仰角大于约5度
-    
+    pitch_gate = torch.clamp((-projected_gravity[:, 0] - 0.05) / 0.25, 0.0, 1.0)
+    body_lift = asset.data.root_pos_w[:, 2] - (rear_terrain_z + nominal_base_height)
+    lift_gate = torch.clamp((body_lift - min_body_lift) / 0.10, 0.0, 1.0)
+
     # 获取后腿指定关节的输出扭矩和速度
     rear_torques = asset.data.applied_torque[:, rear_joint_ids]
     rear_vel = asset.data.joint_vel[:, rear_joint_ids]
-    
-    # 机械功率 = 扭矩 * 速度。我们奖励做正功（发力伸展）
+
+    # Mechanical power = torque * velocity.  Joint sign conventions can differ
+    # between models, so high-step training can optionally use bounded absolute
+    # power after the high-step gates have already selected the relevant state.
     power = rear_torques * rear_vel
-    # 过滤掉负功，只奖励正向发力
-    positive_power = torch.clamp(power, min=0.0)
-    
-    # 只有在抬头爬升时，才奖励后腿发力
-    bonus = torch.sum(positive_power, dim=1) * is_pitching_up
+    drive_power = torch.abs(power) if use_abs_power else torch.clamp(power, min=0.0)
+    drive_lift_gate = torch.clamp(
+        lift_gate_floor + (1.0 - lift_gate_floor) * lift_gate,
+        min=0.0,
+        max=1.0,
+    )
+
+    # 只有在高台、向前、抬头、身体开始上沿时，才奖励后腿发力。
+    power_score = torch.clamp(
+        torch.sum(drive_power, dim=1) / max(target_positive_power, 1.0e-6),
+        min=0.0,
+        max=max_power_score,
+    )
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    bonus = power_score * gate * cmd_gate * pitch_gate * drive_lift_gate * stage_gate
     return bonus
+
+
+def highstep_rear_push_posture_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    rear_back_min: float = 0.18,
+    rear_back_target: float = 0.46,
+    min_front_rear_height_diff: float = 0.08,
+    target_front_rear_height_diff: float = 0.28,
+    min_distance: float = 0.22,
+    target_distance: float = 0.65,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.08,
+    commit_gate_floor: float = 0.30,
+    progress_floor: float = 0.20,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the 00059-style rear-leg push after the front feet have committed.
+
+    This term intentionally does not reward a rear-stretched posture by itself.
+    The posture is useful only when it happens with body advance/lift, which
+    prevents the high-step policy from getting paid for a static bridge.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(
+        asset,
+        front_foot_names,
+        rear_foot_names,
+        min_height_diff=0.04,
+        target_height_diff=0.18,
+        min_front_x=0.08,
+        target_front_x=0.34,
+        min_pitch_metric=0.01,
+        target_pitch_metric=0.24,
+    )
+    gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    front_ids = asset.find_bodies(front_foot_names)[0]
+    rear_ids = asset.find_bodies(rear_foot_names)[0]
+    front_z = asset.data.body_pos_w[:, front_ids, 2].mean(dim=1)
+    rear_pos_w = asset.data.body_pos_w[:, rear_ids, :]
+    rear_z = rear_pos_w[..., 2].mean(dim=1)
+
+    rear_rel_w = rear_pos_w - asset.data.root_pos_w[:, None, :]
+    num_rear_feet = rear_rel_w.shape[1]
+    heading_quat = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, num_rear_feet, -1)
+    rear_rel_b = quat_apply_inverse(
+        heading_quat.reshape(-1, 4),
+        rear_rel_w.reshape(-1, 3),
+    ).reshape(rear_rel_w.shape)
+    rear_back = torch.clamp(-rear_rel_b[..., 0].mean(dim=1), min=0.0)
+    rear_back_score = torch.clamp(
+        (rear_back - rear_back_min) / max(rear_back_target - rear_back_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    height_diff = front_z - rear_z
+    height_diff_score = torch.clamp(
+        (height_diff - min_front_rear_height_diff)
+        / max(target_front_rear_height_diff - min_front_rear_height_diff, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    progress_score = distance_score * (0.35 + 0.65 * height_gain_score)
+    progress_gate = torch.clamp(progress_floor + (1.0 - progress_floor) * progress_score, 0.0, 1.0)
+
+    pitch_metric = -asset.data.projected_gravity_b[:, 0]
+    safe_pitch = pitch_metric < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * rear_back_score * height_diff_score * progress_gate * safe_pitch * stage_gate
+
+
+def highstep_rear_box_push_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    box_joint_names: dict[str, str],
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.05,
+    front_x_min: float = 0.15,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.35,
+    height_threshold: float = 0.035,
+    height_gate_width: float = 0.12,
+    nominal_base_height: float = 0.44,
+    rear_push_target: float = 0.004,
+    target_std: float = 0.012,
+    min_distance: float = 0.18,
+    target_distance: float = 0.60,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.08,
+    commit_gate_floor: float = 0.35,
+    progress_floor: float = 0.30,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward rear box-joint extension only in the committed push phase."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(
+        asset,
+        front_foot_names,
+        rear_foot_names,
+        min_height_diff=0.04,
+        target_height_diff=0.18,
+        min_front_x=0.08,
+        target_front_x=0.34,
+        min_pitch_metric=0.01,
+        target_pitch_metric=0.24,
+    )
+    gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.20, 0.0, 1.0)
+
+    rear_joint_names = [box_joint_names[k] for k in ("RL", "RR")]
+    joint_ids = []
+    for joint_name in rear_joint_names:
+        ids = asset.find_joints(joint_name)[0]
+        joint_ids.append(ids[0])
+    joint_ids = torch.as_tensor(joint_ids, device=asset.data.joint_pos.device, dtype=torch.long)
+    rear_box_pos = asset.data.joint_pos[:, joint_ids]
+    err = torch.mean(torch.square((rear_box_pos - rear_push_target) / max(target_std, 1.0e-6)), dim=1)
+    box_score = torch.exp(-err)
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    progress_score = distance_score * (0.35 + 0.65 * height_gain_score)
+    progress_gate = torch.clamp(progress_floor + (1.0 - progress_floor) * progress_score, 0.0, 1.0)
+
+    pitch_metric = -asset.data.projected_gravity_b[:, 0]
+    safe_pitch = pitch_metric < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * box_score * progress_gate * safe_pitch * stage_gate
+
+
+def highstep_bridge_stall_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    rear_back_min: float = 0.18,
+    rear_back_target: float = 0.46,
+    min_distance: float = 0.20,
+    target_distance: float = 0.58,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.07,
+    commit_gate_floor: float = 0.30,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize the stuck bridge state: committed front feet, stretched rear legs, no climb progress."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(
+        asset,
+        front_foot_names,
+        rear_foot_names,
+        min_height_diff=0.04,
+        target_height_diff=0.18,
+        min_front_x=0.08,
+        target_front_x=0.34,
+        min_pitch_metric=0.01,
+        target_pitch_metric=0.24,
+    )
+    gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_rel_w = asset.data.body_pos_w[:, rear_ids, :] - asset.data.root_pos_w[:, None, :]
+    num_rear_feet = rear_rel_w.shape[1]
+    heading_quat = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, num_rear_feet, -1)
+    rear_rel_b = quat_apply_inverse(
+        heading_quat.reshape(-1, 4),
+        rear_rel_w.reshape(-1, 3),
+    ).reshape(rear_rel_w.shape)
+    rear_back = torch.clamp(-rear_rel_b[..., 0].mean(dim=1), min=0.0)
+    rear_back_score = torch.clamp(
+        (rear_back - rear_back_min) / max(rear_back_target - rear_back_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    progress_score = torch.maximum(distance_score, height_gain_score)
+    stall_score = torch.clamp(1.0 - progress_score, 0.0, 1.0)
+
+    pitch_metric = -asset.data.projected_gravity_b[:, 0]
+    safe_pitch = pitch_metric < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return gate * cmd_gate * rear_back_score * stall_score * safe_pitch * stage_gate
+
+
+def highstep_box_phase_prior_alignment_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    box_joint_names: dict[str, str],
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.05,
+    front_x_min: float = 0.15,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.35,
+    height_threshold: float = 0.035,
+    height_gate_width: float = 0.12,
+    commit_gate_floor: float = 0.25,
+    front_reach_target: float = 0.014,
+    rear_approach_target: float = 0.034,
+    front_support_target: float = 0.034,
+    rear_push_target: float = 0.012,
+    target_std: float = 0.015,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the phased high-step box posture used by the teacher action prior.
+
+    Smaller box-joint position means a longer telescopic leg.  Before the
+    front feet commit, this rewards front-leg extension for reaching the step;
+    after commitment, it rewards rear-leg extension for pushing the body up.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(
+        asset,
+        front_foot_names,
+        rear_foot_names,
+        min_height_diff=0.04,
+        target_height_diff=0.18,
+        min_front_x=0.08,
+        target_front_x=0.34,
+        min_pitch_metric=0.01,
+        target_pitch_metric=0.24,
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.20, 0.0, 1.0)
+
+    reach_gate = terrain_gate * (1.0 - commit_gate) * cmd_gate
+    push_gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate) * cmd_gate
+    phase_gate = torch.maximum(reach_gate, push_gate)
+
+    joint_names = [box_joint_names[k] for k in ("FL", "FR", "RL", "RR")]
+    joint_ids = []
+    for joint_name in joint_names:
+        ids = asset.find_joints(joint_name)[0]
+        joint_ids.append(ids[0])
+    joint_ids = torch.as_tensor(joint_ids, device=asset.data.joint_pos.device, dtype=torch.long)
+    box_pos = asset.data.joint_pos[:, joint_ids]
+
+    reach_target = torch.tensor(
+        [front_reach_target, front_reach_target, rear_approach_target, rear_approach_target],
+        device=box_pos.device,
+        dtype=box_pos.dtype,
+    )
+    push_target = torch.tensor(
+        [front_support_target, front_support_target, rear_push_target, rear_push_target],
+        device=box_pos.device,
+        dtype=box_pos.dtype,
+    )
+    target_weight = torch.clamp(reach_gate + push_gate, min=1.0e-6).unsqueeze(1)
+    target = (reach_gate.unsqueeze(1) * reach_target + push_gate.unsqueeze(1) * push_target) / target_weight
+
+    err = torch.mean(torch.square((box_pos - target) / max(target_std, 1.0e-6)), dim=1)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return phase_gate * torch.exp(-err) * stage_gate
 
 # ==========================================
 # 4. 仅惩罚 Roll 和 Yaw，放开 Pitch (Roll-Yaw Only Penalty)
@@ -1385,22 +2809,79 @@ def action_rate_l2_by_name(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) ->
     """
     # 获取机器人资产
     asset = env.scene[asset_cfg.name]
-    
+
     # 根据传入的正则表达式解析出具体的关节索引
     # 注意：这里获取的是在驱动关节列表中的索引，通常与 action 的索引一一对应
     joint_indices, _ = asset.find_joints(asset_cfg.joint_names)
-    
+
     # 切片提取特定关节的动作
     current_action = env.action_manager.action[:, joint_indices]
     prev_action = env.action_manager.prev_action[:, joint_indices]
-    
+
     return torch.sum(torch.square(current_action - prev_action), dim=1)
+
+
+def lateral_step_scaled_action_rate_l2_by_name(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    relief_scale: float,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+) -> torch.Tensor:
+    """Reduce named-joint action-rate penalty when lateral-step posture correction is needed."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    penalty = action_rate_l2_by_name(env, asset_cfg)
+    relief = _lateral_step_relief_scale(
+        env,
+        asset,
+        foot_body_names,
+        height_threshold,
+        gate_width,
+        relief_scale,
+        contact_sensor_cfg,
+        contact_threshold,
+        min_contacts_per_side,
+    )
+    return penalty * relief
+
+
+def action_rate_l2_by_name_command_scale(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    stand_still_scale: float = 1.0,
+    moving_scale: float = 0.5,
+    command_threshold: float = 0.1,
+    ignore_yaw_command: bool = False,
+) -> torch.Tensor:
+    """Scale named-joint action-rate penalty by whether the velocity command is still or moving."""
+    penalty = action_rate_l2_by_name(env, asset_cfg)
+    command = env.command_manager.get_command(command_name)
+    command_norm = _stand_still_command_norm(command, ignore_yaw_command)
+    scale = torch.where(
+        command_norm < command_threshold,
+        torch.full_like(penalty, stand_still_scale),
+        torch.full_like(penalty, moving_scale),
+    )
+    return penalty * scale
+
+
+def _stand_still_command_norm(command: torch.Tensor, ignore_yaw_command: bool) -> torch.Tensor:
+    if ignore_yaw_command:
+        return torch.norm(command[:, :2], dim=1)
+    return torch.norm(command[:, :3], dim=1)
+
 
 def stand_still_joint_vel_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     command_threshold: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ignore_yaw_command: bool = False,
 ) -> torch.Tensor:
     """
     自定义惩罚：当机器人收到静止指令时，严厉惩罚任何关节的速度（即摇晃和抽搐）。
@@ -1408,29 +2889,70 @@ def stand_still_joint_vel_penalty(
     """
     # 获取机器人实体
     robot = env.scene[asset_cfg.name]
-    
+
     # 获取速度指令 (通常是 [lin_x, lin_y, ang_z])
     command = env.command_manager.get_command(command_name)
-    
-    # 计算指令速度的绝对大小 (L2 Norm)
-    # 取前三个维度计算模长，代表整体的运动意图
-    command_norm = torch.norm(command[:, :3], dim=1)
-    
+
+    command_norm = _stand_still_command_norm(command, ignore_yaw_command)
+
     # 判断是否处于“静止状态” (指令速度小于阈值)
     is_standing_still = command_norm < command_threshold
-    
+
+    # 【关键修改】只获取 asset_cfg 中指定的关节速度
+    # Isaac Lab 的 Reward Manager 会自动解析 joint_names 并将其转换为 joint_ids
+    joint_vel = robot.data.joint_vel[:, asset_cfg.joint_ids]
+
     # 计算所有关节速度的平方和 (dof_vel^2)
     # 速度越大，平方后的惩罚越重
-    joint_vel_sq = torch.sum(torch.square(robot.data.joint_vel), dim=1)
-    
+    # joint_vel_sq = torch.sum(torch.square(robot.data.joint_vel), dim=1) #非解耦时的写法
+    joint_vel_sq = torch.sum(torch.square(joint_vel), dim=1)
+
     # 只有在静止时才输出惩罚值，移动时输出 0
     return is_standing_still.float() * joint_vel_sq
+
+
+def lateral_step_scaled_stand_still_joint_vel_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    relief_scale: float,
+    command_threshold: float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ignore_yaw_command: bool = False,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+) -> torch.Tensor:
+    """Reduce stillness joint-velocity penalty while correcting lateral-step posture."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    penalty = stand_still_joint_vel_penalty(
+        env,
+        command_name,
+        command_threshold=command_threshold,
+        asset_cfg=asset_cfg,
+        ignore_yaw_command=ignore_yaw_command,
+    )
+    relief = _lateral_step_relief_scale(
+        env,
+        asset,
+        foot_body_names,
+        height_threshold,
+        gate_width,
+        relief_scale,
+        contact_sensor_cfg,
+        contact_threshold,
+        min_contacts_per_side,
+    )
+    return penalty * relief
 
 def stand_still_base_ang_vel_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     command_threshold: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ignore_yaw_command: bool = False,
 ) -> torch.Tensor:
     """
     惩罚静止时的机身角速度。
@@ -1439,15 +2961,15 @@ def stand_still_base_ang_vel_penalty(
     """
     asset: Articulation = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    
+
     # 判断是否处于静止指令
-    command_norm = torch.norm(command[:, :3], dim=1)
+    command_norm = _stand_still_command_norm(command, ignore_yaw_command)
     is_standing_still = command_norm < command_threshold
-    
+
     # 获取机身在世界坐标系下的角速度 (root_ang_vel_w)
     # 也可以使用相对于机身坐标系的角速度 (root_ang_vel_b)，效果类似
     base_ang_vel_sq = torch.sum(torch.square(asset.data.root_ang_vel_w), dim=1)
-    
+
     return is_standing_still.float() * base_ang_vel_sq
 
 
@@ -1455,7 +2977,8 @@ def stand_still_base_lin_vel_penalty(
     env: ManagerBasedRLEnv,
     command_name: str,
     command_threshold: float = 0.1,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ignore_yaw_command: bool = False,
 ) -> torch.Tensor:
     """
     惩罚静止时的机身线速度。
@@ -1463,13 +2986,619 @@ def stand_still_base_lin_vel_penalty(
     """
     asset: Articulation = env.scene[asset_cfg.name]
     command = env.command_manager.get_command(command_name)
-    
+
     # 判断是否处于静止指令
-    command_norm = torch.norm(command[:, :3], dim=1)
+    command_norm = _stand_still_command_norm(command, ignore_yaw_command)
     is_standing_still = command_norm < command_threshold
-    
+
     # 获取机身在世界坐标系下的线速度的平方和
     base_lin_vel_sq = torch.sum(torch.square(asset.data.root_lin_vel_w), dim=1)
-    
+
     return is_standing_still.float() * base_lin_vel_sq
 
+def base_height_l2_relaxed_on_tilt(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    tilt_sensitivity: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Penalize base height error, but relax the penalty when the robot is tilted.
+
+    当机器人水平时，施加正常的 L2 高度惩罚。
+    当机器人倾斜时（例如爬坡、上下台阶），自动减小高度惩罚的力度。
+    """
+    # 获取机器人资产
+    asset: RigidObject = env.scene[asset_cfg.name]
+
+    # 1. 计算标准的高度误差平方: (z - z_target)^2
+    base_height = asset.data.root_pos_w[:, 2]
+    height_error_sq = torch.square(base_height - target_height)
+
+    # 2. 计算倾斜系数 (基于投影重力向量)
+    # projected_gravity_b 是世界坐标系的重力向量 [0, 0, -1] 投影到机器人机身坐标系下的结果。
+    # 当机器人完全水平时，它的 Z 分量 g_z 接近 -1.0。
+    # 当机器人倾斜 90 度时，它的 Z 分量 g_z 接近 0.0。
+    g_z = asset.data.projected_gravity_b[:, 2]
+
+    # 取绝对值得到 flatness (平坦度): 水平时为 1.0，越倾斜越接近 0.0
+    flatness = torch.abs(g_z)
+
+    # 3. 应用敏感度调节
+    # tilt_sensitivity 控制惩罚衰减的速度：
+    # = 1.0: 线性衰减
+    # > 1.0 (例如 2.0): 稍微一倾斜，惩罚就迅速减小 (对倾斜更宽容)
+    # < 1.0 (例如 0.5): 倾斜很多时，惩罚才明显减小 (依然比较严格)
+    relaxation_factor = torch.pow(flatness, tilt_sensitivity)
+
+    # 最终惩罚 = 原始误差 * 放宽系数
+    return height_error_sq * relaxation_factor
+
+def feet_stance_width_penalty(env: ManagerBasedRLEnv, min_width: float, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    惩罚足端间距过小（防止内八字/走钢丝步态）。
+    计算每只脚在机身坐标系下的 Y 轴绝对距离，如果小于 min_width / 2 则产生惩罚。
+    """
+    # 获取机器人资产
+    robot: RigidObject = env.scene[asset_cfg.name]
+
+    # 获取足端和机身在世界坐标系下的位置与姿态
+    feet_pos_w = robot.data.body_pos_w[:, asset_cfg.body_ids, :] # (num_envs, num_feet, 3)
+    base_pos_w = robot.data.root_pos_w # (num_envs, 3)
+    base_quat_w = robot.data.root_quat_w # (num_envs, 4)
+
+    num_envs = env.num_envs
+    num_feet = feet_pos_w.shape[1]
+
+    # 扩展 base 的位置和姿态，以便与所有脚进行批量计算
+    base_pos_w_rep = base_pos_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 3)
+    base_quat_w_rep = base_quat_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 4)
+    feet_pos_w_flat = feet_pos_w.view(-1, 3)
+
+    # 将足端坐标从世界坐标系转换到机身坐标系 (Base Frame)
+    feet_pos_b = quat_apply_inverse(base_quat_w_rep, feet_pos_w_flat - base_pos_w_rep)
+    feet_pos_b = feet_pos_b.view(num_envs, num_feet, 3)
+
+    # 提取在机身坐标系下的 Y 轴坐标（左右方向）
+    feet_y = feet_pos_b[:, :, 1]
+
+    # 计算惩罚：如果单侧脚距离中心线小于 min_width / 2，则惩罚差值
+    penalty = torch.clamp(min_width / 2.0 - torch.abs(feet_y), min=0.0)
+
+    # 将所有脚的惩罚相加
+    return torch.sum(penalty, dim=1)
+
+# def feet_stance_width_advanced_adaptive_penalty(
+#     env: ManagerBasedRLEnv,
+#     flat_min_width: float,
+#     rough_stationary_min_width: float,
+#     rough_moving_min_width: float,
+#     stationary_speed_threshold: float,
+#     moving_speed_threshold: float,
+#     asset_cfg: SceneEntityCfg
+# ) -> torch.Tensor:
+#     """
+#     进阶自适应足端间距惩罚。
+#     - 平地：使用 flat_min_width (最严格)
+#     - 复杂地形 + 静止：使用 rough_stationary_min_width (保证站立稳定)
+#     - 复杂地形 + 运动：使用 rough_moving_min_width (最宽松，允许灵活跨越)
+
+#     参数:
+#         stationary_speed_threshold: 低于此速度完全视为静止状态
+#         moving_speed_threshold: 高于此速度完全视为正常运动状态
+#     """
+#     robot = env.scene[asset_cfg.name]
+
+#     # 获取状态数据
+#     feet_pos_w = robot.data.body_pos_w[:, asset_cfg.body_ids, :] # (num_envs, num_feet, 3)
+#     base_pos_w = robot.data.root_pos_w # (num_envs, 3)
+#     base_quat_w = robot.data.root_quat_w # (num_envs, 4)
+#     base_lin_vel_w = robot.data.root_lin_vel_w # (num_envs, 3) 机身线速度
+
+#     num_envs = env.num_envs
+#     num_feet = feet_pos_w.shape[1]
+
+#     # ==========================================
+#     # 1. 计算地形崎岖度 (Roughness Factor) 0.0 ~ 1.0
+#     # ==========================================
+#     feet_z = feet_pos_w[:, :, 2]
+#     z_diff = torch.max(feet_z, dim=1)[0] - torch.min(feet_z, dim=1)[0]
+#     z_factor = torch.clamp((z_diff - 0.12) / 0.13, min=0.0, max=1.0)
+
+#     gravity_w = torch.tensor([0.0, 0.0, -1.0], device=robot.device).repeat(num_envs, 1)
+#     gravity_b = quat_apply_inverse(base_quat_w, gravity_w)
+#     tilt = torch.norm(gravity_b[:, :2], dim=1)
+#     tilt_factor = torch.clamp((tilt - 0.1) / 0.2, min=0.0, max=1.0)
+
+#     roughness = torch.max(z_factor, tilt_factor) # (num_envs,) 0表示平地，1表示复杂地形
+
+#     # ==========================================
+#     # 2. 计算运动状态因子 (Motion Factor) 0.0 ~ 1.0
+#     # ==========================================
+#     # 计算水平方向的实际移动速度
+#     speed = torch.norm(base_lin_vel_w[:, :2], dim=1) # (num_envs,)
+
+#     # 计算速度区间差值 (加入 1e-5 防止除以 0 的异常)
+#     speed_diff = max(moving_speed_threshold - stationary_speed_threshold, 1e-5)
+
+#     # 速度 < stationary_speed_threshold 视为静止 (factor=0)
+#     # 速度 > moving_speed_threshold 视为正常运动 (factor=1)
+#     # 中间状态平滑过渡
+#     motion_factor = torch.clamp((speed - stationary_speed_threshold) / speed_diff, min=0.0, max=1.0)
+
+#     # ==========================================
+#     # 3. 动态计算目标间距 (Dynamic Min Width)
+#     # ==========================================
+#     # 步骤 A：先计算如果在复杂地形上，当前速度应该对应的目标间距
+#     # 静止时为 rough_stationary_min_width，运动时放宽至 rough_moving_min_width
+#     rough_target_width = rough_stationary_min_width + motion_factor * (rough_moving_min_width - rough_stationary_min_width)
+
+#     # 步骤 B：结合地形崎岖度，在平地间距和复杂地形目标间距之间插值
+#     current_min_width = flat_min_width + roughness * (rough_target_width - flat_min_width)
+
+#     # 扩展维度以便与 4 条腿广播计算
+#     current_min_width = current_min_width.unsqueeze(1).repeat(1, num_feet) # (num_envs, num_feet)
+
+#     # ==========================================
+#     # 4. 计算 Y 轴距离并施加惩罚
+#     # ==========================================
+#     base_pos_w_rep = base_pos_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 3)
+#     base_quat_w_rep = base_quat_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 4)
+#     feet_pos_w_flat = feet_pos_w.view(-1, 3)
+
+#     feet_pos_b = quat_apply_inverse(base_quat_w_rep, feet_pos_w_flat - base_pos_w_rep)
+#     feet_pos_b = feet_pos_b.view(num_envs, num_feet, 3)
+
+#     feet_y = feet_pos_b[:, :, 1]
+
+#     # 只有当实际间距小于动态计算的 current_min_width 时，才产生惩罚
+#     penalty = torch.clamp(current_min_width / 2.0 - torch.abs(feet_y), min=0.0)
+
+#     return torch.sum(penalty, dim=1)
+
+def feet_stance_width_adaptive_penalty(
+    env: ManagerBasedRLEnv,
+    min_width: float,
+    command_speed_threshold: float,
+    asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    """
+    智能自适应足端间距惩罚 (V4 终极版)
+    核心逻辑：仅在【复杂地形】且【正在运动】时释放腿距限制以利于攀爬。
+    只要机器人停下（无论在平地还是楼梯），或者在平地行走，都会强制要求宽站距以保证稳定性。
+    """
+    robot = env.scene[asset_cfg.name]
+
+    # 1. 获取状态数据
+    feet_pos_w = robot.data.body_pos_w[:, asset_cfg.body_ids, :]
+    base_pos_w = robot.data.root_pos_w
+    base_quat_w = robot.data.root_quat_w
+
+    num_envs = env.num_envs
+    num_feet = feet_pos_w.shape[1]
+
+    # 2. 获取指令速度 (Command Velocity) - 代表机器人的运动意图
+    try:
+        commands = env.command_manager.get_command("base_velocity")
+        cmd_speed = torch.norm(commands[:, :2], dim=1) # (num_envs,)
+    except:
+        base_lin_vel_w = robot.data.root_lin_vel_w
+        cmd_speed = torch.norm(base_lin_vel_w[:, :2], dim=1)
+
+    # 3. 计算运动因子 (Speed Factor): 0.0 表示完全静止，1.0 表示正在运动
+    # 阈值可以设小一点，比如 0.1m/s，意味着只要摇杆回中，立刻开始要求宽站距
+    speed_factor = torch.clamp(cmd_speed / command_speed_threshold, min=0.0, max=1.0)
+
+    # 4. 计算地形崎岖度 (Roughness Factor): 0.0 表示平地，1.0 表示复杂地形
+    feet_z = feet_pos_w[:, :, 2]
+    z_diff = torch.max(feet_z, dim=1)[0] - torch.min(feet_z, dim=1)[0]
+    z_factor = torch.clamp((z_diff - 0.05) / 0.10, min=0.0, max=1.0)
+
+    gravity_w = torch.tensor([0.0, 0.0, -1.0], device=robot.device).repeat(num_envs, 1)
+    gravity_b = quat_apply_inverse(base_quat_w, gravity_w)
+    tilt = torch.norm(gravity_b[:, :2], dim=1)
+    tilt_factor = torch.clamp((tilt - 0.08) / 0.17, min=0.0, max=1.0)
+
+    roughness = torch.max(z_factor, tilt_factor)
+
+    # =====================================================================
+    # 5. 核心逻辑反转：计算惩罚乘子 (0.0 表示不惩罚，1.0 表示满额惩罚)
+    # 公式: multiplier = 1.0 - (运动因子 * 地形因子)
+    # - 运动(1) * 复杂(1) = 1 -> 乘子 0.0 (不惩罚，自由攀爬)
+    # - 静止(0) * 复杂(1) = 0 -> 乘子 1.0 (满额惩罚，楼梯上强制张开腿)
+    # - 运动(1) * 平地(0) = 0 -> 乘子 1.0 (满额惩罚，平地宽步态)
+    # - 静止(0) * 平地(0) = 0 -> 乘子 1.0 (满额惩罚，平地宽站距)
+    # =====================================================================
+    penalty_multiplier = 1.0 - (speed_factor * roughness)
+
+    penalty_multiplier = penalty_multiplier.unsqueeze(1).repeat(1, num_feet) # (num_envs, num_feet)
+
+    # 6. 计算 Y 轴距离并施加惩罚
+    base_pos_w_rep = base_pos_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 3)
+    base_quat_w_rep = base_quat_w.unsqueeze(1).repeat(1, num_feet, 1).view(-1, 4)
+    feet_pos_w_flat = feet_pos_w.view(-1, 3)
+
+    feet_pos_b = quat_apply_inverse(base_quat_w_rep, feet_pos_w_flat - base_pos_w_rep)
+    feet_pos_b = feet_pos_b.view(num_envs, num_feet, 3)
+
+    feet_y = feet_pos_b[:, :, 1]
+
+    # 基础惩罚：实际间距小于 min_width 时产生
+    base_penalty = torch.clamp(min_width / 2.0 - torch.abs(feet_y), min=0.0)
+
+    # 应用智能乘子
+    final_penalty = base_penalty * penalty_multiplier
+
+    return torch.sum(final_penalty, dim=1)
+
+
+def hip_joint_abduction_target_l2(
+    env: ManagerBasedRLEnv,
+    target_positions: dict[str, float],
+    deadband: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize hip joints for moving away from a small abduction target."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_ids = asset_cfg.joint_ids
+    if isinstance(joint_ids, slice):
+        joint_ids = list(range(asset.data.joint_pos.shape[1]))[joint_ids]
+    elif isinstance(joint_ids, torch.Tensor):
+        joint_ids = joint_ids.tolist()
+    joint_names = [asset.data.joint_names[joint_id] for joint_id in joint_ids]
+    target = torch.tensor(
+        [target_positions[joint_name] for joint_name in joint_names],
+        device=asset.data.joint_pos.device,
+        dtype=asset.data.joint_pos.dtype,
+    )
+    error = torch.abs(asset.data.joint_pos[:, joint_ids] - target.unsqueeze(0))
+    error = torch.clamp(error - deadband, min=0.0)
+    return torch.sum(torch.square(error), dim=1)
+
+
+def hip_joint_abduction_min_l2(
+    env: ManagerBasedRLEnv,
+    min_positions: dict[str, float],
+    deadband: float,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize hip joints only when they are less abducted than a signed minimum."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_ids = asset_cfg.joint_ids
+    if isinstance(joint_ids, slice):
+        joint_ids = list(range(asset.data.joint_pos.shape[1]))[joint_ids]
+    elif isinstance(joint_ids, torch.Tensor):
+        joint_ids = joint_ids.tolist()
+    joint_names = [asset.data.joint_names[joint_id] for joint_id in joint_ids]
+    min_target = torch.tensor(
+        [min_positions[joint_name] for joint_name in joint_names],
+        device=asset.data.joint_pos.device,
+        dtype=asset.data.joint_pos.dtype,
+    )
+    direction = torch.sign(min_target).clamp(min=-1.0, max=1.0)
+    signed_pos = asset.data.joint_pos[:, joint_ids] * direction.unsqueeze(0)
+    min_abs = torch.abs(min_target).unsqueeze(0)
+    error = torch.clamp(min_abs - signed_pos - deadband, min=0.0)
+    return torch.sum(torch.square(error), dim=1)
+
+
+def _ids_from_names(all_names: list[str], names: tuple[str, ...] | list[str]) -> list[int]:
+    return [all_names.index(name) for name in names]
+
+
+def _lateral_step_contact_gate(
+    env: ManagerBasedRLEnv,
+    contact_sensor_cfg: SceneEntityCfg | None,
+    contact_threshold: float,
+    min_contacts_per_side: int,
+) -> torch.Tensor:
+    if contact_sensor_cfg is None:
+        return torch.ones(env.num_envs, device=env.device)
+    contact_sensor: ContactSensor = env.scene.sensors[contact_sensor_cfg.name]
+    contact_forces = contact_sensor.data.net_forces_w[:, contact_sensor_cfg.body_ids, :]
+    contact = torch.linalg.norm(contact_forces, dim=-1) > contact_threshold
+    left_contacts = contact[:, 0].float() + contact[:, 2].float()
+    right_contacts = contact[:, 1].float() + contact[:, 3].float()
+    return ((left_contacts >= min_contacts_per_side) & (right_contacts >= min_contacts_per_side)).float()
+
+
+def _lateral_step_gate(
+    asset: Articulation,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    invert_side_height_delta: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    foot_ids = _ids_from_names(
+        asset.data.body_names,
+        [
+            foot_body_names["FL"],
+            foot_body_names["FR"],
+            foot_body_names["RL"],
+            foot_body_names["RR"],
+        ],
+    )
+    foot_z = asset.data.body_pos_w[:, foot_ids, 2]
+    left_z = 0.5 * (foot_z[:, 0] + foot_z[:, 2])
+    right_z = 0.5 * (foot_z[:, 1] + foot_z[:, 3])
+    side_height_delta = left_z - right_z
+    if invert_side_height_delta:
+        side_height_delta = -side_height_delta
+    gate = torch.clamp((torch.abs(side_height_delta) - height_threshold) / gate_width, 0.0, 1.0)
+    return side_height_delta, gate
+
+
+def _lateral_step_relief_scale(
+    env: ManagerBasedRLEnv,
+    asset: Articulation,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    relief_scale: float,
+    contact_sensor_cfg: SceneEntityCfg | None,
+    contact_threshold: float,
+    min_contacts_per_side: int,
+) -> torch.Tensor:
+    _, gate = _lateral_step_gate(asset, foot_body_names, height_threshold, gate_width)
+    gate *= _lateral_step_contact_gate(env, contact_sensor_cfg, contact_threshold, min_contacts_per_side)
+    relief_scale_tensor = torch.full_like(gate, relief_scale)
+    return torch.lerp(torch.ones_like(gate), relief_scale_tensor, gate)
+
+
+def lateral_step_flat_orientation_l2(
+    env: ManagerBasedRLEnv,
+    foot_body_names: dict[str, str],
+    height_threshold: float,
+    gate_width: float,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize body tilt only when the robot straddles a left-right height step."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    _, gate = _lateral_step_gate(asset, foot_body_names, height_threshold, gate_width)
+    gate *= _lateral_step_contact_gate(env, contact_sensor_cfg, contact_threshold, min_contacts_per_side)
+    return torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1) * gate
+
+
+def lateral_step_hip_abduction_l2(
+    env: ManagerBasedRLEnv,
+    foot_body_names: dict[str, str],
+    hip_joint_names: dict[str, str],
+    lower_side_target: float,
+    upper_side_target: float,
+    deadband: float,
+    height_threshold: float,
+    gate_width: float,
+    invert_side_height_delta: bool = False,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Encourage the lower-side legs to abduct when left and right feet are at different heights."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    side_height_delta, gate = _lateral_step_gate(
+        asset, foot_body_names, height_threshold, gate_width, invert_side_height_delta
+    )
+    joint_ids = _ids_from_names(
+        asset.data.joint_names,
+        [
+            hip_joint_names["FL"],
+            hip_joint_names["FR"],
+            hip_joint_names["RL"],
+            hip_joint_names["RR"],
+        ],
+    )
+    left_is_lower = side_height_delta < 0.0
+    left_target = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, lower_side_target),
+        torch.full_like(side_height_delta, upper_side_target),
+    )
+    right_target = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, -upper_side_target),
+        torch.full_like(side_height_delta, -lower_side_target),
+    )
+    target = torch.stack([left_target, right_target, left_target, right_target], dim=1)
+    error = torch.abs(asset.data.joint_pos[:, joint_ids] - target)
+    error = torch.clamp(error - deadband, min=0.0)
+    return torch.sum(torch.square(error), dim=1) * gate
+
+
+def lateral_step_hip_abduction_min_l2(
+    env: ManagerBasedRLEnv,
+    foot_body_names: dict[str, str],
+    hip_joint_names: dict[str, str],
+    lower_side_min: float,
+    upper_side_min: float,
+    deadband: float,
+    height_threshold: float,
+    gate_width: float,
+    lower_side_weight: float = 1.0,
+    upper_side_weight: float = 1.0,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+    invert_side_height_delta: bool = False,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Encourage the lower side to abduct more without penalizing extra abduction."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    side_height_delta, gate = _lateral_step_gate(
+        asset, foot_body_names, height_threshold, gate_width, invert_side_height_delta
+    )
+    gate *= _lateral_step_contact_gate(env, contact_sensor_cfg, contact_threshold, min_contacts_per_side)
+    joint_ids = _ids_from_names(
+        asset.data.joint_names,
+        [
+            hip_joint_names["FL"],
+            hip_joint_names["FR"],
+            hip_joint_names["RL"],
+            hip_joint_names["RR"],
+        ],
+    )
+    left_is_lower = side_height_delta < 0.0
+    left_min = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, lower_side_min),
+        torch.full_like(side_height_delta, upper_side_min),
+    )
+    right_min = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, upper_side_min),
+        torch.full_like(side_height_delta, lower_side_min),
+    )
+    min_target = torch.stack([left_min, right_min, left_min, right_min], dim=1)
+    direction = torch.tensor(
+        [1.0, -1.0, 1.0, -1.0],
+        device=asset.data.joint_pos.device,
+        dtype=asset.data.joint_pos.dtype,
+    ).unsqueeze(0)
+    signed_pos = asset.data.joint_pos[:, joint_ids] * direction
+    error = torch.clamp(min_target - signed_pos - deadband, min=0.0)
+    left_weight = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, lower_side_weight),
+        torch.full_like(side_height_delta, upper_side_weight),
+    )
+    right_weight = torch.where(
+        left_is_lower,
+        torch.full_like(side_height_delta, upper_side_weight),
+        torch.full_like(side_height_delta, lower_side_weight),
+    )
+    weights = torch.stack([left_weight, right_weight, left_weight, right_weight], dim=1)
+    return torch.sum(torch.square(error) * weights, dim=1) * gate
+
+
+def lateral_step_box_length_difference_l2(
+    env: ManagerBasedRLEnv,
+    foot_body_names: dict[str, str],
+    box_joint_names: dict[str, str],
+    min_lower_upper_delta: float,
+    deadband: float,
+    height_threshold: float,
+    gate_width: float,
+    pairwise: bool = False,
+    command_name: str | None = None,
+    command_threshold: float = 0.12,
+    body_velocity_threshold: float = 0.18,
+    low_speed_gate_width: float = 0.20,
+    contact_sensor_cfg: SceneEntityCfg | None = None,
+    contact_threshold: float = 5.0,
+    min_contacts_per_side: int = 1,
+    invert_side_height_delta: bool = False,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Encourage lower-side box joints to be longer than upper-side joints by a small margin."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    side_height_delta, gate = _lateral_step_gate(
+        asset, foot_body_names, height_threshold, gate_width, invert_side_height_delta
+    )
+    gate *= _lateral_step_contact_gate(env, contact_sensor_cfg, contact_threshold, min_contacts_per_side)
+    if command_name is not None:
+        command = env.command_manager.get_command(command_name)
+        command_speed = torch.linalg.norm(command[:, :2], dim=1)
+        body_speed = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+        command_gate = torch.clamp(
+            (command_threshold + low_speed_gate_width - command_speed) / low_speed_gate_width, 0.0, 1.0
+        )
+        body_gate = torch.clamp(
+            (body_velocity_threshold + low_speed_gate_width - body_speed) / low_speed_gate_width, 0.0, 1.0
+        )
+        gate *= command_gate * body_gate
+    joint_ids = _ids_from_names(
+        asset.data.joint_names,
+        [
+            box_joint_names["FL"],
+            box_joint_names["FR"],
+            box_joint_names["RL"],
+            box_joint_names["RR"],
+        ],
+    )
+    box_pos = asset.data.joint_pos[:, joint_ids]
+    if pairwise:
+        left_is_lower = side_height_delta < 0.0
+        left_lengths = torch.stack([box_pos[:, 0], box_pos[:, 2]], dim=1)
+        right_lengths = torch.stack([box_pos[:, 1], box_pos[:, 3]], dim=1)
+        lower_lengths = torch.where(left_is_lower.unsqueeze(1), left_lengths, right_lengths)
+        upper_lengths = torch.where(left_is_lower.unsqueeze(1), right_lengths, left_lengths)
+        error = torch.clamp(min_lower_upper_delta - (lower_lengths - upper_lengths) - deadband, min=0.0)
+        return torch.mean(torch.square(error), dim=1) * gate
+
+    left_length = 0.5 * (box_pos[:, 0] + box_pos[:, 2])
+    right_length = 0.5 * (box_pos[:, 1] + box_pos[:, 3])
+    left_is_lower = side_height_delta < 0.0
+    lower_length = torch.where(left_is_lower, left_length, right_length)
+    upper_length = torch.where(left_is_lower, right_length, left_length)
+    error = torch.clamp(min_lower_upper_delta - (lower_length - upper_length) - deadband, min=0.0)
+    return torch.square(error) * gate
+
+
+def diagonal_gait_symmetry_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """
+    对角腿对称性惩罚 (Diagonal Gait Symmetry Penalty)
+    强制 Trot 步态下对角腿（左前-右后，右前-左后）的足端高度保持一致。
+    """
+    # 获取机器人资产
+    robot: Articulation = env.scene[asset_cfg.name]
+
+    # ==========================================
+    # 调试代码：检查匹配到的足端顺序（只打印一次）
+    # 使用 hasattr 检查 env 对象，避免使用 global 变量
+    # ==========================================
+    if not hasattr(env, "_foot_order_printed"):
+        # 根据 asset_cfg.body_ids 获取对应的刚体名称
+        matched_foot_names = [robot.data.body_names[i] for i in asset_cfg.body_ids]
+        print("\n" + "="*50)
+        print(f"🚨 [DEBUG] 正则表达式 '.*_foot' 匹配到的足端顺序为:")
+        for idx, name in enumerate(matched_foot_names):
+            print(f"   索引 {idx}: {name}")
+        print("="*50 + "\n")
+
+        # 给 env 对象打上标记，这样下一帧就不会再打印了
+        env._foot_order_printed = True
+    # ==========================================
+
+
+    # 获取由 asset_cfg 过滤出的足端刚体在世界坐标系下的 Z 轴高度
+    # shape: (num_envs, num_feet) -> 通常 num_feet 为 4
+    foot_z = robot.data.body_pos_w[:, asset_cfg.body_ids, 2]
+
+    # 【重要警告】这里假设你的 URDF/刚体解析顺序是标准的：
+    # 0: FL (左前), 1: FR (右前), 2: RL (左后), 3: RR (右后)
+    # 如果你的机器人按左右划分 (例如 FL, RL, FR, RR)，请务必修改下面的索引！
+
+    # 计算对角腿的高度差
+    diff_FL_RR = foot_z[:, 0] - foot_z[:, 3]  # 左前和右后
+    diff_FR_RL = foot_z[:, 1] - foot_z[:, 2]  # 右前和左后
+
+    # 返回惩罚值：高度差的平方和
+    return torch.square(diff_FL_RR) + torch.square(diff_FR_RL)
+
+
+def action_acceleration_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """
+    惩罚动作的二阶导数 (动作加速度) 使用 L2 范数。
+    计算公式: || (a_t - a_{t-1}) - (a_{t-1} - a_{t-2}) ||^2
+    """
+    # 1. 初始化缓存：如果 env 中还没有这个变量，就创建一个全零的 Tensor
+    if not hasattr(env, "_prev_action_diff"):
+        env._prev_action_diff = torch.zeros_like(env.action_manager.action)
+
+    # 2. 处理环境重置 (Reset)：
+    # 强化学习中环境会不断重置，重置的环境必须把历史记录清零，否则会产生错误的巨大惩罚
+    reset_ids = env.reset_buf.nonzero(as_tuple=False).squeeze(-1)
+    if len(reset_ids) > 0:
+        env._prev_action_diff[reset_ids] = 0.0
+
+    # 3. 计算当前的动作一阶导数 (a_t - a_{t-1})
+    current_action_diff = env.action_manager.action - env.action_manager.prev_action
+
+    # 4. 计算动作二阶导数 (当前一阶导 - 上一步一阶导)
+    action_acc = current_action_diff - env._prev_action_diff
+
+    # 5. 更新缓存，供下一个 Step 使用
+    env._prev_action_diff = current_action_diff.clone()
+
+    # 6. 返回 L2 范数 (对每个环境的动作加速度求平方和)
+    return torch.sum(torch.square(action_acc), dim=1)
