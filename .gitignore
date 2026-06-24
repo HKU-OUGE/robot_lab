@@ -11,14 +11,19 @@
 /outputs/
 env_cfg_debug.json
 
-# Local experiment notes, memory, and scratch analysis
-/docs/
+# Local experiment notes and scratch analysis
 /analysis/
 /RL_memory_start.md
 /my_log.txt
 /play_py.txt
 /real_time_command_debug.txt
 /os
+
+# Keep curated RobotLab memory under docs/ tracked; ignore bulky/personal/generated docs.
+/docs/RL_method_knowledge/
+/docs/figures/
+/docs/*.html
+/docs/.html
 
 # Robot lab build and egg-info
 /source/robot_lab/robot_lab.egg-info/
