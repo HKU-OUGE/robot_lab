@@ -7,6 +7,7 @@
 ## 2026-07-15 当前入口（覆盖下方旧“当前”描述）
 
 - [Codex 新电脑/新会话起点](../CODEX_START_HERE.md)：区分原工作站实时 authority 与 GitHub 冻结快照；克隆后必须先读。
+- [可直接分享的 Highstep 协作者交接 PDF](deliverables/highstep_collaborator_handoff_20260715.pdf)：面向新协作者的执行手册，包含克隆、Codex 首条指令、当前状态、历史链、代码地图、外部 artifact 和禁区。
 - [GitHub 可移植交接：代码、历史与 v1.11 当前进度](library/highstep_repository_transfer_handoff_20260715.md)：本分支的代码范围、历史阅读顺序、外部 checkpoint/日志边界、当前只读 Teacher A/B 流程及恢复限制。
 - [Highstep Student 恢复与自动化规范 v1.11](library/highstep_student_recovery_spec_20260712.md)：当前正式最高规范。顶部 v1.11 覆盖所有冲突旧章节；v1.10 及以下仅为历史证据。
 - [新旧 Teacher 零训练鲁棒性 A/B 决策](library/highstep_teacher_robustness_ab_decision_20260715.md)：当前唯一控制变量、只读约束与终态。

@@ -2,6 +2,8 @@
 
 这是把 `dev_lxq_new` 分支交给另一台电脑或一个全新 Codex 会话时的稳定入口。
 
+可直接转发给协作者的中文 PDF 手册：`deliverables/highstep_collaborator_handoff_20260715.pdf`。
+
 ## 先判断你在哪种环境
 
 ### 原工作站

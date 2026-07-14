@@ -6,6 +6,8 @@
 
 它是 GitHub 发布时刻的只读交接，不是原工作站的实时 supervisor，也不授予自动训练或部署权限。
 
+可直接外发的排版版手册：`docs/robotlab_memory_zh/deliverables/highstep_collaborator_handoff_20260715.pdf`。PDF SHA256：`f203b56ca93cf7c9932fe74a30a3e0e027a01fd98f070f5e9d2e4a685dc4dba3`。同目录 HTML 是可维护源文件。
+
 ## 当前正式 authority
 
 - workflow：`highstep_teacher_robustness_ab_20260715`

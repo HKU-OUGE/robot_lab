@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>RobotLab Highstep 协作者交接</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 17mm; }
+  * { box-sizing: border-box; }
+  html { font-size: 10.5pt; }
+  body {
+    margin: 0; color: #172033; background: #fff;
+    font-family: "Noto Sans CJK SC", "Noto Sans CJK HK", "Droid Sans Fallback", sans-serif;
+    line-height: 1.58;
+  }
+  h1, h2, h3 { margin: 0; color: #14213d; page-break-after: avoid; }
+  h1 { font-size: 29pt; line-height: 1.14; letter-spacing: -.7px; }
+  h2 { font-size: 18pt; margin: 0 0 10px; padding-bottom: 5px; border-bottom: 2px solid #d9e2f2; }
+  h3 { font-size: 12.5pt; margin: 15px 0 6px; }
+  p { margin: 6px 0 9px; }
+  ul, ol { margin: 5px 0 10px; padding-left: 22px; }
+  li { margin: 3px 0; }
+  a { color: #1558d6; text-decoration: none; }
+  code, pre {
+    font-family: "Noto Sans Mono CJK SC", "DejaVu Sans Mono", monospace;
+  }
+  code { color: #1b4d89; background: #edf3fb; padding: 1px 4px; border-radius: 3px; }
+  pre {
+    white-space: pre-wrap; word-break: break-word; background: #111827; color: #eef5ff;
+    padding: 11px 13px; border-radius: 7px; font-size: 8.5pt; line-height: 1.48;
+    page-break-inside: avoid;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 13px; font-size: 9.2pt; }
+  th { background: #eaf0fa; color: #20304b; text-align: left; }
+  th, td { border: 1px solid #cdd7e6; padding: 6px 7px; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  .cover {
+    min-height: 252mm; display: flex; flex-direction: column; justify-content: space-between;
+    padding: 7mm 3mm 3mm; page-break-after: always;
+  }
+  .kicker { color: #1558d6; font-weight: 750; letter-spacing: 1.2px; font-size: 10pt; }
+  .subtitle { font-size: 15pt; color: #475569; margin-top: 11px; max-width: 155mm; }
+  .hero-card {
+    margin-top: 22mm; padding: 15px 18px; border-radius: 10px;
+    background: linear-gradient(135deg, #eaf3ff, #f5f8ff); border-left: 5px solid #2166d1;
+  }
+  .hero-card strong { display: block; font-size: 14pt; color: #123b72; margin-bottom: 5px; }
+  .meta { border-top: 1px solid #cbd5e1; padding-top: 10px; color: #556274; font-size: 9pt; }
+  .meta-grid { display: grid; grid-template-columns: 36mm 1fr; gap: 3px 8px; }
+  .section { page-break-before: always; }
+  .section.first { page-break-before: auto; }
+  .lead { font-size: 11.4pt; color: #34445c; }
+  .callout, .warn, .good {
+    padding: 9px 12px; margin: 9px 0 12px; border-radius: 6px; page-break-inside: avoid;
+  }
+  .callout { background: #eef5ff; border-left: 4px solid #2563eb; }
+  .warn { background: #fff5e8; border-left: 4px solid #ea8a16; }
+  .good { background: #eaf8f0; border-left: 4px solid #1f9d62; }
+  .label { display: inline-block; padding: 2px 7px; border-radius: 12px; font-weight: 700; font-size: 8pt; }
+  .label-blue { background: #dbeafe; color: #1d4ed8; }
+  .label-green { background: #dcfce7; color: #137043; }
+  .label-orange { background: #ffedd5; color: #9a4b0f; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { border: 1px solid #d8e0ec; border-radius: 7px; padding: 9px 11px; page-break-inside: avoid; }
+  .card h3 { margin-top: 0; }
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 10px 0 12px; }
+  .stat { background: #f3f6fb; padding: 8px; border-radius: 6px; text-align: center; }
+  .stat b { display: block; font-size: 15pt; color: #1e4f91; }
+  .stat span { font-size: 8pt; color: #64748b; }
+  .timeline { margin-left: 5px; border-left: 3px solid #c7d7ef; padding-left: 15px; }
+  .timeline .item { position: relative; margin: 0 0 12px; page-break-inside: avoid; }
+  .timeline .item:before { content: ""; position: absolute; left: -21px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: #2870ce; }
+  .timeline .date { font-weight: 750; color: #1e4f91; }
+  .checklist li::marker { color: #1f8a58; font-weight: bold; }
+  .small { font-size: 8.5pt; color: #627085; }
+  .break-safe { page-break-inside: avoid; }
+  .footer-note { color: #6b7280; font-size: 8pt; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div>
+    <div class="kicker">ROBOTLAB · HIGHSTEP · COLLABORATOR HANDOFF</div>
+    <h1>伸缩腿上高台项目<br>协作者交接手册</h1>
+    <div class="subtitle">代码、实验历史、当前 v1.11 进度、Codex 接管方式与下一步分析边界</div>
+
+    <div class="hero-card">
+      <strong>给协作者的一句话</strong>
+      请先克隆 <code>dev_lxq_new</code>，让 Codex 阅读仓库内的 authority 与交接入口；先做只读分析，不要启动任何旧训练服务。当前原工作站正在进行零训练 Teacher A/B，等待终态后只比较旧/新 Teacher，不自动恢复 Student 训练。
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="meta-grid">
+      <b>GitHub</b><span>https://github.com/HKU-OUGE/robot_lab</span>
+      <b>分支</b><span>dev_lxq_new</span>
+      <b>交接提交</b><span>55b5317fa3c5b5efc048bb4811be65b7ea7e877b</span>
+      <b>草稿 PR</b><span>https://github.com/HKU-OUGE/robot_lab/pull/3</span>
+      <b>正式 authority</b><span>v1.11 · highstep_teacher_robustness_ab_20260715</span>
+      <b>生成时间</b><span>2026-07-15 05:55 HKT</span>
+      <b>提供者</b><span>lxq · RobotLab highstep 工作区</span>
+    </div>
+  </div>
+</section>
+
+<section class="section first">
+  <h2>1. 收到这份文件后，先做什么</h2>
+  <p class="lead">目标不是让你立刻“接着跑”，而是让你在不丢失上下文、不误用旧路线的情况下，先建立一份可信的项目认识。</p>
+
+  <h3>前15分钟执行清单</h3>
+  <ol class="checklist">
+    <li>克隆仓库并切换到 <code>dev_lxq_new</code>。</li>
+    <li>确认 HEAD 是交接提交 <code>55b5317f…</code> 或其后续提交。</li>
+    <li>在仓库根目录启动 Codex，让它先读取 <code>AGENTS.md</code>。</li>
+    <li>继续读取 <code>docs/robotlab_memory_zh/CODEX_START_HERE.md</code>。</li>
+    <li>读取 v1.11 spec 顶部、Teacher A/B decision 和可移植 handoff。</li>
+    <li>只读总结当前 authority、已知失败事实、外部 artifact 缺口；不要启动 service。</li>
+  </ol>
+
+  <pre>git clone git@github.com:HKU-OUGE/robot_lab.git
+cd robot_lab
+git checkout dev_lxq_new
+git rev-parse HEAD
+sed -n '1,240p' AGENTS.md
+sed -n '1,260p' docs/robotlab_memory_zh/CODEX_START_HERE.md</pre>
+
+  <h3>建议直接发给 Codex 的首条指令</h3>
+  <pre>这是 RobotLab highstep 项目的协作分析环境。先严格读取 AGENTS.md、
+docs/robotlab_memory_zh/CODEX_START_HERE.md、
+docs/robotlab_memory_zh/library/highstep_repository_transfer_handoff_20260715.md，
+再读取正式 spec 顶部 v1.11 和 Teacher A/B decision。
+
+当前先做只读接管：
+1. 校验当前 Git commit 与文件 SHA；
+2. 区分当前 authority 和 historical-only 章节；
+3. 总结当前实验问题、已有证据和缺失外部 artifact；
+4. 审查代码和测试，但不要启动训练、评估、旧 systemd service 或真机部署；
+5. 输出你建议优先分析的三个问题及证据需求。</pre>
+
+  <div class="warn"><b>重要：</b>新 clone 没有原工作站的 <code>tmp/</code> heartbeat、checkpoint 和日志。缺少它们不表示原流程停止，也不能用 Git 快照伪造实时 authority。</div>
+</section>
+
+<section class="section">
+  <h2>2. 当前项目处于什么状态</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>当前正式工作</h3>
+      <p><span class="label label-blue">v1.11</span> 新旧 Teacher 的零训练鲁棒性 A/B。</p>
+      <p>唯一变量是 Teacher checkpoint。两者必须使用相同 Robust Teacher task、action prior、real gains、delay=0、命令、平台、seed、物理 snapshot 和干预。</p>
+    </div>
+    <div class="card">
+      <h3>当前明确不做</h3>
+      <p><span class="label label-orange">禁止训练</span> 不调用 backward、optimizer.step、runner.learn，不写 checkpoint。</p>
+      <p>v1.10 Student continuation 已暂停；无论 A/B 结果如何，都不会自动恢复 Student 或 Teacher 训练。</p>
+    </div>
+  </div>
+
+  <h3>生成本 PDF 时的实时观测</h3>
+  <div class="stat-row">
+    <div class="stat"><b>117/204</b><span>总评估进度</span></div>
+    <div class="stat"><b>102/102</b><span>Teacher A 已完成</span></div>
+    <div class="stat"><b>15/102</b><span>Teacher B 已完成</span></div>
+    <div class="stat"><b>0</b><span>基础设施无效/补跑</span></div>
+  </div>
+  <p class="small">时间点：2026-07-15 05:55 HKT。该数字是生成时刻快照，不是 PDF 内的实时状态。原工作站 service 当时 active/running，authority、heartbeat 和子进程均正常。</p>
+
+  <h3>Teacher 绑定</h3>
+  <table>
+    <thead><tr><th>角色</th><th>checkpoint</th><th>SHA256</th></tr></thead>
+    <tbody>
+      <tr><td>Teacher A<br>0707旧Teacher对照</td><td><code>2026-07-04_01-45-21/model_151399.pt</code></td><td><code>d34d560e…0640b1d</code></td></tr>
+      <tr><td>Teacher B<br>新Teacher候选</td><td><code>2026-07-11_11-22-23/model_172300.pt</code></td><td><code>dee40bff…f4eb35</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>本轮要回答的唯一问题</h3>
+  <div class="callout">新 Teacher <code>model_172300</code> 相比0707旧 Teacher，是否在<strong>后腿内收恢复、分阶段横向冲量和组合压力</strong>下产生可重复、明显且不牺牲 nominal 的鲁棒性提升？</div>
+
+  <h3>冻结矩阵和门禁</h3>
+  <table>
+    <thead><tr><th>类别</th><th>每个Teacher</th><th>固定条件</th><th>明显改善标准</th></tr></thead>
+    <tbody>
+      <tr><td>Nominal</td><td>3场</td><td>seeds 11/22/33</td><td>B不得在 valid/full/rear hold/recovery 上退化，跌倒和中心线穿越不得增加</td></tr>
+      <tr><td>后腿内收</td><td>36场</td><td>0.34/0.30/0.26/0.22 m × 对称/RL-only/RR-only × 3 seeds</td><td>B最难通过等级至少比A提高0.04 m</td></tr>
+      <tr><td>横向冲量</td><td>54场</td><td>approach/front-support/first-rear × 左右 × 0.10/0.20/0.30 m/s × 3 seeds</td><td>B最大通过等级至少比A提高0.10 m/s</td></tr>
+      <tr><td>组合压力</td><td>9场</td><td>0.26 m内收 + first-rear 0.20 m/s</td><td>B valid=9/9，full/rear hold/recovery≥7/9</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>3. 为什么走到 v1.11：最短历史链</h2>
+  <div class="timeline">
+    <div class="item"><div class="date">2026-06-25 至 07-03 · Teacher/reward/terrain 反复试验</div><div>确认 terrain level 不是高台高度；平均化后腿 reward 会掩盖单侧失败；只拧 reward 权重不能稳定解决第二后腿清台。ActionScore、阶段 reward、support gate 和选模真实性逐步建立。</div></div>
+    <div class="item"><div class="date">2026-07-07 · 真机暴露核心问题</div><div>真机测试显示前腿搭台后后腿内收、卡边和摇摆；0707视频与两组 rosbag 后续完成配准。还发现真实 target 越限、policy switch 短时全零、配置指纹和跨进程 schedule 问题。</div></div>
+    <div class="item"><div class="date">2026-07-11 至 07-12 · 自动化和紧急恢复</div><div>显示链卡死后安全暂停/重启；建立 checkpoint、schedule、lineage、core9、directional、W&B 和 supervisor 的 fail-closed 合同。旧结果全部保留，不再靠口头记忆恢复。</div></div>
+    <div class="item"><div class="date">v1.1–v1.5 · Student 冻结/蒸馏恢复路线</div><div>经历 B、R2/R3/R4/R5、单侧 directional 和视觉复核。B500 虽有数值 8/9，但用户视觉拒绝，证明“门禁数字”不能替代清晰视频和人工判断。</div></div>
+    <div class="item"><div class="date">v1.5–v1.7 · 0707 蒸馏语义纠错</div><div>定位错误 target、warmup、phase/rear-box scale 解释以及 estimator→latent 问题。历史证据最终确认0707合同为 warmup=1400、pre-prior主 target、phase=2.0、rear-box=1.5。</div></div>
+    <div class="item"><div class="date">v1.8 · Student 环境课程</div><div>发现所谓“exact 0707”并未复现0707 Student环境，转为0707环境 bootstrap→完整鲁棒环境续训。路线到E1400未达到目标，不能继续堆 iteration。</div></div>
+    <div class="item"><div class="date">v1.9–v1.10 · Prior-delta 与受限 continuation</div><div>oracle prior-delta 未恢复目标行为，blind residual不满足启动条件；v1.10 continuation随后被用户暂停。</div></div>
+    <div class="item"><div class="date">v1.11 · 回到上游做零训练 Teacher A/B</div><div>在不改任何参数的前提下，先回答新 Teacher 是否真的比0707旧 Teacher更鲁棒。当前这一步完成前，不再追加 Student iteration。</div></div>
+  </div>
+
+  <div class="good"><b>经验核心：</b>这段历史不是“试了很多所以都没用”。它把问题从模糊的“真机上不去”逐层拆成：Teacher能力、Student模仿、环境分布、prior可观测性、评估真实性和自动化基础设施。当前 v1.11 是为了先关闭最上游的 Teacher 鲁棒性问题。</div>
+</section>
+
+<section class="section">
+  <h2>4. 仓库里有什么：代码地图</h2>
+  <table>
+    <thead><tr><th>目录/文件</th><th>用途</th><th>协作者优先看什么</th></tr></thead>
+    <tbody>
+      <tr><td><code>AGENTS.md</code><br><code>.agents/skills/highstep-control-variable-guardian/</code></td><td>authority、控制变量和安全边界</td><td>必须先读；任何 highstep 判断前先 audit</td></tr>
+      <tr><td><code>docs/robotlab_memory_zh/</code></td><td>正式 spec、0707报告、路线决策、失败经验、快照</td><td><code>CODEX_START_HERE.md</code> 和 repository transfer handoff</td></tr>
+      <tr><td><code>scripts/rsl_rl/base/train.py</code><br><code>algorithm_checkpoint.py</code></td><td>训练入口、resume、双checkpoint、schedule/runtime恢复</td><td>检查 full/weights-only、effective update 和 optimizer合同</td></tr>
+      <tr><td><code>scripts/rsl_rl/base/highstep_*play.py</code></td><td>自主rollout、same-state、core9、Teacher A/B、视频</td><td>区分自主行为证据与same-state诊断</td></tr>
+      <tr><td><code>source/.../highstep_env_cfg.py</code><br><code>mdp/*.py</code></td><td>环境、reward、curriculum、action prior、事件和schedule</td><td>不要脱离spec单看一个weight</td></tr>
+      <tr><td><code>tools/highstep_*supervisor.py</code></td><td>多阶段自动化、门禁、W&B、恢复和状态</td><td>注意旧route是historical-only，不能直接启动</td></tr>
+      <tr><td><code>tests/test_highstep_*.py</code></td><td>合同、SHA、lineage、门禁、基础设施回归</td><td>当前v1.11定向测试通过；历史tests部分故意fail-closed</td></tr>
+      <tr><td><code>scripts/systemd/</code></td><td>原工作站服务定义和故障历史</td><td>包含 <code>/home/lxq</code> 绝对路径，只作模板，禁止新机直接enable</td></tr>
+    </tbody>
+  </table>
+
+  <h3>正式阅读顺序</h3>
+  <ol>
+    <li><code>AGENTS.md</code></li>
+    <li><code>docs/robotlab_memory_zh/CODEX_START_HERE.md</code></li>
+    <li><code>highstep_repository_transfer_handoff_20260715.md</code></li>
+    <li><code>highstep_student_recovery_spec_20260712.md</code> 顶部 v1.11</li>
+    <li><code>highstep_teacher_robustness_ab_decision_20260715.md</code></li>
+    <li>按问题读取0707报告、failure modes和旧版本章节</li>
+  </ol>
+
+  <div class="warn"><b>不要从文件名判断 authority。</b>大量旧 supervisor、service 和 spec 章节被有意保留，以便解释 checkpoint 和失败历史。只有当前最高 spec 顶部和它绑定的 preregistration 能授权执行。</div>
+</section>
+
+<section class="section">
+  <h2>5. GitHub 没有包含什么，以及怎么补齐</h2>
+  <p>代码和记忆已经公开推送，但以下 artifact 因体积、机器绑定或隐私没有进入 Git：</p>
+
+  <table>
+    <thead><tr><th>外部内容</th><th>为什么不入Git</th><th>需要继续实验时怎么做</th></tr></thead>
+    <tbody>
+      <tr><td>Teacher/Student <code>.pt</code> checkpoint、optimizer</td><td>体积大；必须保持精确SHA和lineage</td><td>向lxq索取指定文件；传输后重新计算SHA，不接受同名替代</td></tr>
+      <tr><td><code>tmp/</code> state、heartbeat、逐场snapshot和frames</td><td>实时、机器绑定、数量大</td><td>只在需要复核终态时打包只读结果；不要把Git snapshot当实时lock</td></tr>
+      <tr><td><code>wandb/</code> 离线run和远端history</td><td>缓存和认证不适合入库</td><td>使用文档中的run ID/URL；必要时由拥有权限者导出</td></tr>
+      <tr><td>0707 rosbag与真机视频</td><td>大文件；可能包含实验现场信息</td><td>受控传输；保留原始目录与SHA，分析时按报告中的对齐结论复核</td></tr>
+      <tr><td>Isaac Lab、GPU驱动和本机conda环境</td><td>系统依赖，不是仓库源代码</td><td>先做只读代码分析；需要重现时再单独建立环境清单</td></tr>
+      <tr><td>用户级 systemd、VPN和部署端仓库</td><td>主机专属且可能含本地网络配置</td><td>不要复制旧unit直接启用；先重写路径并建立新authority</td></tr>
+    </tbody>
+  </table>
+
+  <h3>最重要的两个 checkpoint</h3>
+  <pre>Teacher A
+/home/lxq/Softwares/robot_lab/logs/rsl_rl/
+  arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/
+  2026-07-04_01-45-21/model_151399.pt
+SHA256=d34d560ee7c2b3d8c3df00b04c4514e6c69be4779ec38aeee6d176dec0640b1d
+
+Teacher B
+/home/lxq/Softwares/robot_lab/logs/rsl_rl/
+  arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/
+  2026-07-11_11-22-23/model_172300.pt
+SHA256=dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35</pre>
+
+  <div class="callout"><b>建议：</b>协作者第一阶段只需要 GitHub 即可做代码、路线和因果链审查。只有当审查明确指出必须复现实验时，再按“最少 artifact”原则索取 checkpoint 或数据，避免一开始传几十GB却仍不清楚要验证什么。</div>
+</section>
+
+<section class="section">
+  <h2>6. 验证状态与已知测试失败</h2>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>发布检查已通过</h3>
+      <ul>
+        <li>107个Python文件AST解析通过</li>
+        <li>Shell语法检查通过</li>
+        <li>高置信秘密扫描通过</li>
+        <li>无新增文件超过5 MB</li>
+        <li>Git远端commit回读一致</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>当前v1.11相关测试</h3>
+      <p style="font-size:18pt;color:#16824f;font-weight:800">14 passed</p>
+      <p>Teacher A/B合同、supervisor和authority guard。</p>
+    </div>
+  </div>
+
+  <h3>全历史测试</h3>
+  <p><code>250 passed, 10 failed</code></p>
+  <p>这10项没有被隐藏：</p>
+  <ul>
+    <li>9项历史测试把 v1.3/v1.5/v1.8/v1.9 的旧 spec、dashboard 或 play SHA 当作当前 authority；当前 dashboard 已迁移到 v1.11，因此 fail-closed。</li>
+    <li>1项是已知的旧 R2 canonical-helper authority 冲突。</li>
+  </ul>
+  <div class="warn">不要为了全绿而把正式 spec SHA 改回旧值、伪造旧 dashboard、放宽 canonical helper 或让 historical route重新获得启动权。正确后续维护是隔离历史 fixture，使它们在显式 historical context 下测试。</div>
+
+  <h3>GitHub交接位置</h3>
+  <table>
+    <tbody>
+      <tr><th>仓库/分支</th><td>https://github.com/HKU-OUGE/robot_lab/tree/dev_lxq_new</td></tr>
+      <tr><th>Commit</th><td>55b5317fa3c5b5efc048bb4811be65b7ea7e877b</td></tr>
+      <tr><th>Draft PR</th><td>https://github.com/HKU-OUGE/robot_lab/pull/3</td></tr>
+      <tr><th>Spec SHA</th><td>445b322302f1e1b64a621208670c7fa8736d7f1a64dec2d000f6b629e936076a</td></tr>
+      <tr><th>Preregistration SHA</th><td>1b2bd47960d9111cf1b98676ece01524d89a889fc4b55cfc1ed08174782f2a55</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>7. 严禁事项：避免把交接变成新变量</h2>
+  <ol>
+    <li><b>不要自动启动任何旧 service。</b> v1.5、R2/R3、v1.8、v1.10 都有历史 unit，但当前没有启动权。</li>
+    <li><b>不要把 Git state snapshot 当作实时 heartbeat。</b> 它只证明发布时刻的状态。</li>
+    <li><b>不要从中断或明确禁止的 checkpoint 恢复。</b> 先核验完整 optimizer、Teacher绑定、runtime/schedule state 和SHA。</li>
+    <li><b>不要一次修改多个训练语义。</b> Teacher、reward、prior、网络、loss、warmup、冻结范围、optimizer、action_scale、joint_pos.clip 必须受单变量 preregistration 约束。</li>
+    <li><b>不要用 smoke、loss 或same-state轨迹宣称自主上台。</b> 行为必须来自候选自身驱动的固定 rollout 和清晰视频。</li>
+    <li><b>不要把基础设施无效改判成行为失败。</b> 也不要因行为失败重复跑到“偶然通过”。</li>
+    <li><b>不要自动部署真机。</b> 数值通过后仍必须由用户观看视频并明确接受。</li>
+  </ol>
+
+  <div class="good"><b>推荐姿势：</b>先提出“哪一层证据缺失”，再请求最小数据；先关闭 route/binding/module/tensor/transform，再讨论行为和新实验。</div>
+</section>
+
+<section class="section">
+  <h2>8. 建议协作者优先完成的工作</h2>
+
+  <h3>任务A：等待并审查 v1.11 终态</h3>
+  <ul>
+    <li>由 lxq 提供 A/B 完成后的 final report、state/handoff 和聚合 manifest。</li>
+    <li>核验204场完整性、同snapshot、checkpoint/tensor SHA不变、零训练调用。</li>
+    <li>按预注册四个条件判断“明显改善”，不得看结果后改阈值。</li>
+    <li>只输出 Teacher A/B 对照和证据强度，不自动启动下一路线。</li>
+  </ul>
+
+  <h3>任务B：代码与历史一致性审计</h3>
+  <ul>
+    <li>把正式 spec 各版本、实际代码和 checkpoint lineage 对齐。</li>
+    <li>找出仍依赖活动 dashboard 的历史 tests，提出fixture隔离方案，但不要修改当前 authority。</li>
+    <li>检查绝对路径和 systemd unit 的可移植性；把“模板”和“可直接执行”明确分开。</li>
+  </ul>
+
+  <h3>任务C：如果未来要继续训练</h3>
+  <p>必须等用户根据 v1.11 结果决定方向。协作者应先写：</p>
+  <table>
+    <thead><tr><th>字段</th><th>必须回答</th></tr></thead>
+    <tbody>
+      <tr><td>Accepted baseline</td><td>哪一个Teacher/Student/checkpoint，SHA和已知行为是什么</td></tr>
+      <tr><td>Single variable</td><td>本轮唯一改变的训练语义是什么</td></tr>
+      <tr><td>Evidence</td><td>为什么这个变量对应已关闭的根因，而不是猜测</td></tr>
+      <tr><td>Budget / stop</td><td>保存点、门禁、绝对上限和失败后的终态</td></tr>
+      <tr><td>Artifacts</td><td>checkpoint、optimizer、W&B、评估和视频如何绑定</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>9. 协作者回复模板</h2>
+  <p>请让对方第一次回复尽量按下面格式，便于快速判断他是否真正完成了接管：</p>
+
+  <pre>我已检出：
+- repo/branch/commit：
+- 已读取 AGENTS / CODEX_START_HERE / portable handoff / v1.11 spec：是/否
+
+我对当前 authority 的理解：
+- workflow：
+- 当前唯一变量：
+- 当前允许的操作：
+- 当前禁止的操作：
+
+我确认缺失的外部 artifact：
+- checkpoint：
+- runtime manifests/state：
+- W&B/video/rosbag：
+
+我认为最值得优先分析的三个问题：
+1.
+2.
+3.
+
+每个问题需要的最小证据：
+1.
+2.
+3.
+
+在你批准前，我不会启动训练、旧service或真机部署。</pre>
+
+  <h3>如果对方只需要快速了解项目</h3>
+  <p>让他先读本 PDF、<code>CODEX_START_HERE.md</code> 和 portable handoff 即可。若要做深入算法判断，再读0707真机报告、正式spec完整版本链和 failure modes。</p>
+
+  <div class="callout"><b>交接完成标准：</b>对方能准确说出“当前不是在训练Student，而是在零训练比较两个Teacher；Git里没有checkpoint；旧章节是历史证据；任何下一步都必须等v1.11终态并由用户决定”。</div>
+</section>
+
+<section class="section">
+  <h2>附录：关键文件清单</h2>
+  <table>
+    <thead><tr><th>用途</th><th>仓库相对路径</th></tr></thead>
+    <tbody>
+      <tr><td>Codex入口</td><td><code>docs/robotlab_memory_zh/CODEX_START_HERE.md</code></td></tr>
+      <tr><td>本次完整文字交接</td><td><code>docs/robotlab_memory_zh/library/highstep_repository_transfer_handoff_20260715.md</code></td></tr>
+      <tr><td>正式spec</td><td><code>docs/robotlab_memory_zh/library/highstep_student_recovery_spec_20260712.md</code></td></tr>
+      <tr><td>v1.11决策</td><td><code>docs/robotlab_memory_zh/library/highstep_teacher_robustness_ab_decision_20260715.md</code></td></tr>
+      <tr><td>冻结preregistration</td><td><code>docs/robotlab_memory_zh/snapshots/highstep_teacher_robustness_ab_20260715/preregistration_v111.json</code></td></tr>
+      <tr><td>0707真机数据报告</td><td><code>docs/robotlab_memory_zh/library/highstep_0707_real_data_analysis_20260712.md</code></td></tr>
+      <tr><td>通用失败经验</td><td><code>docs/robotlab_memory_zh/library/failure_modes_and_lessons.md</code></td></tr>
+      <tr><td>Authority守护</td><td><code>.agents/skills/highstep-control-variable-guardian/</code></td></tr>
+      <tr><td>Teacher A/B executor</td><td><code>scripts/rsl_rl/base/highstep_teacher_robustness_ab_play.py</code></td></tr>
+      <tr><td>Teacher A/B supervisor</td><td><code>tools/highstep_teacher_robustness_ab_supervisor.py</code></td></tr>
+      <tr><td>Teacher A/B monitor</td><td><code>tools/highstep_teacher_robustness_ab_monitor.py</code></td></tr>
+    </tbody>
+  </table>
+
+  <p class="footer-note">本 PDF 是2026-07-15的可分享交接版本。项目实时状态以原工作站的 SHA-verified dashboard/state/heartbeat/handoff 为准；GitHub与PDF只提供冻结证据和分析入口。</p>
+</section>
+
+</body>
+</html>
