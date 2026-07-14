@@ -3,12 +3,199 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import NamedTuple
+
 import torch
 
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
 from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction
 from isaaclab.managers import ActionTerm
 from isaaclab.utils import configclass
+from isaaclab.utils.buffers import DelayBuffer
+
+from .highstep_schedule import global_update as _global_update
+from .highstep_schedule import prior_scale as _prior_scale
+
+
+class PhasedHighstepPostPriorResult(NamedTuple):
+    """Numerical outputs of the phased high-step post-prior transform."""
+
+    raw_equivalent_actions: torch.Tensor
+    physical_targets: torch.Tensor
+    box_bias: torch.Tensor
+    gate: torch.Tensor
+    reach_gate: torch.Tensor
+    push_gate: torch.Tensor
+    box_clip_mask: torch.Tensor
+    prior_scale: float
+
+
+def _phased_highstep_smoothstep(x: torch.Tensor) -> torch.Tensor:
+    x = torch.clamp(x, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def compute_phased_highstep_post_prior(
+    raw_actions: torch.Tensor,
+    processed_actions: torch.Tensor,
+    box_action_ids: torch.Tensor,
+    action_scale: float | torch.Tensor,
+    action_offset: float | torch.Tensor,
+    height_delta: torch.Tensor,
+    command_x: torch.Tensor,
+    front_rear_delta: torch.Tensor,
+    *,
+    terrain_gate_available: bool,
+    height_threshold: float,
+    height_gate_width: float,
+    min_forward_command: float,
+    command_gate_width: float,
+    commit_height_delta_min: float,
+    commit_height_delta_target: float,
+    commit_gate_floor: float,
+    front_reach_box_bias: float,
+    rear_approach_box_bias: float,
+    front_support_box_bias: float,
+    rear_push_box_bias: float,
+    min_box_target: float,
+    max_box_target: float,
+    update_count: float,
+    prior_start_update: float,
+    prior_full_update: float,
+) -> PhasedHighstepPostPriorResult:
+    """Apply the production phased high-step prior without mutating its inputs.
+
+    ``processed_actions`` is the standard scaled/default-offset/clipped joint
+    target. ``physical_targets`` is the exact post-prior target used by the
+    live action term, before the independently configured action-delay buffer.
+    ``raw_equivalent_actions`` expresses that same target in policy-action
+    units; it is diagnostic output and does not feed the live controller.
+    """
+
+    gate = torch.zeros_like(height_delta)
+    if terrain_gate_available:
+        effective_height_gate_width = max(height_gate_width, 1.0e-6)
+        height_gate = _phased_highstep_smoothstep(
+            (height_delta - height_threshold) / effective_height_gate_width
+        )
+
+        effective_command_gate_width = max(command_gate_width, 1.0e-6)
+        command_gate = torch.clamp(
+            (command_x - min_forward_command) / effective_command_gate_width,
+            0.0,
+            1.0,
+        )
+        gate = height_gate * command_gate
+
+    commit_gate = _phased_highstep_smoothstep(
+        (front_rear_delta - commit_height_delta_min)
+        / max(commit_height_delta_target - commit_height_delta_min, 1.0e-6)
+    )
+
+    reach_gate = gate * (1.0 - commit_gate)
+    push_gate = torch.maximum(gate * commit_gate, commit_gate_floor * commit_gate)
+
+    reach_bias = torch.tensor(
+        [
+            front_reach_box_bias,
+            front_reach_box_bias,
+            rear_approach_box_bias,
+            rear_approach_box_bias,
+        ],
+        device=processed_actions.device,
+        dtype=processed_actions.dtype,
+    )
+    push_bias = torch.tensor(
+        [
+            front_support_box_bias,
+            front_support_box_bias,
+            rear_push_box_bias,
+            rear_push_box_bias,
+        ],
+        device=processed_actions.device,
+        dtype=processed_actions.dtype,
+    )
+    box_bias = reach_gate.unsqueeze(1) * reach_bias + push_gate.unsqueeze(1) * push_bias
+    prior_scale = _prior_scale(update_count, prior_start_update, prior_full_update)
+    box_bias = box_bias * prior_scale
+
+    physical_targets = processed_actions.clone()
+    unclamped_box_targets = processed_actions[:, box_action_ids] + box_bias
+    box_clip_mask = (unclamped_box_targets < min_box_target) | (unclamped_box_targets > max_box_target)
+    box_targets = torch.clamp(unclamped_box_targets, min=min_box_target, max=max_box_target)
+    physical_targets[:, box_action_ids] = box_targets
+
+    box_scale = action_scale[:, box_action_ids] if isinstance(action_scale, torch.Tensor) else action_scale
+    box_offset = action_offset[:, box_action_ids] if isinstance(action_offset, torch.Tensor) else action_offset
+    raw_equivalent_actions = raw_actions.clone()
+    raw_equivalent_actions[:, box_action_ids] = (box_targets - box_offset) / box_scale
+
+    return PhasedHighstepPostPriorResult(
+        raw_equivalent_actions=raw_equivalent_actions,
+        physical_targets=physical_targets,
+        box_bias=box_bias,
+        gate=torch.maximum(reach_gate, push_gate) * prior_scale,
+        reach_gate=reach_gate * prior_scale,
+        push_gate=push_gate * prior_scale,
+        box_clip_mask=box_clip_mask,
+        prior_scale=prior_scale,
+    )
+
+
+def _reset_action_delay(term, env_ids: Sequence[int] | None) -> None:
+    if term._action_delay_buffer is None:
+        return
+    if env_ids is None or isinstance(env_ids, slice):
+        count = term.num_envs
+        batch_ids = None
+    else:
+        count = len(env_ids)
+        batch_ids = env_ids
+    delays = torch.randint(
+        low=int(term.cfg.min_action_delay_steps),
+        high=int(term.cfg.max_action_delay_steps) + 1,
+        size=(count,),
+        dtype=term._action_delay_buffer.time_lags.dtype,
+        device=term.device,
+    )
+    term._action_delay_buffer.set_time_lag(delays, batch_ids)
+    term._action_delay_buffer.reset(batch_ids)
+    term._env._highstep_action_delay_steps = term._action_delay_buffer.time_lags
+
+
+class DelayedJointPositionAction(JointPositionAction):
+    """Joint-position action with a per-episode delay in control steps."""
+
+    cfg: "DelayedJointPositionActionCfg"
+
+    def __init__(self, cfg: "DelayedJointPositionActionCfg", env) -> None:
+        super().__init__(cfg, env)
+        if cfg.min_action_delay_steps < 0 or cfg.max_action_delay_steps < cfg.min_action_delay_steps:
+            raise ValueError("Invalid action delay range")
+        self._action_delay_buffer = (
+            DelayBuffer(cfg.max_action_delay_steps, self.num_envs, device=self.device)
+            if cfg.max_action_delay_steps > 0
+            else None
+        )
+
+    def process_actions(self, actions: torch.Tensor):
+        super().process_actions(actions)
+        if self._action_delay_buffer is not None:
+            self._processed_actions = self._action_delay_buffer.compute(self._processed_actions)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        super().reset(env_ids)
+        _reset_action_delay(self, env_ids)
+
+
+@configclass
+class DelayedJointPositionActionCfg(JointPositionActionCfg):
+    """Configuration for :class:`DelayedJointPositionAction`."""
+
+    class_type: type[ActionTerm] = DelayedJointPositionAction
+    min_action_delay_steps: int = 0
+    max_action_delay_steps: int = 0
 
 
 class LateralStepBoxBiasJointPositionAction(JointPositionAction):
@@ -239,6 +426,13 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
 
     def __init__(self, cfg: "PhasedHighstepBoxBiasJointPositionActionCfg", env) -> None:
         super().__init__(cfg, env)
+        if cfg.min_action_delay_steps < 0 or cfg.max_action_delay_steps < cfg.min_action_delay_steps:
+            raise ValueError("Invalid action delay range")
+        self._action_delay_buffer = (
+            DelayBuffer(cfg.max_action_delay_steps, self.num_envs, device=self.device)
+            if cfg.max_action_delay_steps > 0
+            else None
+        )
 
         box_names = [cfg.box_joint_names[k] for k in ("FL", "FR", "RL", "RR")]
         action_id_by_joint = {joint_name: action_id for action_id, joint_name in enumerate(self._joint_names)}
@@ -264,6 +458,7 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
         self._last_phased_highstep_reach_gate = torch.zeros(self.num_envs, device=self.device)
         self._last_phased_highstep_push_gate = torch.zeros(self.num_envs, device=self.device)
         self._last_phased_highstep_height_delta = torch.zeros(self.num_envs, device=self.device)
+        self._last_phased_highstep_prior_scale = 0.0
 
         self._height_sensor = None
         self._front_ray_mask = None
@@ -290,78 +485,71 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
         mean = selected_sum / torch.clamp(valid_count, min=1.0)
         return torch.where(valid_count > 0.0, mean, fallback)
 
-    @staticmethod
-    def _smoothstep(x: torch.Tensor) -> torch.Tensor:
-        x = torch.clamp(x, 0.0, 1.0)
-        return x * x * (3.0 - 2.0 * x)
-
     def process_actions(self, actions: torch.Tensor):
         super().process_actions(actions)
 
-        gate = torch.zeros(self.num_envs, device=self.device)
-        height_delta = torch.zeros_like(gate)
-        if self._height_sensor is not None and self._front_ray_mask is not None and self._rear_ray_mask is not None:
+        height_delta = torch.zeros(self.num_envs, device=self.device)
+        command_x = torch.zeros_like(height_delta)
+        terrain_gate_available = bool(
+            self._height_sensor is not None
+            and self._front_ray_mask is not None
+            and self._rear_ray_mask is not None
+        )
+        if terrain_gate_available:
             ray_hits_z = self._height_sensor.data.ray_hits_w[..., 2]
             sensor_z = self._height_sensor.data.pos_w[:, 2]
             front_z = self._masked_mean(ray_hits_z, self._front_ray_mask, sensor_z)
             rear_z = self._masked_mean(ray_hits_z, self._rear_ray_mask, front_z)
             height_delta = front_z - rear_z
 
-            height_gate_width = max(self.cfg.height_gate_width, 1.0e-6)
-            height_gate = self._smoothstep((height_delta - self.cfg.height_threshold) / height_gate_width)
-
             command = self._env.command_manager.get_command(self.cfg.command_name)
-            cmd_gate_width = max(self.cfg.command_gate_width, 1.0e-6)
-            cmd_gate = torch.clamp((command[:, 0] - self.cfg.min_forward_command) / cmd_gate_width, 0.0, 1.0)
-            gate = height_gate * cmd_gate
+            command_x = command[:, 0]
 
         front_z = self._asset.data.body_pos_w[:, self._front_foot_ids, 2].mean(dim=1)
         rear_z = self._asset.data.body_pos_w[:, self._rear_foot_ids, 2].mean(dim=1)
         front_rear_delta = front_z - rear_z
-        commit_gate = self._smoothstep(
-            (front_rear_delta - self.cfg.commit_height_delta_min)
-            / max(self.cfg.commit_height_delta_target - self.cfg.commit_height_delta_min, 1.0e-6)
+        update_count = _global_update(self._env, self.cfg.num_steps_per_update)
+        result = compute_phased_highstep_post_prior(
+            self._raw_actions,
+            self._processed_actions,
+            self._box_action_ids,
+            self._scale,
+            self._offset,
+            height_delta,
+            command_x,
+            front_rear_delta,
+            terrain_gate_available=terrain_gate_available,
+            height_threshold=self.cfg.height_threshold,
+            height_gate_width=self.cfg.height_gate_width,
+            min_forward_command=self.cfg.min_forward_command,
+            command_gate_width=self.cfg.command_gate_width,
+            commit_height_delta_min=self.cfg.commit_height_delta_min,
+            commit_height_delta_target=self.cfg.commit_height_delta_target,
+            commit_gate_floor=self.cfg.commit_gate_floor,
+            front_reach_box_bias=self.cfg.front_reach_box_bias,
+            rear_approach_box_bias=self.cfg.rear_approach_box_bias,
+            front_support_box_bias=self.cfg.front_support_box_bias,
+            rear_push_box_bias=self.cfg.rear_push_box_bias,
+            min_box_target=self.cfg.min_box_target,
+            max_box_target=self.cfg.max_box_target,
+            update_count=update_count,
+            prior_start_update=self.cfg.prior_start_update,
+            prior_full_update=self.cfg.prior_full_update,
         )
+        self._processed_actions[:] = result.physical_targets
 
-        reach_gate = gate * (1.0 - commit_gate)
-        push_gate = torch.maximum(gate * commit_gate, self.cfg.commit_gate_floor * commit_gate)
-
-        reach_bias = torch.tensor(
-            [
-                self.cfg.front_reach_box_bias,
-                self.cfg.front_reach_box_bias,
-                self.cfg.rear_approach_box_bias,
-                self.cfg.rear_approach_box_bias,
-            ],
-            device=self.device,
-            dtype=self._processed_actions.dtype,
-        )
-        push_bias = torch.tensor(
-            [
-                self.cfg.front_support_box_bias,
-                self.cfg.front_support_box_bias,
-                self.cfg.rear_push_box_bias,
-                self.cfg.rear_push_box_bias,
-            ],
-            device=self.device,
-            dtype=self._processed_actions.dtype,
-        )
-        box_bias = reach_gate.unsqueeze(1) * reach_bias + push_gate.unsqueeze(1) * push_bias
-        update_count = float(self._env.common_step_counter) / max(float(self.cfg.num_steps_per_update), 1.0)
-        prior_ramp = max(float(self.cfg.prior_full_update - self.cfg.prior_start_update), 1.0)
-        prior_scale = (update_count - float(self.cfg.prior_start_update)) / prior_ramp
-        prior_scale = float(max(0.0, min(1.0, prior_scale)))
-        box_bias = box_bias * prior_scale
-
-        box_targets = self._processed_actions[:, self._box_action_ids] + box_bias
-        box_targets = torch.clamp(box_targets, min=self.cfg.min_box_target, max=self.cfg.max_box_target)
-        self._processed_actions[:, self._box_action_ids] = box_targets
-
-        self._last_phased_highstep_box_bias[:] = box_bias
-        self._last_phased_highstep_gate[:] = torch.maximum(reach_gate, push_gate) * prior_scale
-        self._last_phased_highstep_reach_gate[:] = reach_gate * prior_scale
-        self._last_phased_highstep_push_gate[:] = push_gate * prior_scale
+        self._last_phased_highstep_box_bias[:] = result.box_bias
+        self._last_phased_highstep_gate[:] = result.gate
+        self._last_phased_highstep_reach_gate[:] = result.reach_gate
+        self._last_phased_highstep_push_gate[:] = result.push_gate
         self._last_phased_highstep_height_delta[:] = height_delta
+        self._last_phased_highstep_prior_scale = result.prior_scale
+        if self._action_delay_buffer is not None:
+            self._processed_actions = self._action_delay_buffer.compute(self._processed_actions)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        super().reset(env_ids)
+        _reset_action_delay(self, env_ids)
 
 
 @configclass
@@ -399,3 +587,5 @@ class PhasedHighstepBoxBiasJointPositionActionCfg(JointPositionActionCfg):
     prior_start_update: int = 300
     prior_full_update: int = 900
     num_steps_per_update: int = 24
+    min_action_delay_steps: int = 0
+    max_action_delay_steps: int = 0

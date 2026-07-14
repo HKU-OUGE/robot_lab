@@ -20,6 +20,38 @@ from isaaclab.managers import ManagerTermBase
 #     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def randomize_highstep_joint_observation_bias(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    hip_bias_range: tuple[float, float] = (-0.020, 0.020),
+    leg_bias_range: tuple[float, float] = (-0.012, 0.012),
+    box_bias_range: tuple[float, float] = (-0.0015, 0.0015),
+) -> None:
+    """Sample persistent per-joint encoder offsets for one episode."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=asset.device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=asset.device, dtype=torch.long)
+    if (
+        not hasattr(env, "_highstep_joint_pos_observation_bias")
+        or env._highstep_joint_pos_observation_bias.shape != asset.data.joint_pos.shape
+    ):
+        env._highstep_joint_pos_observation_bias = torch.zeros_like(asset.data.joint_pos)
+
+    bias = env._highstep_joint_pos_observation_bias
+    bias[env_ids] = 0.0
+    for joint_id, joint_name in enumerate(asset.joint_names):
+        if "hip_joint" in joint_name:
+            low, high = hip_bias_range
+        elif "box_joint" in joint_name:
+            low, high = box_bias_range
+        else:
+            low, high = leg_bias_range
+        bias[env_ids, joint_id] = low + (high - low) * torch.rand(len(env_ids), device=asset.device)
+
+
 def reset_root_state_highstep_approach(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -346,6 +378,104 @@ def set_joint_positions_simple(env: ManagerBasedRLEnv, env_ids, joint_pos: dict)
 
     # 写回仿真
     robot.write_joint_state_to_sim(q, dq)
+
+
+def randomize_highstep_foot_under_hip_reset(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    hip_joint_names: list[str],
+    thigh_joint_names: list[str],
+    calf_joint_names: list[str],
+    box_joint_names: list[str],
+    hip_outward_range: tuple[float, float] = (0.0, 0.055),
+    hip_noise_range: tuple[float, float] = (-0.018, 0.018),
+    thigh_position_range: tuple[float, float] = (-0.035, 0.035),
+    calf_position_range: tuple[float, float] = (-0.035, 0.035),
+    box_position_range: tuple[float, float] = (-0.006, 0.006),
+    velocity_range: tuple[float, float] = (-0.12, 0.12),
+    rear_inward_prob: float = 0.0,
+    rear_inward_range: tuple[float, float] = (0.015, 0.055),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Randomize reset foot placement around the hip-under-foot neighborhood."""
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    device = asset.data.joint_pos.device
+    if env_ids is None:
+        env_ids = torch.arange(env.scene.num_envs, device=device, dtype=torch.long)
+    elif not torch.is_tensor(env_ids):
+        env_ids = torch.as_tensor(env_ids, device=device, dtype=torch.long)
+    else:
+        env_ids = env_ids.to(device=device, dtype=torch.long)
+
+    if hasattr(asset.data, "joint_names"):
+        joint_names = list(asset.data.joint_names)
+    else:
+        joint_names = list(asset.joint_names)
+    name_to_id = {name: idx for idx, name in enumerate(joint_names)}
+    expected_names = hip_joint_names + thigh_joint_names + calf_joint_names + box_joint_names
+    missing = [name for name in expected_names if name not in name_to_id]
+    if missing:
+        raise ValueError(f"Missing highstep reset joints: {missing}")
+
+    hip_ids = [name_to_id[name] for name in hip_joint_names]
+    thigh_ids = [name_to_id[name] for name in thigh_joint_names]
+    calf_ids = [name_to_id[name] for name in calf_joint_names]
+    box_ids = [name_to_id[name] for name in box_joint_names]
+    selected_ids = sorted(set(hip_ids + thigh_ids + calf_ids + box_ids))
+    selected_ids_t = torch.as_tensor(selected_ids, device=device, dtype=torch.long)
+
+    joint_pos = asset.data.joint_pos[env_ids].clone()
+    joint_vel = asset.data.joint_vel[env_ids].clone()
+    num_envs = len(env_ids)
+
+    def _sample(value_range: tuple[float, float], width: int) -> torch.Tensor:
+        return math_utils.sample_uniform(value_range[0], value_range[1], (num_envs, width), device=device)
+
+    if hip_ids:
+        signs = torch.tensor(
+            [1.0 if name.startswith(("FL_", "RL_")) else -1.0 for name in hip_joint_names],
+            device=device,
+            dtype=joint_pos.dtype,
+        ).unsqueeze(0)
+        outward = _sample(hip_outward_range, len(hip_ids))
+        noise = _sample(hip_noise_range, len(hip_ids))
+        hip_delta = torch.clamp(outward + noise, min=0.0)
+        if rear_inward_prob > 0.0:
+            rear_mask = torch.tensor(
+                [name.startswith(("RL_", "RR_")) for name in hip_joint_names],
+                device=device,
+                dtype=torch.bool,
+            ).unsqueeze(0)
+            inward_env = (
+                torch.rand(num_envs, 1, device=device) < min(max(rear_inward_prob, 0.0), 1.0)
+            )
+            inward = _sample(rear_inward_range, len(hip_ids))
+            hip_delta = torch.where(inward_env & rear_mask, -inward, hip_delta)
+        joint_pos[:, hip_ids] += signs * hip_delta
+
+    if thigh_ids:
+        joint_pos[:, thigh_ids] += _sample(thigh_position_range, len(thigh_ids))
+    if calf_ids:
+        joint_pos[:, calf_ids] += _sample(calf_position_range, len(calf_ids))
+    if box_ids:
+        joint_pos[:, box_ids] += _sample(box_position_range, len(box_ids))
+
+    joint_vel[:, selected_ids] += _sample(velocity_range, len(selected_ids))
+
+    iter_env_ids = env_ids[:, None]
+    pos_limits = asset.data.soft_joint_pos_limits[iter_env_ids, selected_ids_t]
+    joint_pos[:, selected_ids] = joint_pos[:, selected_ids].clamp(pos_limits[..., 0], pos_limits[..., 1])
+    vel_limits = asset.data.soft_joint_vel_limits[iter_env_ids, selected_ids_t]
+    joint_vel[:, selected_ids] = joint_vel[:, selected_ids].clamp(-vel_limits, vel_limits)
+
+    asset.write_joint_state_to_sim(
+        joint_pos[:, selected_ids],
+        joint_vel[:, selected_ids],
+        joint_ids=selected_ids_t,
+        env_ids=env_ids,
+    )
+
 
 from isaaclab.envs.mdp.commands.commands_cfg import UniformPoseCommandCfg
 import math

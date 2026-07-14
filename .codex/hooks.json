@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.agents/skills/highstep-control-variable-guardian/scripts/highstep_guard.py\" hook",
+            "timeout": 10,
+            "statusMessage": "Loading Highstep authority guard"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.agents/skills/highstep-control-variable-guardian/scripts/highstep_guard.py\" hook",
+            "timeout": 10,
+            "statusMessage": "Checking Highstep authority and control-variable policy"
+          }
+        ]
+      }
+    ]
+  }
+}

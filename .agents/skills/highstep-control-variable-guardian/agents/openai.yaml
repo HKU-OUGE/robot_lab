@@ -1,0 +1,4 @@
+interface:
+  display_name: "Highstep Control-Variable Guardian"
+  short_description: "Enforce highstep authority and one-variable workflow"
+  default_prompt: "Use $highstep-control-variable-guardian to audit and safely advance the current highstep workflow."

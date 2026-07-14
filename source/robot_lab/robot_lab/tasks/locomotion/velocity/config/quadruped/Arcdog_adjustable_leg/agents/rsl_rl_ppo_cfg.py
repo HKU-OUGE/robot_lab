@@ -4,6 +4,7 @@
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 from dataclasses import field
+import os
 from rsl_rl.algorithms import PPO
 # 【关键修复 1】：导入 rsl_rl 的 runner 模块
 import rsl_rl.runners.on_policy_runner as on_policy_runner
@@ -70,6 +71,33 @@ class VAEActorCriticCfg(RslRlPpoActorCriticCfg):
     student_recon_loss_coef: float = 0.5
     student_kl_loss_coef: float = 0.1
     student_post_prior_mode: str = "lateral"
+    student_highstep_phase_loss_scale: float = 0.0
+    student_highstep_rear_box_loss_scale: float = 0.0
+    student_highstep_rear_hip_loss_scale: float = 0.0
+    student_highstep_rear_hip_min_abs: float = 0.0
+    student_highstep_rear_hip_action_scale: float = 0.1
+    # Approved 2026-07-12 highstep Student recovery.  "none" preserves the
+    # legacy distillation path for unrelated tasks; stage B is enabled only by
+    # the dedicated highstep ActionScore Student config below.
+    student_recovery_stage: str = "none"
+    student_recovery_actor_lr: float = 1.0e-5
+    student_recovery_epochs: int = 1
+    student_recovery_source_checkpoint: str = ""
+    student_recovery_source_sha256: str = ""
+    student_recovery_teacher_checkpoint: str = ""
+    student_recovery_teacher_sha256: str = ""
+    student_recovery_r2_preregistration_path: str = ""
+    student_recovery_r2_preregistration_sha256: str = ""
+    student_recovery_r3_preregistration_path: str = ""
+    student_recovery_r3_preregistration_sha256: str = ""
+    student_recovery_v15_preregistration_path: str = ""
+    student_recovery_v15_preregistration_sha256: str = ""
+    student_recovery_0707_exact_preregistration_path: str = ""
+    student_recovery_0707_exact_preregistration_sha256: str = ""
+    student_recovery_historical_0707_exact_preregistration_path: str = ""
+    student_recovery_historical_0707_exact_preregistration_sha256: str = ""
+    student_recovery_v18_preregistration_path: str = ""
+    student_recovery_v18_preregistration_sha256: str = ""
 
 # ---------------------------------------------------------
 # 2. 声明 VAE 专属的算法配置
@@ -248,6 +276,354 @@ class ArclabArcdogAdjustableLegHighstepStudentNoPriorPPORunnerCfg(ArclabArcdogAd
         self.policy.student_recon_loss_coef = 0.5
         self.policy.student_kl_loss_coef = 0.1
         self.policy.student_post_prior_mode = "highstep"
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg(ArclabArcdogAdjustableLegHighstepPPORunnerCfg):
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae"
+    max_iterations = 12000
+    save_interval = 100
+
+    def __post_init__(self):
+        self.algorithm.entropy_coef = 0.0015
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.desired_kl = 0.006
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_no_prior"
+    max_iterations = 2000
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        # Formal recovery spec B: reuse model_900's estimator and actor body,
+        # and train only the final RL/RR hip rows against the independently
+        # loaded model_172300 Teacher.  No warm-up or hand-written hip target.
+        self.policy.student_recovery_stage = "B"
+        self.policy.student_actor_warmup_updates = 0
+        self.policy.student_recovery_actor_lr = 1.0e-5
+        self.policy.student_recovery_epochs = 1
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_no_prior_Student/"
+            "2026-07-12_04-41-42_robust_student_distill_20260712_044124/model_900.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "9bbd5b597d9c195ecf9afb141152b8f0749dc599a54868674b299107fb40a229"
+        )
+        self.policy.student_recovery_teacher_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/"
+            "2026-07-11_11-22-23/model_172300.pt"
+        )
+        self.policy.student_recovery_teacher_sha256 = (
+            "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35"
+        )
+        self.policy.student_highstep_phase_loss_scale = 0.0
+        self.policy.student_highstep_rear_box_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorR2PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Dedicated immutable-v1.1.1 R2 Student runner; the archived Stage-B cfg is untouched."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_recovery_r2"
+    max_iterations = 1000
+    save_interval = 100
+    obs_groups = {
+        "policy": ["policy"],
+        "estimator": ["estimator"],
+        "critic": ["critic"],
+        "teacher_context": ["teacher_context"],
+    }
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "R2"
+        self.policy.student_recovery_r2_preregistration_path = (
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v11_20260712/"
+            "r2_preregistration.json"
+        )
+        self.policy.student_recovery_r2_preregistration_sha256 = (
+            "36d39316f8fbba407899a14d1d659873f75b33423464f01ea92000e588c56fc5"
+        )
+        self.policy.student_actor_warmup_updates = 0
+        self.policy.student_recovery_epochs = 1
+        self.algorithm.num_learning_epochs = 1
+        self.algorithm.num_mini_batches = 4
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "fixed"
+        self.algorithm.max_grad_norm = 1.0
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorR3PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Spec-locked v1.2 R3 Student runner with a frozen estimator and full action head."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_recovery_r3"
+    max_iterations = 100
+    save_interval = 25
+    obs_groups = {
+        "policy": ["policy"],
+        "estimator": ["estimator"],
+        "critic": ["critic"],
+        "teacher_context": ["teacher_context"],
+    }
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "R3"
+        self.policy.student_recovery_r3_preregistration_path = (
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v12_20260713/"
+            "r3_preregistration.json"
+        )
+        self.policy.student_recovery_r3_preregistration_sha256 = (
+            "13c184e4b6e2c3b514f52466dac1e27ff18256433716fd0c6b5d0890d93945e6"
+        )
+        self.policy.student_actor_warmup_updates = 0
+        self.policy.student_recovery_epochs = 1
+        self.algorithm.num_learning_epochs = 1
+        self.algorithm.num_mini_batches = 4
+        self.algorithm.learning_rate = 5.0e-6
+        self.algorithm.schedule = "fixed"
+        self.algorithm.max_grad_norm = 1.0
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV15PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Spec-locked v1.5 fresh Stage-2 distillation from model_172300."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_v15"
+    max_iterations = 2500
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "V15"
+        self.policy.student_recovery_v15_preregistration_path = os.environ.get(
+            "HIGHSTEP_V15_PREREGISTRATION_PATH",
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v15_20260713/"
+            "preregistration_v6.json",
+        )
+        # The preregistration binds this source file, so its own digest cannot
+        # be embedded here without a hash cycle.  The supervisor supplies the
+        # already-frozen digest; an absent/incorrect value fails closed in VAEPPO.
+        self.policy.student_recovery_v15_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_V15_PREREGISTRATION_SHA256", ""
+        )
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v15_20260713/"
+            "source_model_172300_v3/model_172300.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35"
+        )
+        self.policy.student_recovery_teacher_checkpoint = self.policy.student_recovery_source_checkpoint
+        self.policy.student_recovery_teacher_sha256 = self.policy.student_recovery_source_sha256
+        self.policy.student_actor_warmup_updates = 1400
+        self.policy.student_vae_epochs = 4
+        self.policy.student_teacher_action_loss_coef = 20.0
+        self.policy.student_prior_box_loss_coef = 5.0
+        self.policy.student_post_prior_mode = "highstep"
+        self.policy.student_highstep_phase_loss_scale = 2.0
+        self.policy.student_highstep_rear_box_loss_scale = 1.5
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPrior0707ExactPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Strict replay of the proven 0707 Stage-2 semantics with model_172300."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_0707_exact_new_teacher"
+    max_iterations = 1200
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "0707_EXACT"
+        self.policy.student_recovery_0707_exact_preregistration_path = os.environ.get(
+            "HIGHSTEP_0707_EXACT_PREREGISTRATION_PATH", ""
+        )
+        self.policy.student_recovery_0707_exact_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_0707_EXACT_PREREGISTRATION_SHA256", ""
+        )
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_0707_exact_new_teacher_20260713/"
+            "source_model_172300/model_172300.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35"
+        )
+        self.policy.student_recovery_teacher_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/"
+            "2026-07-11_11-22-23/model_172300.pt"
+        )
+        self.policy.student_recovery_teacher_sha256 = self.policy.student_recovery_source_sha256
+        self.policy.student_actor_warmup_updates = 1200
+        self.policy.student_vae_epochs = 4
+        self.policy.student_vel_loss_coef = 10.0
+        self.policy.student_latent_loss_coef = 50.0
+        self.policy.student_teacher_action_loss_coef = 20.0
+        self.policy.student_prior_box_loss_coef = 5.0
+        self.policy.student_recon_loss_coef = 0.5
+        self.policy.student_kl_loss_coef = 0.1
+        self.policy.student_post_prior_mode = "highstep"
+        self.policy.student_highstep_phase_loss_scale = 0.0
+        self.policy.student_highstep_rear_box_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorHistorical0707ExactPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Evidence-frozen historical 0707 Stage-2 semantics with model_172300."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_"
+        "historical_0707_exact_new_teacher"
+    )
+    max_iterations = 1400
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "HISTORICAL_0707_EXACT"
+        self.policy.student_recovery_historical_0707_exact_preregistration_path = os.environ.get(
+            "HIGHSTEP_HISTORICAL_0707_EXACT_PREREGISTRATION_PATH", ""
+        )
+        self.policy.student_recovery_historical_0707_exact_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_HISTORICAL_0707_EXACT_PREREGISTRATION_SHA256", ""
+        )
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/tmp/"
+            "highstep_historical_0707_exact_new_teacher_20260714/"
+            "source_model_172300/model_172300.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35"
+        )
+        self.policy.student_recovery_teacher_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/"
+            "2026-07-11_11-22-23/model_172300.pt"
+        )
+        self.policy.student_recovery_teacher_sha256 = self.policy.student_recovery_source_sha256
+        self.policy.student_actor_warmup_updates = 1400
+        self.policy.student_vae_epochs = 4
+        self.policy.student_vel_loss_coef = 10.0
+        self.policy.student_latent_loss_coef = 50.0
+        self.policy.student_teacher_action_loss_coef = 20.0
+        self.policy.student_prior_box_loss_coef = 5.0
+        self.policy.student_recon_loss_coef = 0.5
+        self.policy.student_kl_loss_coef = 0.1
+        self.policy.student_post_prior_mode = "highstep"
+        self.policy.student_highstep_phase_loss_scale = 2.0
+        self.policy.student_highstep_rear_box_loss_scale = 1.5
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """v1.8 two-stage environment curriculum with unchanged 0707 distillation contract."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_"
+        "environment_curriculum_v18"
+    )
+    max_iterations = 2500
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        continuation_branch = os.environ.get("HIGHSTEP_E1400_CONTINUATION_BRANCH", "").upper()
+        if continuation_branch:
+            if continuation_branch not in {"A", "B"}:
+                raise ValueError(
+                    "HIGHSTEP_E1400_CONTINUATION_BRANCH must be A or B, got "
+                    f"{continuation_branch!r}"
+                )
+            self.policy.student_recovery_stage = "E1400_CONTINUATION"
+            self.policy.student_recovery_e1400_continuation_branch = continuation_branch
+            self.policy.student_recovery_e1400_continuation_preregistration_path = os.environ.get(
+                "HIGHSTEP_E1400_CONTINUATION_PREREGISTRATION_PATH", ""
+            )
+            self.policy.student_recovery_e1400_continuation_preregistration_sha256 = os.environ.get(
+                "HIGHSTEP_E1400_CONTINUATION_PREREGISTRATION_SHA256", ""
+            )
+        else:
+            self.policy.student_recovery_stage = "ENV_CURRICULUM_V18"
+            self.policy.student_recovery_v18_preregistration_path = os.environ.get(
+                "HIGHSTEP_V18_PREREGISTRATION_PATH", ""
+            )
+            self.policy.student_recovery_v18_preregistration_sha256 = os.environ.get(
+                "HIGHSTEP_V18_PREREGISTRATION_SHA256", ""
+            )
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/tmp/"
+            "highstep_historical_0707_exact_new_teacher_20260714/"
+            "source_model_172300/model_172300.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35"
+        )
+        self.policy.student_recovery_teacher_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/"
+            "2026-07-11_11-22-23/model_172300.pt"
+        )
+        self.policy.student_recovery_teacher_sha256 = self.policy.student_recovery_source_sha256
+        self.policy.student_actor_warmup_updates = (
+            1700 if continuation_branch == "A" else 1400
+        )
+        self.policy.student_vae_epochs = 4
+        self.policy.student_vel_loss_coef = 10.0
+        self.policy.student_latent_loss_coef = 50.0
+        self.policy.student_teacher_action_loss_coef = 20.0
+        self.policy.student_prior_box_loss_coef = 5.0
+        self.policy.student_recon_loss_coef = 0.5
+        self.policy.student_kl_loss_coef = 0.1
+        self.policy.student_post_prior_mode = "highstep"
+        self.policy.student_highstep_phase_loss_scale = 2.0
+        self.policy.student_highstep_rear_box_loss_scale = 1.5
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
         super().__post_init__()
 
 # @configclass

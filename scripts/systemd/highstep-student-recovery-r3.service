@@ -1,0 +1,23 @@
+[Unit]
+Description=Spec-locked autonomous highstep Student R3 recovery supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=4
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=highstep-student-recovery-r3 --why=spec-locked-R3-training --mode=block /home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_student_recovery_r3_supervisor.py
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=1 2
+TimeoutStopSec=75
+KillMode=control-group
+SuccessExitStatus=130
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v12_20260713/r3_supervisor_service.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v12_20260713/r3_supervisor_service.log
+
+[Install]
+WantedBy=default.target

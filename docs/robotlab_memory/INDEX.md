@@ -1,8 +1,24 @@
 # RobotLab Memory Index
 
-Last updated: 2026-06-24, Asia/Hong_Kong.
+Last updated: 2026-07-15, Asia/Hong_Kong.
 
 This is the always-on entry point for future conversations. Read this file first, then open only the linked detail file that matches the current question.
+
+## Current 2026-07-15 Entry (Overrides Older "Current" Text Below)
+
+- [Codex start-here entry for a new machine/session](../robotlab_memory_zh/CODEX_START_HERE.md): distinguishes live workstation authority from the frozen GitHub handoff.
+- [Portable GitHub handoff: code, history, and v1.11 progress](../robotlab_memory_zh/library/highstep_repository_transfer_handoff_20260715.md): branch scope, historical reading order, external artifact boundary, and the current read-only Teacher A/B workflow.
+- [Highstep recovery and automation specification v1.11](../robotlab_memory_zh/library/highstep_student_recovery_spec_20260712.md): the top v1.11 section is the current formal authority; conflicting v1.10-and-older sections are historical evidence only.
+- [Old-vs-new Teacher zero-training robustness A/B decision](../robotlab_memory_zh/library/highstep_teacher_robustness_ab_decision_20260715.md): current single variable, read-only contract, and terminal behavior.
+
+All older items below remain useful history, but their old "current" labels, PIDs, and resume commands must not be treated as executable authority.
+
+## Highest-Priority Workflow Constraints
+
+- [Highstep 0707 real-video/rosbag audit and paused checkpoint](../robotlab_memory_zh/library/highstep_0707_real_log_audit_handoff_20260712.md): current highest-priority recovery point. Training and automation are safely stopped at `2026-07-11_23-45-31/model_600.pt`; do not resume before fixing cross-process schedules, target-limit safety, deployment handoff, provenance, and strict-eval gates.
+- [Highstep 0707 real-data analysis and remediation report](../robotlab_memory_zh/library/highstep_0707_real_data_analysis_20260712.md): detailed alignment of both video/bag trials, cross-trial evidence, full change-chain reassessment, and implementation status for schedule, target, deployment, and strict-eval fixes.
+- [Codex accountability protocol](library/accountability_protocol.md): read before every answer, judgement, command recommendation, code edit, training analysis, or video analysis. It records the user's highest-standard constraints: do not hide behind model labels; every judgement needs evidence; every command needs risk explanation; no code edit without backup; no conclusion before premise checks; no mutually conflicting recommendations; every phenomenon must be mapped to data, video, and code mechanisms.
+- [Highstep short-term memory after 2026-06-25 20:00](../robotlab_memory_zh/library/highstep_short_term_2026-06-25_20h.md): read before every future answer. The answer must start with the exact Chinese sentence `已按照要求提前检索记忆和约束`. This file records the late-2026-06-25 student failure, fixes, teacher stage-task edits, WandB judgements, and current training state.
 
 ## Current Focus
 
@@ -20,6 +36,8 @@ This is the always-on entry point for future conversations. Read this file first
 ## Read This Next
 
 - [Current state](library/current_state.md): latest checkpoint, current recommendation, active config values.
+- [Highstep short-term memory after 2026-06-25 20:00](../robotlab_memory_zh/library/highstep_short_term_2026-06-25_20h.md): highest-priority recent context; read first.
+- [Codex accountability protocol](library/accountability_protocol.md): highest-priority workflow constraints; read first.
 - [Highstep training chain](library/highstep_training_chain.md): which WandB runs to keep or hide, and why.
 - [Bodyflat and sidestep memory](library/bodyflat_sidestep_memory.md): bodyflat teacher/student history, sidestep action-prior lessons.
 - [Repository usage rules](library/repo_usage_rules.md): commands, backups, logs, videos, monitoring, and safe operating rules.
@@ -31,6 +49,8 @@ This is the always-on entry point for future conversations. Read this file first
 
 ## Hard Rules To Preserve
 
+- Highest priority: read [Codex accountability protocol](library/accountability_protocol.md). Every judgement needs evidence; every command needs risk explanation; every code edit needs a backup; no conclusion before premise checks; no mutually conflicting recommendations.
+- Every answer must start with the exact Chinese sentence `已按照要求提前检索记忆和约束`. Before answering, actively read the [Highstep short-term memory](../robotlab_memory_zh/library/highstep_short_term_2026-06-25_20h.md) and [Codex accountability protocol](library/accountability_protocol.md).
 - Before code changes, back up every modified file. Backup suffix should be the previous or current relevant training log folder name, e.g. `_2026-06-17_03-05-16`.
 - Do not judge highstep only by `Curriculum/terrain_levels`; play/video is decisive.
 - `terrain_levels` is an average terrain-row occupancy metric, not a direct "max platform height climbed" score. Bodyflat curves around 5.x and highstep curves around 2.7-3.3 are not directly comparable without checking task, curriculum function, command range, and terrain mix.

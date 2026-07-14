@@ -16,6 +16,7 @@ from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 from typing import Optional
 import robot_lab.tasks.locomotion.velocity.mdp as mdp
+from .highstep_schedule import global_update as _global_update
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 def joint_pos_penalty(
@@ -1297,8 +1298,8 @@ def _highstep_training_progress_gate(
     stage_ramp_updates: int = 1,
     num_steps_per_update: int = 24,
 ) -> torch.Tensor:
-    """Scalar gate used to stage high-step rewards during one continuous run."""
-    update_count = float(env.common_step_counter) / max(float(num_steps_per_update), 1.0)
+    """Scalar gate staged by the checkpoint-continuous high-step update."""
+    update_count = _global_update(env, num_steps_per_update)
     progress = (update_count - float(stage_start_update)) / max(float(stage_ramp_updates), 1.0)
     progress = max(0.0, min(1.0, progress))
     return torch.as_tensor(progress, device=env.device)
@@ -1618,20 +1619,270 @@ def _front_feet_highstep_commit_gate(
     return height_score * (0.45 + 0.55 * front_x_score) * (0.35 + 0.65 * pitch_score)
 
 
+def _highstep_on_top_phase_gates(
+    env: ManagerBasedRLEnv,
+    asset: RigidObject,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str] | None,
+    rear_foot_names: list[str] | None,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    second_clear_min: float = 0.72,
+    min_base_clearance: float = 0.35,
+    target_base_clearance: float = 0.43,
+    commit_gate_scale: float = 0.85,
+) -> dict[str, torch.Tensor]:
+    """Detect when the high-step task has finished so entry/prep rewards can shut off."""
+    terrain_gate, height_delta, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    task_gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+
+    if rear_foot_names is None:
+        zero = torch.zeros_like(task_gate)
+        return {
+            "terrain_gate": terrain_gate,
+            "height_delta": height_delta,
+            "front_terrain_z": front_terrain_z,
+            "commit_gate": commit_gate,
+            "task_gate": task_gate,
+            "second_ready_gate": zero,
+            "base_clearance_score": zero,
+            "on_top_gate": zero,
+            "entry_allowed_gate": torch.ones_like(task_gate),
+        }
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_z = asset.data.body_pos_w[:, rear_foot_ids, 2]
+    rear_clearance = rear_z - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_score = torch.min(rear_clearance_score, dim=1).values
+    second_ready_gate = torch.clamp(
+        (second_score - second_clear_min) / max(1.0 - second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    base_clearance = asset.data.root_pos_w[:, 2] - front_terrain_z
+    base_clearance_score = torch.clamp(
+        (base_clearance - min_base_clearance) / max(target_base_clearance - min_base_clearance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    on_top_gate = torch.clamp(task_gate * second_ready_gate * base_clearance_score, min=0.0, max=1.0)
+    return {
+        "terrain_gate": terrain_gate,
+        "height_delta": height_delta,
+        "front_terrain_z": front_terrain_z,
+        "commit_gate": commit_gate,
+        "task_gate": task_gate,
+        "second_ready_gate": second_ready_gate,
+        "base_clearance_score": base_clearance_score,
+        "on_top_gate": on_top_gate,
+        "entry_allowed_gate": 1.0 - on_top_gate,
+    }
+
+
 def _ensure_highstep_rear_branch_buffers(env: ManagerBasedRLEnv):
     """Create per-env buffers used to diagnose rear-foot branch choice."""
+    device = torch.device(env.device)
     needs_init = (
         not hasattr(env, "_highstep_rear_branch_lead")
+        or not hasattr(env, "_highstep_rear_branch_lead_steps")
+        or not hasattr(env, "_highstep_rear_branch_sample_steps")
+        or not hasattr(env, "_highstep_lead_support_drive_sample_steps")
+        or not hasattr(env, "_highstep_lead_support_drive_lift_velocity_sum")
+        or not hasattr(env, "_highstep_post_lead_drive_lift_velocity_sum")
+        or not hasattr(env, "_highstep_rear_approach_width_sample_steps")
+        or not hasattr(env, "_highstep_rear_approach_center_deficit_max")
+        or not hasattr(env, "_highstep_rear_motion_center_deficit_max")
+        or not hasattr(env, "_highstep_support_stability_sample_steps")
+        or not hasattr(env, "_highstep_front_lift_guard_sample_steps")
+        or not hasattr(env, "_highstep_fl_forward_flat_sample_steps")
+        or not hasattr(env, "_highstep_post_clear_origin_valid")
+        or not hasattr(env, "_highstep_post_clear_origin_rear_pos_w")
+        or not hasattr(env, "_highstep_post_clear_heading_w")
+        or not hasattr(env, "_highstep_post_clear_origin_step")
+        or not hasattr(env, "_highstep_post_clear_stall_near_edge_counter")
         or env._highstep_rear_branch_lead.shape[0] != env.num_envs
-        or env._highstep_rear_branch_lead.device != env.device
+        or env._highstep_rear_branch_lead.device != device
     )
     if needs_init:
         env._highstep_rear_branch_lead = torch.full(
-            (env.num_envs,), -1, dtype=torch.int64, device=env.device
+            (env.num_envs,), -1, dtype=torch.int64, device=device
         )
-        env._highstep_rear_branch_commit_steps = torch.zeros(env.num_envs, device=env.device)
-        env._highstep_rear_branch_one_sided_steps = torch.zeros(env.num_envs, device=env.device)
-        env._highstep_rear_branch_second_clear_steps = torch.zeros(env.num_envs, device=env.device)
+        env._highstep_rear_branch_commit_steps = torch.zeros(env.num_envs, device=device)
+        env._highstep_rear_branch_lead_steps = torch.zeros(env.num_envs, device=device)
+        env._highstep_rear_branch_one_sided_steps = torch.zeros(env.num_envs, device=device)
+        env._highstep_rear_branch_second_clear_steps = torch.zeros(env.num_envs, device=device)
+        env._highstep_post_clear_origin_valid = torch.zeros(
+            env.num_envs, dtype=torch.bool, device=device
+        )
+        env._highstep_post_clear_origin_rear_pos_w = torch.zeros(
+            (env.num_envs, 2, 2), device=device
+        )
+        env._highstep_post_clear_heading_w = torch.zeros((env.num_envs, 2), device=device)
+        env._highstep_post_clear_origin_step = torch.zeros(env.num_envs, device=device)
+        for buffer_name in (
+            "_highstep_rear_branch_sample_steps",
+            "_highstep_rear_branch_active_steps",
+            "_highstep_rear_branch_soft_active_steps",
+            "_highstep_rear_branch_lead_candidate_steps",
+            "_highstep_rear_branch_active_gate_sum",
+            "_highstep_rear_branch_active_gate_max",
+            "_highstep_rear_branch_task_gate_sum",
+            "_highstep_rear_branch_task_gate_max",
+            "_highstep_rear_branch_terrain_gate_sum",
+            "_highstep_rear_branch_terrain_gate_max",
+            "_highstep_rear_branch_commit_gate_sum",
+            "_highstep_rear_branch_commit_gate_max",
+            "_highstep_rear_branch_cmd_gate_sum",
+            "_highstep_rear_branch_cmd_gate_max",
+            "_highstep_rear_branch_first_score_sum",
+            "_highstep_rear_branch_first_score_max",
+            "_highstep_rear_branch_second_score_sum",
+            "_highstep_rear_branch_second_score_max",
+            "_highstep_post_lead_stall_sample_steps",
+            "_highstep_post_lead_stall_base_sum",
+            "_highstep_post_lead_stall_base_max",
+            "_highstep_post_lead_stall_second_low_sum",
+            "_highstep_post_lead_stall_progress_low_sum",
+            "_highstep_post_lead_stall_modifier_sum",
+            "_highstep_post_lead_stall_signal_sum",
+            "_highstep_post_lead_stall_signal_max",
+            "_highstep_lead_support_drive_sample_steps",
+            "_highstep_lead_support_drive_gate_sum",
+            "_highstep_lead_support_drive_lead_sum",
+            "_highstep_lead_support_drive_height_sum",
+            "_highstep_lead_support_drive_height_active_sum",
+            "_highstep_lead_support_drive_progress_sum",
+            "_highstep_lead_support_drive_lift_velocity_sum",
+            "_highstep_lead_support_drive_lift_velocity_active_sum",
+            "_highstep_lead_support_drive_body_sum",
+            "_highstep_lead_support_drive_body_active_sum",
+            "_highstep_lead_support_drive_signal_sum",
+            "_highstep_lead_support_drive_signal_max",
+            "_highstep_lead_support_drive_height_max",
+            "_highstep_lead_support_drive_lift_velocity_max",
+            "_highstep_lead_support_drive_body_max",
+            "_highstep_post_lead_drive_sample_steps",
+            "_highstep_post_lead_drive_gate_sum",
+            "_highstep_post_lead_drive_lead_sum",
+            "_highstep_post_lead_drive_height_sum",
+            "_highstep_post_lead_drive_lift_velocity_sum",
+            "_highstep_post_lead_drive_progress_sum",
+            "_highstep_post_lead_drive_second_sum",
+            "_highstep_post_lead_drive_stage_gate_sum",
+            "_highstep_post_lead_drive_signal_sum",
+            "_highstep_post_lead_drive_signal_max",
+            "_highstep_post_clear_recovery_sample_steps",
+            "_highstep_post_clear_recovery_gate_sum",
+            "_highstep_post_clear_recovery_posture_sum",
+            "_highstep_post_clear_recovery_base_clearance_sum",
+            "_highstep_post_clear_recovery_forward_sum",
+            "_highstep_post_clear_recovery_rear_advance_sum",
+            "_highstep_post_clear_recovery_signal_sum",
+            "_highstep_post_clear_recovery_signal_max",
+            "_highstep_post_clear_stall_near_edge_counter",
+            "_highstep_post_clear_stall_sample_steps",
+            "_highstep_post_clear_stall_margin_sum",
+            "_highstep_post_clear_stall_counter_max",
+            "_highstep_post_clear_stall_signal_sum",
+            "_highstep_scanner_pretrigger_sample_steps",
+            "_highstep_scanner_pretrigger_gate_sum",
+            "_highstep_scanner_pretrigger_terrain_gate_sum",
+            "_highstep_scanner_pretrigger_commit_gate_sum",
+            "_highstep_scanner_pretrigger_low_cmd_gate_sum",
+            "_highstep_scanner_pretrigger_front_lift_sum",
+            "_highstep_scanner_pretrigger_uncommanded_vel_sum",
+            "_highstep_scanner_pretrigger_signal_sum",
+            "_highstep_scanner_pretrigger_signal_max",
+            "_highstep_rear_approach_width_sample_steps",
+            "_highstep_rear_approach_width_active_steps",
+            "_highstep_rear_approach_width_gate_sum",
+            "_highstep_rear_approach_width_terrain_gate_sum",
+            "_highstep_rear_approach_width_commit_gate_sum",
+            "_highstep_rear_approach_width_cmd_gate_sum",
+            "_highstep_rear_approach_width_sum",
+            "_highstep_rear_approach_width_active_sum",
+            "_highstep_rear_approach_min_abs_y_sum",
+            "_highstep_rear_approach_min_abs_y_active_sum",
+            "_highstep_rear_approach_width_violation_steps",
+            "_highstep_rear_approach_center_violation_steps",
+            "_highstep_rear_approach_center_deficit_max",
+            "_highstep_rear_approach_signal_sum",
+            "_highstep_rear_approach_signal_max",
+            "_highstep_rear_motion_width_sample_steps",
+            "_highstep_rear_motion_width_active_steps",
+            "_highstep_rear_motion_width_gate_sum",
+            "_highstep_rear_motion_width_terrain_gate_sum",
+            "_highstep_rear_motion_width_commit_gate_sum",
+            "_highstep_rear_motion_width_cmd_gate_sum",
+            "_highstep_rear_motion_width_second_sum",
+            "_highstep_rear_motion_width_sum",
+            "_highstep_rear_motion_width_active_sum",
+            "_highstep_rear_motion_min_abs_y_sum",
+            "_highstep_rear_motion_min_abs_y_active_sum",
+            "_highstep_rear_motion_width_violation_steps",
+            "_highstep_rear_motion_center_violation_steps",
+            "_highstep_rear_motion_center_deficit_max",
+            "_highstep_rear_motion_signal_sum",
+            "_highstep_rear_motion_signal_max",
+            "_highstep_support_stability_sample_steps",
+            "_highstep_support_stability_active_steps",
+            "_highstep_support_stability_gate_sum",
+            "_highstep_support_stability_front_contact_sum",
+            "_highstep_support_stability_front_slip_sum",
+            "_highstep_support_stability_posture_rate_sum",
+            "_highstep_support_stability_rear_lag_sum",
+            "_highstep_support_stability_support_width_sum",
+            "_highstep_support_stability_signal_sum",
+            "_highstep_support_stability_signal_max",
+            "_highstep_front_lift_guard_sample_steps",
+            "_highstep_front_lift_guard_gate_sum",
+            "_highstep_front_lift_guard_signal_sum",
+            "_highstep_front_lift_guard_signal_max",
+            "_highstep_front_lift_guard_max_lift_sum",
+            "_highstep_front_lift_guard_asym_sum",
+            "_highstep_front_lift_guard_height_excess_sum",
+            "_highstep_front_lift_guard_asym_excess_sum",
+            "_highstep_front_lift_guard_terrain_gate_sum",
+            "_highstep_front_lift_guard_commit_gate_sum",
+            "_highstep_fl_forward_flat_sample_steps",
+            "_highstep_fl_forward_flat_active_gate_sum",
+            "_highstep_fl_forward_flat_forward_gate_sum",
+            "_highstep_fl_forward_flat_backward_gate_sum",
+            "_highstep_fl_forward_flat_lateral_gate_sum",
+            "_highstep_fl_forward_flat_yaw_gate_sum",
+            "_highstep_fl_forward_flat_flat_gate_sum",
+            "_highstep_fl_forward_flat_highstep_relief_sum",
+            "_highstep_fl_forward_flat_fl_lift_sum",
+            "_highstep_fl_forward_flat_fr_lift_sum",
+            "_highstep_fl_forward_flat_fl_minus_fr_sum",
+            "_highstep_fl_forward_flat_height_excess_sum",
+            "_highstep_fl_forward_flat_asym_excess_sum",
+            "_highstep_fl_forward_flat_overlift_sum",
+            "_highstep_fl_forward_flat_penalty_sum",
+            "_highstep_fl_forward_flat_penalty_max",
+        ):
+            setattr(env, buffer_name, torch.zeros(env.num_envs, device=device))
+        for buffer_name in (
+            "_highstep_rear_approach_min_abs_y_active_min",
+            "_highstep_rear_motion_min_abs_y_active_min",
+            "_highstep_post_clear_stall_margin_min",
+        ):
+            setattr(env, buffer_name, torch.full((env.num_envs,), 10.0, device=device))
 
 
 def _update_highstep_rear_branch_state(
@@ -1641,13 +1892,20 @@ def _update_highstep_rear_branch_state(
     lead_threshold: float = 0.62,
     second_clear_threshold: float = 0.72,
     one_sided_gap: float = 0.22,
+    active_threshold: float = 0.15,
+    task_gate: torch.Tensor | None = None,
+    terrain_gate: torch.Tensor | None = None,
+    commit_gate: torch.Tensor | None = None,
+    cmd_gate: torch.Tensor | None = None,
 ) -> None:
     """Track which rear foot leads and whether the other rear foot is left behind."""
     _ensure_highstep_rear_branch_buffers(env)
-    active = active_gate > 0.15
+    active_gate = torch.clamp(active_gate.detach(), min=0.0, max=1.0)
+    active = active_gate > active_threshold
     if rear_clearance_score.shape[1] < 2:
         return
 
+    rear_clearance_score = torch.clamp(rear_clearance_score.detach(), min=0.0, max=1.0)
     rl_score = rear_clearance_score[:, 0]
     rr_score = rear_clearance_score[:, 1]
     rl_high = rl_score > lead_threshold
@@ -1658,6 +1916,7 @@ def _update_highstep_rear_branch_state(
     rl_first = active & no_lead & rl_high & ((rl_score - rr_score) > lead_gap)
     rr_first = active & no_lead & rr_high & ((rr_score - rl_score) > lead_gap)
     both_first = active & no_lead & (rl_high | rr_high) & (~rl_first) & (~rr_first)
+    new_lead = rl_first | rr_first | both_first
     env._highstep_rear_branch_lead = torch.where(
         rl_first,
         torch.zeros_like(env._highstep_rear_branch_lead),
@@ -1674,13 +1933,115 @@ def _update_highstep_rear_branch_state(
         env._highstep_rear_branch_lead,
     )
 
-    env._highstep_rear_branch_commit_steps += active.float()
+    def _gate_or_zero(gate: torch.Tensor | None) -> torch.Tensor:
+        if gate is None:
+            return torch.zeros_like(active_gate)
+        return torch.clamp(gate.detach(), min=0.0, max=1.0)
+
+    task_gate = _gate_or_zero(task_gate)
+    terrain_gate = _gate_or_zero(terrain_gate)
+    commit_gate = _gate_or_zero(commit_gate)
+    cmd_gate = _gate_or_zero(cmd_gate)
     max_score = torch.maximum(rl_score, rr_score)
     min_score = torch.minimum(rl_score, rr_score)
+    lead_candidate = active & (max_score > lead_threshold)
+
+    env._highstep_rear_branch_sample_steps += torch.ones_like(active_gate)
+    env._highstep_rear_branch_active_steps += active.float()
+    env._highstep_rear_branch_soft_active_steps += (active_gate > 0.01).float()
+    env._highstep_rear_branch_lead_candidate_steps += lead_candidate.float()
+    env._highstep_rear_branch_active_gate_sum += active_gate
+    env._highstep_rear_branch_active_gate_max = torch.maximum(env._highstep_rear_branch_active_gate_max, active_gate)
+    env._highstep_rear_branch_task_gate_sum += task_gate
+    env._highstep_rear_branch_task_gate_max = torch.maximum(env._highstep_rear_branch_task_gate_max, task_gate)
+    env._highstep_rear_branch_terrain_gate_sum += terrain_gate
+    env._highstep_rear_branch_terrain_gate_max = torch.maximum(env._highstep_rear_branch_terrain_gate_max, terrain_gate)
+    env._highstep_rear_branch_commit_gate_sum += commit_gate
+    env._highstep_rear_branch_commit_gate_max = torch.maximum(env._highstep_rear_branch_commit_gate_max, commit_gate)
+    env._highstep_rear_branch_cmd_gate_sum += cmd_gate
+    env._highstep_rear_branch_cmd_gate_max = torch.maximum(env._highstep_rear_branch_cmd_gate_max, cmd_gate)
+    env._highstep_rear_branch_first_score_sum += max_score
+    env._highstep_rear_branch_first_score_max = torch.maximum(env._highstep_rear_branch_first_score_max, max_score)
+    env._highstep_rear_branch_second_score_sum += min_score
+    env._highstep_rear_branch_second_score_max = torch.maximum(env._highstep_rear_branch_second_score_max, min_score)
+
+    env._highstep_rear_branch_commit_steps += active.float()
+    env._highstep_rear_branch_lead_steps = torch.where(
+        new_lead,
+        env._highstep_rear_branch_commit_steps,
+        env._highstep_rear_branch_lead_steps,
+    )
     one_sided = active & (max_score > lead_threshold) & ((max_score - min_score) > one_sided_gap)
     second_clear = active & (min_score > second_clear_threshold)
     env._highstep_rear_branch_one_sided_steps += one_sided.float()
     env._highstep_rear_branch_second_clear_steps += second_clear.float()
+
+
+def _highstep_rear_stage_context(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    commit_gate_scale: float = 0.90,
+) -> dict[str, torch.Tensor]:
+    """Shared high-step rear-branch signals after the branch tracker has run."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    task_gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_feet_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    rear_clearance = rear_feet_pos_w[..., 2] - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    _ensure_highstep_rear_branch_buffers(env)
+    lead = env._highstep_rear_branch_lead
+    lead_known = lead >= 0
+    lead_index = torch.clamp(lead, min=0, max=1)
+    lead_score = torch.gather(rear_clearance_score, 1, lead_index.unsqueeze(1)).squeeze(1)
+    lead_score = torch.where(lead == 2, torch.max(rear_clearance_score, dim=1).values, lead_score)
+    second_score = torch.min(rear_clearance_score, dim=1).values
+    lead_elapsed_steps = torch.clamp(
+        env._highstep_rear_branch_commit_steps - env._highstep_rear_branch_lead_steps,
+        min=0.0,
+    )
+
+    return {
+        "asset": asset,
+        "task_gate": task_gate,
+        "terrain_gate": terrain_gate,
+        "commit_gate": commit_gate,
+        "front_terrain_z": front_terrain_z,
+        "cmd_gate": cmd_gate,
+        "rear_clearance_score": rear_clearance_score,
+        "lead": lead,
+        "lead_known": lead_known.float(),
+        "lead_index": lead_index,
+        "lead_score": lead_score,
+        "second_score": second_score,
+        "lead_elapsed_steps": lead_elapsed_steps,
+        "first_score": torch.max(rear_clearance_score, dim=1).values,
+    }
 
 
 def front_feet_highstep_clearance_bonus(
@@ -1689,6 +2050,7 @@ def front_feet_highstep_clearance_bonus(
     asset_cfg: SceneEntityCfg,
     sensor_cfg: SceneEntityCfg,
     front_foot_names: list[str],
+    rear_foot_names: list[str] | None = None,
     min_cmd_x: float = 0.08,
     front_x_min: float = 0.25,
     rear_x_max: float = -0.20,
@@ -1786,12 +2148,102 @@ def rear_feet_highstep_clearance_bonus(
         min=0.0,
         max=1.0,
     )
-    rear_x_score = torch.max(rear_x_each_score, dim=1).values
+    rear_x_single_score = torch.max(rear_x_each_score, dim=1).values
+    rear_x_mean_score = torch.mean(rear_x_each_score, dim=1)
+    rear_x_single_w = max(0.0, min(rear_x_single_weight, 1.0))
+    rear_x_score = rear_x_single_w * rear_x_single_score + (1.0 - rear_x_single_w) * rear_x_mean_score
 
     score = (1.0 - rear_x_weight) * rear_height_score + rear_x_weight * rear_x_score
     safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
     stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
     return gate * cmd_gate * score * safe_pitch * stage_gate
+
+
+def rear_first_foot_highstep_preclearance_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.06,
+    clearance_window: float = 0.16,
+    first_clear_min: float = 0.55,
+    second_clear_suppress_min: float = 0.72,
+    commit_gate_min: float = 0.25,
+    commit_gate_scale: float = 0.90,
+    terrain_commit_min: float = 0.22,
+    terrain_commit_floor: float = 0.0,
+    max_roll_metric: float = 0.28,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the first rear foot lifting above the step before a one-sided stall forms."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    task_gate = torch.maximum(terrain_gate, commit_gate_scale * commit_gate)
+    front_commit_ready = torch.clamp(
+        (commit_gate - commit_gate_min) / max(1.0 - commit_gate_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    terrain_commit_ready = torch.clamp(
+        (terrain_gate - terrain_commit_min) / max(1.0 - terrain_commit_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    terrain_floor = max(0.0, min(float(terrain_commit_floor), 1.0))
+    commit_ready = torch.maximum(front_commit_ready, terrain_floor * terrain_commit_ready)
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_feet_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    rear_clearance = rear_feet_pos_w[..., 2] - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    first_score = torch.max(rear_clearance_score, dim=1).values
+    second_score = torch.min(rear_clearance_score, dim=1).values
+    first_clear_score = torch.clamp(
+        (first_score - first_clear_min) / max(1.0 - first_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_clear_score = torch.clamp(
+        (second_score - second_clear_suppress_min) / max(1.0 - second_clear_suppress_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    first_needed_gate = 1.0 - second_clear_score
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return (
+        task_gate
+        * commit_ready
+        * cmd_gate
+        * first_clear_score
+        * first_needed_gate
+        * roll_gate
+        * safe_pitch
+        * stage_gate
+    )
 
 
 def rear_feet_under_step_after_commit_penalty(
@@ -1902,6 +2354,7 @@ def rear_second_foot_highstep_clearance_bonus(
     branch_lead_threshold: float = 0.62,
     branch_second_clear_threshold: float = 0.72,
     branch_one_sided_gap: float = 0.22,
+    branch_active_threshold: float = 0.12,
     stage_start_update: int = 0,
     stage_ramp_updates: int = 1,
     num_steps_per_update: int = 24,
@@ -1928,11 +2381,16 @@ def rear_second_foot_highstep_clearance_bonus(
 
     _update_highstep_rear_branch_state(
         env,
-        cmd_gate * commit_gate,
+        cmd_gate * gate,
         rear_clearance_score,
         lead_threshold=branch_lead_threshold,
         second_clear_threshold=branch_second_clear_threshold,
         one_sided_gap=branch_one_sided_gap,
+        active_threshold=branch_active_threshold,
+        task_gate=gate,
+        terrain_gate=terrain_gate,
+        commit_gate=commit_gate,
+        cmd_gate=cmd_gate,
     )
 
     first_rear_score = torch.max(rear_clearance_score, dim=1).values
@@ -1963,6 +2421,1768 @@ def rear_second_foot_highstep_clearance_bonus(
     safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
     stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
     return gate * cmd_gate * first_rear_gate * second_rear_score * progress_gate * roll_gate * safe_pitch * stage_gate
+
+
+def second_rear_clear_deadline_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    second_clear_min: float = 0.62,
+    deadline_steps: float = 32.0,
+    deadline_grace_steps: float = 6.0,
+    commit_gate_scale: float = 0.90,
+    max_roll_metric: float = 0.28,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the second rear foot clearing soon after the first rear foot leads."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+    second_clear_score = torch.clamp(
+        (ctx["second_score"] - second_clear_min) / max(1.0 - second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    deadline_score = torch.clamp(
+        (deadline_steps - ctx["lead_elapsed_steps"]) / max(deadline_steps - deadline_grace_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return (
+        ctx["task_gate"]
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * second_clear_score
+        * deadline_score
+        * roll_gate
+        * safe_pitch
+        * stage_gate
+    )
+
+
+def one_sided_rear_stall_time_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    lead_threshold: float = 0.45,
+    one_sided_gap: float = 0.16,
+    grace_steps: float = 12.0,
+    ramp_steps: float = 24.0,
+    commit_gate_scale: float = 0.90,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize long one-rear-foot hanging after a rear branch has been chosen."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+    first_score = ctx["first_score"]
+    second_score = ctx["second_score"]
+    one_sided_now = (first_score > lead_threshold) & ((first_score - second_score) > one_sided_gap)
+    stall_time_score = torch.clamp(
+        (env._highstep_rear_branch_one_sided_steps - grace_steps) / max(ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return (
+        ctx["task_gate"]
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * one_sided_now.float()
+        * stall_time_score
+        * safe_pitch
+        * stage_gate
+    )
+
+
+def lead_rear_support_drive_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    box_joint_names: dict[str, str],
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    rear_push_target: float = 0.003,
+    target_std: float = 0.016,
+    lead_box_floor: float = 0.25,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.20,
+    target_distance: float = 0.62,
+    min_height_gain: float = -0.02,
+    target_height_gain: float = 0.09,
+    target_forward_vel: float = 0.28,
+    body_drive_floor: float = 0.10,
+    body_height_weight: float = 0.55,
+    body_progress_weight: float = 0.45,
+    body_lift_velocity_weight: float = 0.0,
+    lift_velocity_target: float = 0.16,
+    progress_lift_gate_start: float = 0.0,
+    progress_lift_gate_end: float = 0.0,
+    second_clear_relief_min: float = 0.70,
+    second_pending_floor: float = 0.35,
+    commit_gate_scale: float = 0.90,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward the first-cleared rear leg supporting and driving the body upward/forward."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+
+    rear_joint_names = [box_joint_names[k] for k in ("RL", "RR")]
+    joint_ids = []
+    for joint_name in rear_joint_names:
+        ids = asset.find_joints(joint_name)[0]
+        joint_ids.append(ids[0])
+    joint_ids = torch.as_tensor(joint_ids, device=asset.data.joint_pos.device, dtype=torch.long)
+    rear_box_pos = asset.data.joint_pos[:, joint_ids]
+    lead_box_pos = torch.gather(rear_box_pos, 1, ctx["lead_index"].unsqueeze(1)).squeeze(1)
+    both_box_pos = torch.mean(rear_box_pos, dim=1)
+    lead_box_pos = torch.where(ctx["lead"] == 2, both_box_pos, lead_box_pos)
+    box_err = torch.square((lead_box_pos - rear_push_target) / max(target_std, 1.0e-6))
+    lead_box_score = lead_box_floor + (1.0 - lead_box_floor) * torch.exp(-box_err)
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_gain_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    forward_vel_score = torch.clamp(asset.data.root_lin_vel_b[:, 0] / max(target_forward_vel, 1.0e-6), 0.0, 1.0)
+    progress_score = torch.maximum(distance_score, forward_vel_score)
+    lift_velocity_score = torch.clamp(
+        asset.data.root_lin_vel_w[:, 2] / max(lift_velocity_target, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    lift_velocity_component = lift_velocity_score * torch.clamp(1.0 - height_gain_score, min=0.0, max=1.0)
+    if progress_lift_gate_end > progress_lift_gate_start:
+        progress_lift_gate = torch.clamp(
+            (height_gain_score - progress_lift_gate_start)
+            / max(progress_lift_gate_end - progress_lift_gate_start, 1.0e-6),
+            min=0.0,
+            max=1.0,
+        )
+    else:
+        progress_lift_gate = torch.ones_like(progress_score)
+    # Progress should assist only after the lead rear leg starts lifting the body.
+    body_drive_score = torch.clamp(
+        body_height_weight * height_gain_score
+        + body_progress_weight * progress_score * progress_lift_gate
+        + body_lift_velocity_weight * lift_velocity_component,
+        min=0.0,
+        max=1.0,
+    )
+    body_drive_score = body_drive_floor + (1.0 - body_drive_floor) * body_drive_score
+    second_clear_relief = torch.clamp(
+        (ctx["second_score"] - second_clear_relief_min) / max(1.0 - second_clear_relief_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_pending_gate = torch.clamp(
+        second_pending_floor + (1.0 - second_pending_floor) * (1.0 - second_clear_relief),
+        min=0.0,
+        max=1.0,
+    )
+
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    support_gate = (
+        ctx["task_gate"]
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * ctx["lead_score"]
+        * safe_pitch
+        * stage_gate
+    )
+    signal = (
+        support_gate
+        * lead_box_score
+        * body_drive_score
+        * second_pending_gate
+    )
+
+    _ensure_highstep_rear_branch_buffers(env)
+    gate_detached = support_gate.detach()
+    env._highstep_lead_support_drive_sample_steps += torch.ones_like(signal)
+    env._highstep_lead_support_drive_gate_sum += gate_detached
+    env._highstep_lead_support_drive_lead_sum += ctx["lead_score"].detach()
+    env._highstep_lead_support_drive_height_sum += height_gain_score.detach()
+    env._highstep_lead_support_drive_height_active_sum += height_gain_score.detach() * gate_detached
+    env._highstep_lead_support_drive_progress_sum += progress_score.detach()
+    env._highstep_lead_support_drive_lift_velocity_sum += lift_velocity_component.detach()
+    env._highstep_lead_support_drive_lift_velocity_active_sum += lift_velocity_component.detach() * gate_detached
+    env._highstep_lead_support_drive_body_sum += body_drive_score.detach()
+    env._highstep_lead_support_drive_body_active_sum += body_drive_score.detach() * gate_detached
+    env._highstep_lead_support_drive_signal_sum += signal.detach()
+    env._highstep_lead_support_drive_signal_max = torch.maximum(
+        env._highstep_lead_support_drive_signal_max, signal.detach()
+    )
+    env._highstep_lead_support_drive_height_max = torch.maximum(
+        env._highstep_lead_support_drive_height_max, height_gain_score.detach()
+    )
+    env._highstep_lead_support_drive_lift_velocity_max = torch.maximum(
+        env._highstep_lead_support_drive_lift_velocity_max, lift_velocity_component.detach()
+    )
+    env._highstep_lead_support_drive_body_max = torch.maximum(
+        env._highstep_lead_support_drive_body_max, body_drive_score.detach()
+    )
+
+    return signal
+
+
+def post_lead_body_drive_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    lead_score_min: float = 0.58,
+    lead_ready_floor: float = 0.0,
+    second_clear_min: float = 0.58,
+    min_elapsed_steps: float = 1.0,
+    elapsed_ramp_steps: float = 6.0,
+    elapsed_gate_floor: float = 0.0,
+    deadline_steps: float = 38.0,
+    deadline_grace_steps: float = 8.0,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.20,
+    target_distance: float = 0.64,
+    min_height_gain: float = -0.01,
+    target_height_gain: float = 0.10,
+    target_forward_vel: float = 0.28,
+    progress_floor: float = 0.25,
+    second_floor: float = 0.35,
+    body_height_weight: float = 0.50,
+    body_progress_weight: float = 0.35,
+    second_clear_weight: float = 0.15,
+    body_lift_velocity_weight: float = 0.0,
+    lift_velocity_target: float = 0.16,
+    progress_lift_gate_start: float = 0.0,
+    progress_lift_gate_end: float = 0.0,
+    second_lift_gate_start: float = 0.0,
+    second_lift_gate_end: float = 0.0,
+    max_roll_metric: float = 0.30,
+    roll_gate_floor: float = 0.0,
+    commit_gate_scale: float = 0.85,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward body lift/advance immediately after the first rear foot has reached the step."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+
+    lead_ready = torch.clamp(
+        (ctx["lead_score"] - lead_score_min) / max(1.0 - lead_score_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    elapsed_gate = torch.clamp(
+        (ctx["lead_elapsed_steps"] - min_elapsed_steps) / max(elapsed_ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    deadline_score = torch.clamp(
+        (deadline_steps - ctx["lead_elapsed_steps"]) / max(deadline_steps - deadline_grace_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    lift_velocity_score = torch.clamp(
+        asset.data.root_lin_vel_w[:, 2] / max(lift_velocity_target, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    lift_velocity_component = lift_velocity_score * torch.clamp(1.0 - height_score, min=0.0, max=1.0)
+    forward_vel_score = torch.clamp(asset.data.root_lin_vel_b[:, 0] / max(target_forward_vel, 1.0e-6), 0.0, 1.0)
+    progress_score = torch.maximum(distance_score, forward_vel_score)
+    second_score = torch.clamp(
+        (ctx["second_score"] - second_clear_min) / max(1.0 - second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_component = second_floor + (1.0 - second_floor) * second_score
+    if progress_lift_gate_end > progress_lift_gate_start:
+        progress_lift_gate = torch.clamp(
+            (height_score - progress_lift_gate_start)
+            / max(progress_lift_gate_end - progress_lift_gate_start, 1.0e-6),
+            min=0.0,
+            max=1.0,
+        )
+    else:
+        progress_lift_gate = torch.ones_like(progress_score)
+    if second_lift_gate_end > second_lift_gate_start:
+        second_lift_gate = torch.clamp(
+            (height_score - second_lift_gate_start)
+            / max(second_lift_gate_end - second_lift_gate_start, 1.0e-6),
+            min=0.0,
+            max=1.0,
+        )
+    else:
+        second_lift_gate = torch.ones_like(second_component)
+    # Progress/second-clear can polish support, but body lift must open that path.
+    drive_score = torch.clamp(
+        body_height_weight * height_score
+        + body_progress_weight * (progress_floor + (1.0 - progress_floor) * progress_score) * progress_lift_gate
+        + second_clear_weight * second_component * second_lift_gate
+        + body_lift_velocity_weight * lift_velocity_component,
+        min=0.0,
+        max=1.0,
+    )
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    lead_factor = torch.clamp(
+        lead_ready_floor + (1.0 - lead_ready_floor) * lead_ready,
+        min=0.0,
+        max=1.0,
+    )
+    elapsed_factor = torch.clamp(
+        elapsed_gate_floor + (1.0 - elapsed_gate_floor) * elapsed_gate,
+        min=0.0,
+        max=1.0,
+    )
+    roll_factor = torch.clamp(
+        roll_gate_floor + (1.0 - roll_gate_floor) * roll_gate,
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    post_lead_gate = (
+        ctx["task_gate"]
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * lead_factor
+        * elapsed_factor
+        * deadline_score
+        * roll_factor
+        * safe_pitch
+        * stage_gate
+    )
+    signal = post_lead_gate * drive_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_post_lead_drive_sample_steps += torch.ones_like(signal)
+    env._highstep_post_lead_drive_gate_sum += post_lead_gate.detach()
+    env._highstep_post_lead_drive_lead_sum += lead_ready.detach()
+    env._highstep_post_lead_drive_height_sum += height_score.detach()
+    env._highstep_post_lead_drive_lift_velocity_sum += lift_velocity_component.detach()
+    env._highstep_post_lead_drive_progress_sum += progress_score.detach()
+    env._highstep_post_lead_drive_second_sum += second_score.detach()
+    env._highstep_post_lead_drive_stage_gate_sum += torch.ones_like(signal) * stage_gate.detach()
+    env._highstep_post_lead_drive_signal_sum += signal.detach()
+    env._highstep_post_lead_drive_signal_max = torch.maximum(
+        env._highstep_post_lead_drive_signal_max, signal.detach()
+    )
+
+    return signal
+
+
+def post_lead_stall_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    lead_score_min: float = 0.55,
+    second_low_threshold: float = 0.58,
+    one_sided_gap: float = 0.14,
+    one_sided_floor: float = 0.35,
+    grace_steps: float = 10.0,
+    ramp_steps: float = 26.0,
+    target_progress: float = 0.45,
+    base_floor: float = 0.35,
+    second_low_weight: float = 0.40,
+    progress_low_weight: float = 0.25,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.20,
+    target_distance: float = 0.62,
+    min_height_gain: float = -0.01,
+    target_height_gain: float = 0.09,
+    target_forward_vel: float = 0.24,
+    max_roll_metric: float = 0.35,
+    commit_gate_scale: float = 0.85,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize post-lead stalls when one rear foot is up but the body/other rear foot do not follow."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+
+    lead_ready = torch.clamp(
+        (ctx["lead_score"] - lead_score_min) / max(1.0 - lead_score_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    elapsed_pressure = torch.clamp(
+        (ctx["lead_elapsed_steps"] - grace_steps) / max(ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    first_minus_second = ctx["first_score"] - ctx["second_score"]
+    one_sided_hard = ((ctx["first_score"] > lead_score_min) & (first_minus_second > one_sided_gap)).float()
+    one_sided_soft = torch.clamp(
+        (first_minus_second - one_sided_gap) / max(1.0 - one_sided_gap, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    one_sided_score = one_sided_hard * (one_sided_floor + (1.0 - one_sided_floor) * one_sided_soft)
+    second_low_score = torch.clamp(
+        (second_low_threshold - ctx["second_score"]) / max(second_low_threshold, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    distance = torch.norm(asset.data.root_pos_w[:, :2] - env.scene.env_origins[:, :2], dim=1)
+    distance_score = torch.clamp(
+        (distance - min_distance) / max(target_distance - min_distance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    forward_vel_score = torch.clamp(asset.data.root_lin_vel_b[:, 0] / max(target_forward_vel, 1.0e-6), 0.0, 1.0)
+    progress_score = torch.maximum(torch.maximum(height_score, distance_score), forward_vel_score)
+    progress_low_score = torch.clamp(
+        (target_progress - progress_score) / max(target_progress, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    safe_pitch = (-asset.data.projected_gravity_b[:, 0]) < 0.95
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    stall_condition_score = torch.maximum(one_sided_score, second_low_score * progress_low_score)
+    base_signal = (
+        ctx["task_gate"]
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * lead_ready
+        * elapsed_pressure
+        * stall_condition_score
+        * roll_gate
+        * safe_pitch
+        * stage_gate
+    )
+    stall_modifier = torch.clamp(
+        base_floor + second_low_weight * second_low_score + progress_low_weight * progress_low_score,
+        min=0.0,
+        max=1.0,
+    )
+    penalty_signal = base_signal * stall_modifier
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_post_lead_stall_sample_steps += torch.ones_like(penalty_signal)
+    env._highstep_post_lead_stall_base_sum += base_signal.detach()
+    env._highstep_post_lead_stall_base_max = torch.maximum(
+        env._highstep_post_lead_stall_base_max, base_signal.detach()
+    )
+    env._highstep_post_lead_stall_second_low_sum += second_low_score.detach()
+    env._highstep_post_lead_stall_progress_low_sum += progress_low_score.detach()
+    env._highstep_post_lead_stall_modifier_sum += stall_modifier.detach()
+    env._highstep_post_lead_stall_signal_sum += penalty_signal.detach()
+    env._highstep_post_lead_stall_signal_max = torch.maximum(
+        env._highstep_post_lead_stall_signal_max, penalty_signal.detach()
+    )
+
+    return penalty_signal
+
+
+def highstep_action_score_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    first_clear_min: float = 0.54,
+    second_clear_min: float = 0.58,
+    lead_score_min: float = 0.52,
+    one_sided_gap: float = 0.16,
+    nominal_base_height: float = 0.44,
+    min_distance: float = 0.20,
+    target_distance: float = 0.64,
+    min_height_gain: float = -0.01,
+    target_height_gain: float = 0.11,
+    target_forward_vel: float = 0.24,
+    entry_weight: float = 0.35,
+    support_weight: float = 0.50,
+    safety_weight: float = 0.15,
+    entry_floor: float = 0.55,
+    support_floor: float = 0.45,
+    support_gate_floor: float = 0.22,
+    second_floor: float = 0.45,
+    pre_support_cap: float = 0.42,
+    support_cap_gain: float = 0.40,
+    second_cap_gain: float = 0.18,
+    max_roll_metric: float = 0.34,
+    centerline_min_rear_width: float = 0.30,
+    centerline_width_window: float = 0.12,
+    centerline_min_rear_abs_y: float = 0.15,
+    centerline_center_window: float = 0.10,
+    commit_gate_scale: float = 0.85,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    support_bottleneck_start_update: int = 0,
+    support_bottleneck_ramp_updates: int = 1,
+    support_bottleneck_warmup_min_gate: float = 0.0,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Composite reward aligned with the hand-scored high-step behavior.
+
+    This term intentionally keeps the score close to the behavior we inspect in
+    play: rear entry, post-lead body support, and low one-sided stall risk.  It
+    is used only by the rebuilt high-step task so the old task remains a
+    comparable baseline.
+    """
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+
+    first_entry = torch.clamp(
+        (ctx["first_score"] - first_clear_min) / max(1.0 - first_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_entry = torch.clamp(
+        (ctx["second_score"] - second_clear_min) / max(1.0 - second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    entry_score = torch.clamp(0.62 * first_entry + 0.28 * second_entry + 0.10 * ctx["lead_known"], 0.0, 1.0)
+
+    lead_ready = torch.clamp(
+        (ctx["lead_score"] - lead_score_min) / max(1.0 - lead_score_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    height_gain = asset.data.root_pos_w[:, 2] - env.scene.env_origins[:, 2] - nominal_base_height
+    height_score = torch.clamp(
+        (height_gain - min_height_gain) / max(target_height_gain - min_height_gain, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    # Support must be earned by body lift after lead entry; progress is scored by separate terms.
+    height_gate = torch.clamp(height_score / 0.35, min=0.0, max=1.0)
+    support_core = torch.clamp(0.84 * height_score + 0.16 * second_entry, min=0.0, max=1.0)
+    support_score = torch.clamp(
+        ctx["lead_known"] * lead_ready * height_gate * support_core,
+        min=0.0,
+        max=1.0,
+    )
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_gate = torch.clamp((max_roll_metric - roll_metric) / max(max_roll_metric, 1.0e-6), min=0.0, max=1.0)
+    one_sided_score = torch.clamp(
+        (ctx["first_score"] - ctx["second_score"] - one_sided_gap) / max(1.0 - one_sided_gap, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    safe_pitch = ((-asset.data.projected_gravity_b[:, 0]) < 0.98).float()
+    safety_score = torch.clamp(roll_gate * safe_pitch * (1.0 - 0.70 * one_sided_score), min=0.0, max=1.0)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    base_pos_rep = asset.data.root_pos_w.unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 3)
+    heading_rep = yaw_quat(asset.data.root_quat_w).unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 4)
+    rear_pos_b = quat_apply_inverse(heading_rep, rear_pos_w.reshape(-1, 3) - base_pos_rep)
+    rear_y = rear_pos_b.reshape(env.num_envs, rear_pos_w.shape[1], 3)[:, :, 1]
+    rear_width = torch.abs(rear_y[:, 0] - rear_y[:, 1])
+    rear_min_abs_y = torch.min(torch.abs(rear_y), dim=1).values
+    centerline_width_risk = torch.clamp(
+        (centerline_min_rear_width - rear_width) / max(centerline_width_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    centerline_abs_y_risk = torch.clamp(
+        (centerline_min_rear_abs_y - rear_min_abs_y) / max(centerline_center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    centerline_gate = torch.clamp(1.0 - torch.maximum(centerline_width_risk, centerline_abs_y_risk), min=0.0, max=1.0)
+
+    raw_score = torch.clamp(
+        entry_weight * entry_score + support_weight * support_score + safety_weight * safety_score,
+        min=0.0,
+        max=1.0,
+    )
+    entry_gate = torch.clamp(entry_score / max(entry_floor, 1.0e-6), min=0.0, max=1.0)
+    support_gate = torch.clamp(support_score / max(support_floor, 1.0e-6), min=0.0, max=1.0)
+    second_gate = torch.clamp(second_entry / max(second_floor, 1.0e-6), min=0.0, max=1.0)
+    support_bottleneck_gate = torch.clamp(
+        (support_score - support_gate_floor) / max(support_floor - support_gate_floor, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    bottleneck_blend = _highstep_training_progress_gate(
+        env,
+        support_bottleneck_start_update,
+        support_bottleneck_ramp_updates,
+        num_steps_per_update,
+    )
+    relaxed_bottleneck_gate = torch.maximum(
+        support_bottleneck_gate,
+        torch.full_like(support_bottleneck_gate, float(support_bottleneck_warmup_min_gate)),
+    )
+    effective_bottleneck_gate = relaxed_bottleneck_gate + bottleneck_blend * (
+        support_bottleneck_gate - relaxed_bottleneck_gate
+    )
+
+    # Stage bottleneck: entry and safety may teach useful preparation, but they
+    # must not compensate for a missing post-lead support phase.  Without this
+    # cap, the policy can keep a high score while the first rear foot never
+    # really pushes the body onto the step.
+    stage_cap = torch.clamp(
+        pre_support_cap + support_cap_gain * support_gate + second_cap_gain * second_gate,
+        min=0.0,
+        max=1.0,
+    )
+    # The cap alone is intentionally not trusted: near the support floor it can
+    # stay high enough that the policy ignores the support phase.  During
+    # bodyflat -> highstep migration, however, applying the hard support gate too
+    # early erases the entry/first-rear-clear signal before support can emerge.
+    # The warmup only relaxes that multiplier; after the ramp, the hard
+    # bottleneck again says "entry without support is incomplete".
+    total_score = torch.minimum(raw_score, stage_cap) * entry_gate * effective_bottleneck_gate * centerline_gate
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    return ctx["task_gate"] * ctx["cmd_gate"] * total_score * stage_gate
+
+
+def _post_clear_absolute_rear_margin(
+    rear_pos_w: torch.Tensor,
+    platform_origin_w: torch.Tensor,
+    heading_w: torch.Tensor,
+    platform_half_width: float,
+) -> torch.Tensor:
+    """Return the slower rear foot's inward margin from a square platform entry edge.
+
+    ``heading_w`` points into the platform.  The ray from the platform center in
+    the opposite direction reaches the axis-aligned square at
+    ``half_width / max(abs(hx), abs(hy))``.  This keeps the margin exact when the
+    robot approaches with a small yaw instead of treating every entry edge as a
+    plane at a fixed 1.5 m projection.
+    """
+    heading_norm = torch.linalg.vector_norm(heading_w, dim=-1, keepdim=True)
+    unit_heading_w = heading_w / torch.clamp(heading_norm, min=1.0e-6)
+    edge_distance = float(platform_half_width) / torch.clamp(
+        torch.amax(torch.abs(unit_heading_w), dim=-1), min=1.0e-6
+    )
+    outward_distance = torch.sum(
+        (rear_pos_w - platform_origin_w[:, None, :])
+        * (-unit_heading_w[:, None, :]),
+        dim=-1,
+    )
+    rear_margin = edge_distance[:, None] - outward_distance
+    return torch.min(rear_margin, dim=1).values
+
+
+def _update_post_clear_near_edge_counter(
+    counter: torch.Tensor,
+    post_clear_valid: torch.Tensor,
+    command_relevant: torch.Tensor,
+    slow_rear_margin: torch.Tensor,
+    near_edge_margin: float,
+) -> torch.Tensor:
+    """Increment only a consecutive, commanded post-clear near-edge streak."""
+    near_edge = (
+        post_clear_valid.to(dtype=torch.bool)
+        & command_relevant.to(dtype=torch.bool)
+        & (slow_rear_margin < float(near_edge_margin))
+    )
+    return torch.where(near_edge, counter + 1.0, torch.zeros_like(counter))
+
+
+def post_clear_recovery_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    second_clear_min: float = 0.68,
+    min_elapsed_steps: float = 8.0,
+    elapsed_ramp_steps: float = 10.0,
+    min_base_clearance: float = 0.34,
+    target_base_clearance: float = 0.43,
+    target_forward_vel: float = 0.22,
+    platform_half_width: float = 1.5,
+    min_rear_margin: float = 0.04,
+    target_rear_margin: float = 0.18,
+    max_abs_pitch_metric: float = 0.24,
+    max_abs_roll_metric: float = 0.24,
+    posture_weight: float = 0.45,
+    base_clearance_weight: float = 0.35,
+    forward_weight: float = 0.20,
+    rear_advance_weight: float = 0.35,
+    post_clear_latch_scale: float = 1.0,
+    commit_gate_scale: float = 0.85,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Reward returning to a usable walking posture after both rear feet clear the step."""
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale,
+    )
+    asset = ctx["asset"]
+
+    second_ready = torch.clamp(
+        (ctx["second_score"] - second_clear_min) / max(1.0 - second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    elapsed_gate = torch.clamp(
+        (ctx["lead_elapsed_steps"] - min_elapsed_steps) / max(elapsed_ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    pitch_metric = torch.abs(asset.data.projected_gravity_b[:, 0])
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    pitch_score = torch.clamp(
+        (max_abs_pitch_metric - pitch_metric) / max(max_abs_pitch_metric, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    roll_score = torch.clamp(
+        (max_abs_roll_metric - roll_metric) / max(max_abs_roll_metric, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    posture_score = pitch_score * roll_score
+
+    base_clearance = asset.data.root_pos_w[:, 2] - ctx["front_terrain_z"]
+    base_clearance_score = torch.clamp(
+        (base_clearance - min_base_clearance) / max(target_base_clearance - min_base_clearance, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    forward_target = torch.minimum(
+        torch.clamp(cmd_x, min=min_cmd_x),
+        torch.full_like(cmd_x, float(target_forward_vel)),
+    )
+    forward_score = torch.clamp(
+        asset.data.root_lin_vel_b[:, 0] / torch.clamp(forward_target, min=1.0e-6),
+        0.0,
+        1.0,
+    )
+
+    # Latch heading when the second rear foot first clears the entry edge.  The
+    # rear component now rewards an absolute inward safety margin from that edge;
+    # the old relative origin is retained only for checkpoint/runtime compatibility.
+    post_clear_latch_bool = env._highstep_rear_branch_second_clear_steps > 0.0
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :2]
+    unit_forward_b = torch.zeros_like(asset.data.root_pos_w)
+    unit_forward_b[:, 0] = 1.0
+    heading_w = math_utils.quat_apply_yaw(asset.data.root_quat_w, unit_forward_b)[:, :2]
+    new_latch = post_clear_latch_bool & (~env._highstep_post_clear_origin_valid)
+    env._highstep_post_clear_origin_rear_pos_w = torch.where(
+        new_latch[:, None, None],
+        rear_pos_w.detach(),
+        env._highstep_post_clear_origin_rear_pos_w,
+    )
+    env._highstep_post_clear_heading_w = torch.where(
+        new_latch[:, None],
+        heading_w.detach(),
+        env._highstep_post_clear_heading_w,
+    )
+    env._highstep_post_clear_origin_step = torch.where(
+        new_latch,
+        env.episode_length_buf.to(dtype=rear_pos_w.dtype),
+        env._highstep_post_clear_origin_step,
+    )
+    env._highstep_post_clear_origin_valid |= post_clear_latch_bool
+    rear_margin = _post_clear_absolute_rear_margin(
+        rear_pos_w,
+        env.scene.env_origins[:, :2],
+        env._highstep_post_clear_heading_w,
+        platform_half_width,
+    )
+    rear_advance_score = torch.clamp(
+        (rear_margin - min_rear_margin)
+        / max(target_rear_margin - min_rear_margin, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    ) * env._highstep_post_clear_origin_valid.float()
+
+    total_weight = max(
+        posture_weight + base_clearance_weight + forward_weight + rear_advance_weight,
+        1.0e-6,
+    )
+    recovery_score = torch.clamp(
+        (
+            posture_weight * posture_score
+            + base_clearance_weight * base_clearance_score
+            + forward_weight * forward_score
+            + rear_advance_weight * rear_advance_score
+        )
+        / total_weight,
+        min=0.0,
+        max=1.0,
+    )
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    # Once both rear feet have cleared, the forward scanner becomes flat and the
+    # instantaneous high-step task gate can vanish. Keep this phase latched for
+    # the rest of the episode so walking away from the entry edge remains rewarded.
+    post_clear_latch = post_clear_latch_bool.to(dtype=base_clearance_score.dtype)
+    completion_gate = torch.maximum(
+        ctx["task_gate"] * second_ready,
+        torch.clamp(float(post_clear_latch_scale) * post_clear_latch, min=0.0, max=1.0),
+    )
+    done_gate = completion_gate * base_clearance_score
+    recovery_gate = (
+        done_gate
+        * ctx["cmd_gate"]
+        * ctx["lead_known"]
+        * elapsed_gate
+        * stage_gate
+    )
+    signal = recovery_gate * recovery_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_post_clear_recovery_sample_steps += torch.ones_like(signal)
+    env._highstep_post_clear_recovery_gate_sum += recovery_gate.detach()
+    env._highstep_post_clear_recovery_posture_sum += posture_score.detach()
+    env._highstep_post_clear_recovery_base_clearance_sum += base_clearance_score.detach()
+    env._highstep_post_clear_recovery_forward_sum += forward_score.detach()
+    env._highstep_post_clear_recovery_rear_advance_sum += rear_advance_score.detach()
+    env._highstep_post_clear_recovery_signal_sum += signal.detach()
+    env._highstep_post_clear_recovery_signal_max = torch.maximum(
+        env._highstep_post_clear_recovery_signal_max, signal.detach()
+    )
+
+    return signal
+
+
+def post_clear_rear_advance_stall_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    platform_half_width: float = 1.5,
+    min_rear_margin: float = 0.04,
+    near_edge_margin: float = 0.12,
+    target_rear_margin: float = 0.18,
+    grace_steps: float = 8.0,
+    ramp_steps: float = 32.0,
+) -> torch.Tensor:
+    """Penalize a consecutive commanded post-clear stay near the platform edge."""
+    _ensure_highstep_rear_branch_buffers(env)
+    asset: RigidObject = env.scene[asset_cfg.name]
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :2]
+    slow_rear_margin = _post_clear_absolute_rear_margin(
+        rear_pos_w,
+        env.scene.env_origins[:, :2],
+        env._highstep_post_clear_heading_w,
+        platform_half_width,
+    )
+    margin_deficit = torch.clamp(
+        (target_rear_margin - slow_rear_margin)
+        / max(target_rear_margin - min_rear_margin, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, 0.0, 1.0)
+    post_clear_valid = env._highstep_post_clear_origin_valid
+    command_relevant = cmd_gate > 0.0
+    env._highstep_post_clear_stall_near_edge_counter = _update_post_clear_near_edge_counter(
+        env._highstep_post_clear_stall_near_edge_counter,
+        post_clear_valid,
+        command_relevant,
+        slow_rear_margin,
+        near_edge_margin,
+    ).detach()
+    consecutive_gate = torch.clamp(
+        (env._highstep_post_clear_stall_near_edge_counter - grace_steps)
+        / max(ramp_steps, 1.0e-6),
+        0.0,
+        1.0,
+    )
+    signal = (
+        post_clear_valid.to(dtype=rear_pos_w.dtype)
+        * cmd_gate
+        * consecutive_gate
+        * margin_deficit
+    )
+
+    metric_active = post_clear_valid & command_relevant
+    metric_active_f = metric_active.to(dtype=rear_pos_w.dtype)
+    env._highstep_post_clear_stall_sample_steps += metric_active_f
+    env._highstep_post_clear_stall_margin_sum += metric_active_f * slow_rear_margin.detach()
+    env._highstep_post_clear_stall_margin_min = torch.where(
+        metric_active,
+        torch.minimum(
+            env._highstep_post_clear_stall_margin_min,
+            slow_rear_margin.detach(),
+        ),
+        env._highstep_post_clear_stall_margin_min,
+    )
+    env._highstep_post_clear_stall_counter_max = torch.maximum(
+        env._highstep_post_clear_stall_counter_max,
+        env._highstep_post_clear_stall_near_edge_counter,
+    )
+    env._highstep_post_clear_stall_signal_sum += signal.detach()
+    return signal
+
+
+def scanner_pretrigger_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    terrain_gate_min: float = 0.20,
+    commit_gate_cutoff: float = 0.22,
+    low_cmd_threshold: float = 0.12,
+    front_lift_limit: float = -0.14,
+    front_lift_window: float = 0.14,
+    forward_vel_margin: float = 0.10,
+    forward_vel_window: float = 0.25,
+    front_lift_weight: float = 0.55,
+    uncommanded_vel_weight: float = 0.45,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize scanner-only pre-trigger motion without touching committed climbs."""
+    asset = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    phase = _highstep_on_top_phase_gates(
+        env,
+        asset,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+
+    terrain_active = torch.clamp(
+        (terrain_gate - terrain_gate_min) / max(1.0 - terrain_gate_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    precommit_gate = torch.clamp(
+        (commit_gate_cutoff - commit_gate) / max(commit_gate_cutoff, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    low_cmd_gate = torch.clamp(
+        (low_cmd_threshold - cmd_x) / max(low_cmd_threshold, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    front_foot_ids = asset.find_bodies(front_foot_names)[0]
+    front_rel_z = asset.data.body_pos_w[:, front_foot_ids, 2] - asset.data.root_pos_w[:, 2].unsqueeze(1)
+    max_front_lift = torch.max(front_rel_z, dim=1).values
+    front_lift_score = torch.clamp(
+        (max_front_lift - front_lift_limit) / max(front_lift_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    uncommanded_forward_score = torch.clamp(
+        (asset.data.root_lin_vel_b[:, 0] - cmd_x - forward_vel_margin) / max(forward_vel_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    total_weight = max(front_lift_weight + uncommanded_vel_weight, 1.0e-6)
+    raw_score = torch.clamp(
+        (
+            front_lift_weight * front_lift_score
+            + uncommanded_vel_weight * low_cmd_gate * uncommanded_forward_score
+        )
+        / total_weight,
+        min=0.0,
+        max=1.0,
+    )
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    penalty_gate = terrain_active * precommit_gate * phase["entry_allowed_gate"] * stage_gate
+    signal = penalty_gate * raw_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_scanner_pretrigger_sample_steps += torch.ones_like(signal)
+    env._highstep_scanner_pretrigger_gate_sum += penalty_gate.detach()
+    env._highstep_scanner_pretrigger_terrain_gate_sum += terrain_gate.detach()
+    env._highstep_scanner_pretrigger_commit_gate_sum += commit_gate.detach()
+    env._highstep_scanner_pretrigger_low_cmd_gate_sum += low_cmd_gate.detach()
+    env._highstep_scanner_pretrigger_front_lift_sum += front_lift_score.detach()
+    env._highstep_scanner_pretrigger_uncommanded_vel_sum += uncommanded_forward_score.detach()
+    env._highstep_scanner_pretrigger_signal_sum += signal.detach()
+    env._highstep_scanner_pretrigger_signal_max = torch.maximum(
+        env._highstep_scanner_pretrigger_signal_max, signal.detach()
+    )
+
+    return signal
+
+
+def rear_approach_width_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.06,
+    cmd_gate_width: float = 0.18,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    terrain_gate_min: float = 0.08,
+    commit_gate_cutoff: float = 0.28,
+    min_rear_width: float = 0.26,
+    width_window: float = 0.08,
+    min_rear_abs_y: float = 0.11,
+    center_window: float = 0.05,
+    width_weight: float = 0.65,
+    center_weight: float = 0.35,
+    hard_center_weight: float = 0.0,
+    critical_center_boost: float = 0.0,
+    critical_min_rear_abs_y: float = 0.075,
+    critical_center_window: float = 0.04,
+    terrain_gate_floor: float = 0.0,
+    precommit_gate_floor: float = 0.0,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize rear-foot narrowing during high-step approach before front commit.
+
+    This targets the sim-to-real failure where the rear feet collapse toward the
+    centerline immediately after switching into the high-step policy, before the
+    robot has actually climbed onto the platform.
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    terrain_active = torch.clamp(
+        (terrain_gate - terrain_gate_min) / max(1.0 - terrain_gate_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    if terrain_gate_floor > 0.0:
+        terrain_active = torch.maximum(
+            terrain_active,
+            torch.full_like(terrain_active, min(max(terrain_gate_floor, 0.0), 1.0)),
+        )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    precommit_gate = torch.clamp(
+        (commit_gate_cutoff - commit_gate) / max(commit_gate_cutoff, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    if precommit_gate_floor > 0.0:
+        precommit_gate = torch.maximum(
+            precommit_gate,
+            torch.full_like(precommit_gate, min(max(precommit_gate_floor, 0.0), 1.0)),
+        )
+    phase = _highstep_on_top_phase_gates(
+        env,
+        asset,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / max(cmd_gate_width, 1.0e-6), min=0.0, max=1.0)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    approach_gate = terrain_active * cmd_gate * precommit_gate * phase["entry_allowed_gate"] * stage_gate
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    base_pos_w = asset.data.root_pos_w
+    heading_quat = yaw_quat(asset.data.root_quat_w)
+    base_pos_rep = base_pos_w.unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 3)
+    heading_rep = heading_quat.unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 4)
+    rear_pos_b = quat_apply_inverse(heading_rep, rear_pos_w.reshape(-1, 3) - base_pos_rep)
+    rear_pos_b = rear_pos_b.reshape(env.num_envs, rear_pos_w.shape[1], 3)
+    rear_y = rear_pos_b[:, :, 1]
+
+    rear_width = torch.abs(rear_y[:, 0] - rear_y[:, 1])
+    rear_min_abs_y = torch.min(torch.abs(rear_y), dim=1).values
+    width_deficit = torch.clamp((min_rear_width - rear_width) / max(width_window, 1.0e-6), min=0.0, max=1.0)
+    center_deficit = torch.clamp(
+        (min_rear_abs_y - rear_min_abs_y) / max(center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    hard_center_deficit = center_deficit.square()
+    critical_center_deficit = torch.clamp(
+        (critical_min_rear_abs_y - rear_min_abs_y) / max(critical_center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    total_weight = max(width_weight + center_weight + hard_center_weight, 1.0e-6)
+    raw_score = torch.clamp(
+        (
+            width_weight * width_deficit
+            + center_weight * center_deficit
+            + hard_center_weight * hard_center_deficit
+        )
+        / total_weight,
+        min=0.0,
+        max=1.0,
+    )
+    raw_score = torch.clamp(raw_score + critical_center_boost * critical_center_deficit, min=0.0, max=1.0)
+    signal = approach_gate * raw_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    active = approach_gate > 0.01
+    env._highstep_rear_approach_width_sample_steps += torch.ones_like(signal)
+    env._highstep_rear_approach_width_active_steps += active.float()
+    env._highstep_rear_approach_width_gate_sum += approach_gate.detach()
+    env._highstep_rear_approach_width_terrain_gate_sum += terrain_gate.detach()
+    env._highstep_rear_approach_width_commit_gate_sum += commit_gate.detach()
+    env._highstep_rear_approach_width_cmd_gate_sum += cmd_gate.detach()
+    env._highstep_rear_approach_width_sum += rear_width.detach()
+    env._highstep_rear_approach_width_active_sum += rear_width.detach() * approach_gate.detach()
+    env._highstep_rear_approach_min_abs_y_sum += rear_min_abs_y.detach()
+    env._highstep_rear_approach_min_abs_y_active_sum += rear_min_abs_y.detach() * approach_gate.detach()
+    env._highstep_rear_approach_width_violation_steps += (active & (width_deficit > 0.0)).float()
+    env._highstep_rear_approach_center_violation_steps += (active & (center_deficit > 0.0)).float()
+    env._highstep_rear_approach_min_abs_y_active_min = torch.minimum(
+        env._highstep_rear_approach_min_abs_y_active_min,
+        torch.where(active, rear_min_abs_y.detach(), env._highstep_rear_approach_min_abs_y_active_min),
+    )
+    env._highstep_rear_approach_center_deficit_max = torch.maximum(
+        env._highstep_rear_approach_center_deficit_max,
+        torch.where(active, center_deficit.detach(), torch.zeros_like(center_deficit)),
+    )
+    env._highstep_rear_approach_signal_sum += signal.detach()
+    env._highstep_rear_approach_signal_max = torch.maximum(
+        env._highstep_rear_approach_signal_max,
+        signal.detach(),
+    )
+
+    return signal
+
+
+def rear_highstep_motion_width_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.04,
+    cmd_gate_width: float = 0.18,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    terrain_gate_min: float = 0.05,
+    commit_gate_floor: float = 0.25,
+    min_rear_width: float = 0.255,
+    width_window: float = 0.08,
+    min_rear_abs_y: float = 0.105,
+    center_window: float = 0.05,
+    width_weight: float = 0.70,
+    center_weight: float = 0.30,
+    hard_center_weight: float = 0.0,
+    critical_center_boost: float = 0.0,
+    critical_min_rear_abs_y: float = 0.075,
+    critical_center_window: float = 0.04,
+    post_clear_relief: float = 0.45,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize rear-foot inward collapse through highstep approach and support."""
+
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    terrain_active = torch.clamp(
+        (terrain_gate - terrain_gate_min) / max(1.0 - terrain_gate_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    phase = _highstep_on_top_phase_gates(
+        env,
+        asset,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / max(cmd_gate_width, 1.0e-6), min=0.0, max=1.0)
+    precommit_gate = terrain_active * (1.0 - torch.clamp(commit_gate, min=0.0, max=1.0))
+    postcommit_gate = torch.maximum(terrain_active * commit_gate, commit_gate_floor * commit_gate)
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    base_pos_w = asset.data.root_pos_w
+    heading_quat = yaw_quat(asset.data.root_quat_w)
+    base_pos_rep = base_pos_w.unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 3)
+    heading_rep = heading_quat.unsqueeze(1).repeat(1, rear_pos_w.shape[1], 1).reshape(-1, 4)
+    rear_pos_b = quat_apply_inverse(heading_rep, rear_pos_w.reshape(-1, 3) - base_pos_rep)
+    rear_pos_b = rear_pos_b.reshape(env.num_envs, rear_pos_w.shape[1], 3)
+    rear_y = rear_pos_b[:, :, 1]
+
+    rear_clearance = rear_pos_w[..., 2] - (front_terrain_z[:, None] + clearance_margin)
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + clearance_window) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_score = torch.min(rear_clearance_score, dim=1).values
+    post_clear_scale = 1.0 - post_clear_relief * second_score
+
+    rear_width = torch.abs(rear_y[:, 0] - rear_y[:, 1])
+    rear_min_abs_y = torch.min(torch.abs(rear_y), dim=1).values
+    width_deficit = torch.clamp((min_rear_width - rear_width) / max(width_window, 1.0e-6), min=0.0, max=1.0)
+    center_deficit = torch.clamp(
+        (min_rear_abs_y - rear_min_abs_y) / max(center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    hard_center_deficit = center_deficit.square()
+    critical_center_deficit = torch.clamp(
+        (critical_min_rear_abs_y - rear_min_abs_y) / max(critical_center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    total_weight = max(width_weight + center_weight + hard_center_weight, 1.0e-6)
+    raw_score = torch.clamp(
+        (
+            width_weight * width_deficit
+            + center_weight * center_deficit
+            + hard_center_weight * hard_center_deficit
+        )
+        / total_weight,
+        min=0.0,
+        max=1.0,
+    )
+    raw_score = torch.clamp(raw_score + critical_center_boost * critical_center_deficit, min=0.0, max=1.0)
+
+    motion_gate = torch.maximum(precommit_gate, postcommit_gate) * phase["entry_allowed_gate"] * cmd_gate * stage_gate
+    signal = motion_gate * raw_score * post_clear_scale
+
+    _ensure_highstep_rear_branch_buffers(env)
+    active = motion_gate > 0.01
+    env._highstep_rear_motion_width_sample_steps += torch.ones_like(signal)
+    env._highstep_rear_motion_width_active_steps += active.float()
+    env._highstep_rear_motion_width_gate_sum += motion_gate.detach()
+    env._highstep_rear_motion_width_terrain_gate_sum += terrain_gate.detach()
+    env._highstep_rear_motion_width_commit_gate_sum += commit_gate.detach()
+    env._highstep_rear_motion_width_cmd_gate_sum += cmd_gate.detach()
+    env._highstep_rear_motion_width_second_sum += second_score.detach()
+    env._highstep_rear_motion_width_sum += rear_width.detach()
+    env._highstep_rear_motion_width_active_sum += rear_width.detach() * motion_gate.detach()
+    env._highstep_rear_motion_min_abs_y_sum += rear_min_abs_y.detach()
+    env._highstep_rear_motion_min_abs_y_active_sum += rear_min_abs_y.detach() * motion_gate.detach()
+    env._highstep_rear_motion_width_violation_steps += (active & (width_deficit > 0.0)).float()
+    env._highstep_rear_motion_center_violation_steps += (active & (center_deficit > 0.0)).float()
+    env._highstep_rear_motion_min_abs_y_active_min = torch.minimum(
+        env._highstep_rear_motion_min_abs_y_active_min,
+        torch.where(active, rear_min_abs_y.detach(), env._highstep_rear_motion_min_abs_y_active_min),
+    )
+    env._highstep_rear_motion_center_deficit_max = torch.maximum(
+        env._highstep_rear_motion_center_deficit_max,
+        torch.where(active, center_deficit.detach(), torch.zeros_like(center_deficit)),
+    )
+    env._highstep_rear_motion_signal_sum += signal.detach()
+    env._highstep_rear_motion_signal_max = torch.maximum(
+        env._highstep_rear_motion_signal_max,
+        signal.detach(),
+    )
+
+    return signal
+
+
+def highstep_support_stability_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    contact_sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.06,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    clearance_margin: float = 0.04,
+    clearance_window: float = 0.18,
+    commit_gate_floor: float = 0.18,
+    contact_threshold: float = 4.0,
+    contact_force_window: float = 32.0,
+    front_slip_deadband: float = 0.08,
+    front_slip_window: float = 0.24,
+    roll_deadband: float = 0.16,
+    roll_window: float = 0.20,
+    roll_rate_deadband: float = 0.45,
+    roll_rate_window: float = 1.10,
+    yaw_rate_deadband: float = 0.18,
+    yaw_rate_window: float = 0.65,
+    lead_score_min: float = 0.44,
+    second_clear_min: float = 0.62,
+    rear_lag_grace_steps: float = 10.0,
+    rear_lag_ramp_steps: float = 30.0,
+    one_sided_gap: float = 0.18,
+    min_support_width: float = 0.25,
+    support_width_window: float = 0.10,
+    min_support_abs_y: float = 0.09,
+    support_center_window: float = 0.06,
+    front_support_grace_steps: float = 8.0,
+    front_support_ramp_steps: float = 16.0,
+    front_contact_weight: float = 0.25,
+    front_slip_weight: float = 0.18,
+    posture_rate_weight: float = 0.32,
+    rear_lag_weight: float = 0.18,
+    support_width_weight: float = 0.07,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize risky high-step support patterns seen in sim-to-real tests.
+
+    This is a SWAP-inspired guard: once the front feet have committed to the
+    step, discourage single-front-foot bracing, front-foot slip, roll/yaw rate,
+    rear-foot edge dwell, and a narrow lateral support polygon.
+    """
+    ctx = _highstep_rear_stage_context(
+        env,
+        command_name,
+        asset_cfg,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        min_cmd_x,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+        commit_gate_scale=0.90,
+    )
+    asset = ctx["asset"]
+    phase = _highstep_on_top_phase_gates(
+        env,
+        asset,
+        sensor_cfg,
+        front_foot_names,
+        rear_foot_names,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+        clearance_margin,
+        clearance_window,
+    )
+    commit_support_gate = torch.clamp(
+        (ctx["commit_gate"] - commit_gate_floor) / max(1.0 - commit_gate_floor, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    support_gate = ctx["task_gate"] * ctx["cmd_gate"] * commit_support_gate * phase["entry_allowed_gate"] * stage_gate
+    # Sequential first contact is part of a normal climb.  Delay the
+    # bilateral-contact/slip/posture pressure briefly, then ramp it in; the real
+    # failure lasts far beyond this grace window and remains penalized.
+    front_support_pressure = torch.clamp(
+        (env._highstep_rear_branch_commit_steps - front_support_grace_steps)
+        / max(front_support_ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    contact_sensor: ContactSensor = env.scene.sensors[contact_sensor_cfg.name]
+    front_contact_ids = contact_sensor.find_bodies(front_foot_names)[0]
+    if hasattr(contact_sensor.data, "net_forces_w_history"):
+        front_force_norm = torch.linalg.norm(
+            contact_sensor.data.net_forces_w_history[:, :, front_contact_ids, :],
+            dim=-1,
+        ).max(dim=1).values
+    else:
+        front_force_norm = torch.linalg.norm(
+            contact_sensor.data.net_forces_w[:, front_contact_ids, :],
+            dim=-1,
+        )
+    front_contact_score = torch.clamp(
+        (front_force_norm - contact_threshold) / max(contact_force_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    front_bilateral_contact = torch.min(front_contact_score, dim=1).values
+    front_contact_imbalance = torch.abs(front_contact_score[:, 0] - front_contact_score[:, 1])
+    front_contact_penalty = torch.clamp(
+        0.65 * (1.0 - front_bilateral_contact) + 0.35 * front_contact_imbalance,
+        min=0.0,
+        max=1.0,
+    ) * front_support_pressure
+
+    front_asset_ids = asset.find_bodies(front_foot_names)[0]
+    front_foot_vel = torch.linalg.norm(asset.data.body_lin_vel_w[:, front_asset_ids, :2], dim=-1)
+    front_contact_weighted = torch.clamp(front_contact_score.detach(), min=0.0, max=1.0)
+    front_slip = torch.sum(front_foot_vel * front_contact_weighted, dim=1) / torch.clamp(
+        torch.sum(front_contact_weighted, dim=1),
+        min=1.0,
+    )
+    front_slip_score = torch.clamp(
+        (front_slip - front_slip_deadband) / max(front_slip_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    ) * front_support_pressure
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_score = torch.clamp((roll_metric - roll_deadband) / max(roll_window, 1.0e-6), min=0.0, max=1.0)
+    roll_rate = torch.abs(asset.data.root_ang_vel_b[:, 0])
+    roll_rate_score = torch.clamp(
+        (roll_rate - roll_rate_deadband) / max(roll_rate_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    cmd_yaw = env.command_manager.get_command(command_name)[:, 2]
+    yaw_rate_error = torch.abs(asset.data.root_ang_vel_b[:, 2] - cmd_yaw)
+    yaw_rate_score = torch.clamp(
+        (yaw_rate_error - yaw_rate_deadband) / max(yaw_rate_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    posture_rate_score = torch.clamp(
+        0.35 * roll_score + 0.35 * roll_rate_score + 0.30 * yaw_rate_score,
+        min=0.0,
+        max=1.0,
+    ) * front_support_pressure
+
+    lead_ready = torch.clamp(
+        (ctx["lead_score"] - lead_score_min) / max(1.0 - lead_score_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_low = torch.clamp(
+        (second_clear_min - ctx["second_score"]) / max(second_clear_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    elapsed_pressure = torch.clamp(
+        (ctx["lead_elapsed_steps"] - rear_lag_grace_steps) / max(rear_lag_ramp_steps, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    one_sided_soft = torch.clamp(
+        (ctx["first_score"] - ctx["second_score"] - one_sided_gap) / max(1.0 - one_sided_gap, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    rear_lag_score = ctx["lead_known"] * lead_ready * torch.maximum(second_low * elapsed_pressure, one_sided_soft)
+
+    support_body_ids = asset.find_bodies(front_foot_names + rear_foot_names)[0]
+    support_pos_w = asset.data.body_pos_w[:, support_body_ids, :]
+    support_rel_w = support_pos_w - asset.data.root_pos_w[:, None, :]
+    num_support_bodies = support_rel_w.shape[1]
+    heading_quat = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, num_support_bodies, -1)
+    support_rel_b = quat_apply_inverse(
+        heading_quat.reshape(-1, 4),
+        support_rel_w.reshape(-1, 3),
+    ).reshape(support_rel_w.shape)
+    support_y = support_rel_b[..., 1]
+    front_width = torch.abs(support_y[:, 0] - support_y[:, 1])
+    rear_width = torch.abs(support_y[:, 2] - support_y[:, 3])
+    min_pair_width = torch.minimum(front_width, rear_width)
+    support_min_abs_y = torch.min(torch.abs(support_y), dim=1).values
+    support_width_deficit = torch.clamp(
+        (min_support_width - min_pair_width) / max(support_width_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    support_center_deficit = torch.clamp(
+        (min_support_abs_y - support_min_abs_y) / max(support_center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    support_width_score = torch.clamp(0.65 * support_width_deficit + 0.35 * support_center_deficit, 0.0, 1.0)
+
+    total_weight = max(
+        front_contact_weight + front_slip_weight + posture_rate_weight + rear_lag_weight + support_width_weight,
+        1.0e-6,
+    )
+    raw_score = torch.clamp(
+        (
+            front_contact_weight * front_contact_penalty
+            + front_slip_weight * front_slip_score
+            + posture_rate_weight * posture_rate_score
+            + rear_lag_weight * rear_lag_score
+            + support_width_weight * support_width_score
+        )
+        / total_weight,
+        min=0.0,
+        max=1.0,
+    )
+    signal = support_gate * raw_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    gate_detached = support_gate.detach()
+    active = support_gate > 0.01
+    env._highstep_support_stability_sample_steps += torch.ones_like(signal)
+    env._highstep_support_stability_active_steps += active.float()
+    env._highstep_support_stability_gate_sum += gate_detached
+    env._highstep_support_stability_front_contact_sum += front_bilateral_contact.detach() * gate_detached
+    env._highstep_support_stability_front_slip_sum += front_slip_score.detach() * gate_detached
+    env._highstep_support_stability_posture_rate_sum += posture_rate_score.detach() * gate_detached
+    env._highstep_support_stability_rear_lag_sum += rear_lag_score.detach() * gate_detached
+    env._highstep_support_stability_support_width_sum += support_width_score.detach() * gate_detached
+    env._highstep_support_stability_signal_sum += signal.detach()
+    env._highstep_support_stability_signal_max = torch.maximum(
+        env._highstep_support_stability_signal_max,
+        signal.detach(),
+    )
+
+    return signal
 
 
 def highstep_forward_progress_bonus(
@@ -2333,7 +4553,13 @@ def horse_rearing_posture_bonus(
     )
     safe_pitch = current_pitch_sin < 0.95
     stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
-    return task_gate * cmd_gate * safe_pitch * (0.45 * pitch_score + 0.35 * height_score + 0.20 * front_x_score) * stage_gate
+    return (
+        task_gate
+        * cmd_gate
+        * safe_pitch
+        * (0.45 * pitch_score + 0.35 * height_score + 0.20 * front_x_score)
+        * stage_gate
+    )
 
 # ==========================================
 # 2. 前腿搭台后锁死 (Front Legs Quiet on Step) - 修改版
@@ -2367,6 +4593,212 @@ def front_legs_quiet_on_step_penalty(
     # 如果双腿都搭上了高台，惩罚前膝盖的速度平方
     penalty = torch.sum(torch.square(front_knee_vel), dim=1) * both_feet_on_step
     return penalty
+
+
+def front_legs_lift_guard_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    relative_lift_limit: float = -0.14,
+    relative_lift_window: float = 0.14,
+    asymmetry_limit: float = 0.16,
+    asymmetry_window: float = 0.16,
+    terrain_relief_scale: float = 1.0,
+    commit_relief_scale: float = 0.90,
+    height_weight: float = 0.60,
+    asymmetry_weight: float = 0.40,
+    min_command_norm: float = 0.02,
+    command_gate_width: float = 0.18,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize front-leg high-lift leakage when no real high-step commitment exists."""
+    asset = env.scene[asset_cfg.name]
+    front_foot_ids = asset.find_bodies(front_foot_names)[0]
+    front_pos_w = asset.data.body_pos_w[:, front_foot_ids, :]
+    front_rel_z = front_pos_w[:, :, 2] - asset.data.root_pos_w[:, 2].unsqueeze(1)
+
+    max_lift = torch.max(front_rel_z, dim=1).values
+    height_excess = torch.clamp(
+        (max_lift - relative_lift_limit) / max(relative_lift_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    if front_rel_z.shape[1] >= 2:
+        asymmetry = torch.abs(front_rel_z[:, 0] - front_rel_z[:, 1])
+    else:
+        asymmetry = torch.zeros_like(max_lift)
+    asymmetry_excess = torch.clamp(
+        (asymmetry - asymmetry_limit) / max(asymmetry_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    highstep_relief = torch.clamp(
+        torch.maximum(terrain_relief_scale * terrain_gate, commit_relief_scale * commit_gate),
+        min=0.0,
+        max=1.0,
+    )
+    guard_gate = torch.square(1.0 - highstep_relief)
+
+    command = env.command_manager.get_command(command_name)
+    command_norm = torch.linalg.norm(command[:, :2], dim=1) + torch.abs(command[:, 2])
+    command_gate = torch.clamp(
+        (command_norm - min_command_norm) / max(command_gate_width, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+
+    raw_score = torch.clamp(
+        height_weight * height_excess + asymmetry_weight * asymmetry_excess,
+        min=0.0,
+        max=1.0,
+    )
+    signal = command_gate * guard_gate * raw_score * stage_gate
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_front_lift_guard_sample_steps += torch.ones_like(signal)
+    env._highstep_front_lift_guard_gate_sum += guard_gate.detach()
+    env._highstep_front_lift_guard_signal_sum += signal.detach()
+    env._highstep_front_lift_guard_signal_max = torch.maximum(
+        env._highstep_front_lift_guard_signal_max, signal.detach()
+    )
+    env._highstep_front_lift_guard_max_lift_sum += max_lift.detach()
+    env._highstep_front_lift_guard_asym_sum += asymmetry.detach()
+    env._highstep_front_lift_guard_height_excess_sum += height_excess.detach()
+    env._highstep_front_lift_guard_asym_excess_sum += asymmetry_excess.detach()
+    env._highstep_front_lift_guard_terrain_gate_sum += terrain_gate.detach()
+    env._highstep_front_lift_guard_commit_gate_sum += commit_gate.detach()
+
+    return signal
+
+
+def forward_flat_left_front_lift_penalty(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    left_front_foot_name: str,
+    right_front_foot_name: str,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    min_forward_cmd: float = 0.08,
+    forward_gate_width: float = 0.18,
+    max_side_cmd: float = 0.12,
+    side_gate_width: float = 0.18,
+    max_yaw_cmd: float = 0.16,
+    yaw_gate_width: float = 0.22,
+    terrain_gate_cutoff: float = 0.08,
+    commit_gate_cutoff: float = 0.06,
+    fl_lift_limit: float = -0.18,
+    fl_lift_window: float = 0.10,
+    fl_over_fr_limit: float = 0.08,
+    fl_over_fr_window: float = 0.12,
+    height_weight: float = 0.45,
+    asymmetry_weight: float = 0.55,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize only left-front high-lift leakage during straight forward flat walking.
+
+    This is intentionally narrower than ``front_legs_lift_guard_penalty``: it is
+    FL-only, forward-command-only, and hard-disabled once terrain/commit gates
+    indicate a real high-step approach.
+    """
+    asset = env.scene[asset_cfg.name]
+    fl_id = asset.find_bodies([left_front_foot_name])[0][0]
+    fr_id = asset.find_bodies([right_front_foot_name])[0][0]
+
+    root_z = asset.data.root_pos_w[:, 2]
+    fl_rel_z = asset.data.body_pos_w[:, fl_id, 2] - root_z
+    fr_rel_z = asset.data.body_pos_w[:, fr_id, 2] - root_z
+    fl_minus_fr = fl_rel_z - fr_rel_z
+
+    height_excess = torch.clamp(
+        (fl_rel_z - fl_lift_limit) / max(fl_lift_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    asymmetry_excess = torch.clamp(
+        (fl_minus_fr - fl_over_fr_limit) / max(fl_over_fr_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    command = env.command_manager.get_command(command_name)
+    cmd_x = command[:, 0]
+    cmd_y = command[:, 1]
+    cmd_yaw = command[:, 2]
+    forward_gate = torch.clamp((cmd_x - min_forward_cmd) / max(forward_gate_width, 1.0e-6), 0.0, 1.0)
+    backward_gate = torch.clamp((-cmd_x - min_forward_cmd) / max(forward_gate_width, 1.0e-6), 0.0, 1.0)
+    lateral_cmd = torch.abs(cmd_y)
+    yaw_cmd = torch.abs(cmd_yaw)
+    straight_side_gate = torch.clamp(
+        (max_side_cmd + side_gate_width - lateral_cmd) / max(side_gate_width, 1.0e-6),
+        0.0,
+        1.0,
+    )
+    straight_yaw_gate = torch.clamp(
+        (max_yaw_cmd + yaw_gate_width - yaw_cmd) / max(yaw_gate_width, 1.0e-6),
+        0.0,
+        1.0,
+    )
+    lateral_gate = torch.clamp((lateral_cmd - max_side_cmd) / max(side_gate_width, 1.0e-6), 0.0, 1.0)
+    yaw_gate = torch.clamp((yaw_cmd - max_yaw_cmd) / max(yaw_gate_width, 1.0e-6), 0.0, 1.0)
+
+    terrain_gate, _, _ = _forward_highstep_terrain_gate(
+        env, sensor_cfg, front_x_min, rear_x_max, max_abs_y, height_threshold, height_gate_width
+    )
+    commit_gate = _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names)
+    highstep_relief = torch.maximum(terrain_gate, commit_gate)
+    flat_gate = ((terrain_gate <= terrain_gate_cutoff) & (commit_gate <= commit_gate_cutoff)).float()
+
+    stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
+    active_gate = forward_gate * straight_side_gate * straight_yaw_gate * flat_gate * stage_gate
+    raw_score = torch.clamp(height_weight * height_excess + asymmetry_weight * asymmetry_excess, 0.0, 1.0)
+    signal = active_gate * raw_score
+
+    _ensure_highstep_rear_branch_buffers(env)
+    env._highstep_fl_forward_flat_sample_steps += torch.ones_like(signal)
+    env._highstep_fl_forward_flat_active_gate_sum += active_gate.detach()
+    env._highstep_fl_forward_flat_forward_gate_sum += forward_gate.detach()
+    env._highstep_fl_forward_flat_backward_gate_sum += backward_gate.detach()
+    env._highstep_fl_forward_flat_lateral_gate_sum += lateral_gate.detach()
+    env._highstep_fl_forward_flat_yaw_gate_sum += yaw_gate.detach()
+    env._highstep_fl_forward_flat_flat_gate_sum += flat_gate.detach()
+    env._highstep_fl_forward_flat_highstep_relief_sum += highstep_relief.detach()
+    env._highstep_fl_forward_flat_fl_lift_sum += fl_rel_z.detach()
+    env._highstep_fl_forward_flat_fr_lift_sum += fr_rel_z.detach()
+    env._highstep_fl_forward_flat_fl_minus_fr_sum += fl_minus_fr.detach()
+    env._highstep_fl_forward_flat_height_excess_sum += height_excess.detach()
+    env._highstep_fl_forward_flat_asym_excess_sum += asymmetry_excess.detach()
+    env._highstep_fl_forward_flat_overlift_sum += ((raw_score > 0.0) & (active_gate > 0.01)).float()
+    env._highstep_fl_forward_flat_penalty_sum += signal.detach()
+    env._highstep_fl_forward_flat_penalty_max = torch.maximum(
+        env._highstep_fl_forward_flat_penalty_max, signal.detach()
+    )
+
+    return signal
 
 
 # ==========================================
@@ -2760,7 +5192,10 @@ def highstep_box_phase_prior_alignment_bonus(
     cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.20, 0.0, 1.0)
 
     reach_gate = terrain_gate * (1.0 - commit_gate) * cmd_gate
-    push_gate = torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate) * cmd_gate
+    push_gate = (
+        torch.maximum(terrain_gate * commit_gate, commit_gate_floor * commit_gate)
+        * cmd_gate
+    )
     phase_gate = torch.maximum(reach_gate, push_gate)
 
     joint_names = [box_joint_names[k] for k in ("FL", "FR", "RL", "RR")]
@@ -3602,3 +6037,110 @@ def action_acceleration_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
 
     # 6. 返回 L2 范数 (对每个环境的动作加速度求平方和)
     return torch.sum(torch.square(action_acc), dim=1)
+
+
+def joint_action_target_limit_penalty(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    safety_margin_fraction: float = 0.0,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Penalize policy-mapped joint targets before the deployment limit clamp.
+
+    Isaac Lab's joint action term clips the affine-mapped target before it is
+    applied to the articulation.  Looking only at the simulated joint position
+    therefore hides a policy that continuously asks for an impossible target.
+    The 0707 real-robot bags exposed exactly that failure on the FL hip.  This
+    term reconstructs the unclipped target from the action term's raw action,
+    scale and offset, and records both normalized loss and physical violations.
+    """
+    terms = getattr(env.action_manager, "_terms", {})
+    term = terms.get(action_name) if isinstance(terms, dict) else None
+    if term is None:
+        raise RuntimeError(f"Action term '{action_name}' is required for target-limit safety.")
+    clip = getattr(term, "_clip", None)
+    if not isinstance(clip, torch.Tensor) or clip.ndim != 3 or clip.shape[-1] != 2:
+        raise RuntimeError(f"Action term '{action_name}' has no resolved finite target-limit tensor.")
+
+    raw_actions = term.raw_actions
+    target = raw_actions * term._scale + term._offset
+    lower = clip[:, :, 0]
+    upper = clip[:, :, 1]
+    finite = torch.isfinite(lower) & torch.isfinite(upper) & (upper > lower)
+    if not bool(torch.all(finite).item()):
+        raise RuntimeError(f"Action term '{action_name}' contains non-finite or inverted target limits.")
+
+    span = torch.clamp(upper - lower, min=1.0e-6)
+    actual_violation = torch.maximum(lower - target, target - upper).clamp(min=0.0)
+    margin_fraction = max(0.0, min(float(safety_margin_fraction), 0.49))
+    safe_lower = lower + span * margin_fraction
+    safe_upper = upper - span * margin_fraction
+    margin_violation = torch.maximum(safe_lower - target, target - safe_upper).clamp(min=0.0)
+    normalized_margin_violation = margin_violation / span
+
+    actual_rate = torch.mean((actual_violation > 1.0e-6).float(), dim=1)
+    actual_step = torch.any(actual_violation > 1.0e-6, dim=1).float()
+    actual_max = torch.max(actual_violation, dim=1).values
+    margin_rate = torch.mean((margin_violation > 1.0e-6).float(), dim=1)
+    margin_max = torch.max(margin_violation, dim=1).values
+    penalty = torch.mean(torch.square(normalized_margin_violation), dim=1)
+
+    # Keep the physical-limit audit separate from the optional soft safety
+    # margin.  A margin hit may be useful training pressure, but it must never
+    # be reported as a real joint-limit violation.
+    env._highstep_target_limit_violation_rate = actual_rate.detach()
+    env._highstep_target_limit_max_delta = actual_max.detach()
+    env._highstep_target_margin_violation_rate = margin_rate.detach()
+    env._highstep_target_margin_max_delta = margin_max.detach()
+    env._highstep_target_limit_penalty = penalty.detach()
+
+    buffer_defaults = {
+        "_highstep_target_limit_sample_steps": 0.0,
+        "_highstep_target_limit_violation_sum": 0.0,
+        "_highstep_target_limit_step_violation_sum": 0.0,
+        "_highstep_target_limit_max_delta_episode": 0.0,
+        "_highstep_target_limit_violation_streak": 0.0,
+        "_highstep_target_limit_violation_max_consecutive": 0.0,
+        "_highstep_target_margin_violation_sum": 0.0,
+        "_highstep_target_margin_max_delta_episode": 0.0,
+        "_highstep_target_limit_penalty_sum": 0.0,
+    }
+    for buffer_name, initial_value in buffer_defaults.items():
+        if not hasattr(env, buffer_name):
+            setattr(
+                env,
+                buffer_name,
+                torch.full((env.num_envs,), initial_value, device=env.device, dtype=penalty.dtype),
+            )
+
+    env._highstep_target_limit_sample_steps += 1.0
+    env._highstep_target_limit_violation_sum += actual_rate.detach()
+    env._highstep_target_limit_step_violation_sum += actual_step.detach()
+    env._highstep_target_limit_max_delta_episode = torch.maximum(
+        env._highstep_target_limit_max_delta_episode,
+        actual_max.detach(),
+    )
+    env._highstep_target_limit_violation_streak = torch.where(
+        actual_step > 0.0,
+        env._highstep_target_limit_violation_streak + 1.0,
+        torch.zeros_like(env._highstep_target_limit_violation_streak),
+    )
+    env._highstep_target_limit_violation_max_consecutive = torch.maximum(
+        env._highstep_target_limit_violation_max_consecutive,
+        env._highstep_target_limit_violation_streak,
+    )
+    env._highstep_target_margin_violation_sum += margin_rate.detach()
+    env._highstep_target_margin_max_delta_episode = torch.maximum(
+        env._highstep_target_margin_max_delta_episode,
+        margin_max.detach(),
+    )
+    env._highstep_target_limit_penalty_sum += penalty.detach()
+    stage_gate = _highstep_training_progress_gate(
+        env,
+        stage_start_update=stage_start_update,
+        stage_ramp_updates=stage_ramp_updates,
+        num_steps_per_update=num_steps_per_update,
+    )
+    return penalty * stage_gate

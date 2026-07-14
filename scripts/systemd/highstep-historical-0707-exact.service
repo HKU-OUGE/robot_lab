@@ -1,0 +1,30 @@
+[Unit]
+Description=RobotLab historical 0707 exact new-Teacher highstep supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=ALL_PROXY=socks5h://127.0.0.1:10808
+Environment=HTTP_PROXY=http://127.0.0.1:10809
+Environment=HTTPS_PROXY=http://127.0.0.1:10809
+Environment=NO_PROXY=127.0.0.1,localhost
+Environment=HIGHSTEP_HISTORICAL_0707_EXACT_PREREGISTRATION_PATH=/home/lxq/Softwares/robot_lab/tmp/highstep_historical_0707_exact_new_teacher_20260714/preregistration_v171.json
+Environment=HIGHSTEP_HISTORICAL_0707_EXACT_PREREGISTRATION_SHA256=7b1bb49a9640e8614313423fce7e66fadc40e38bfb1ce551b78fb02dfbb9c035
+Environment=HIGHSTEP_HISTORICAL_0707_EXACT_REBINDING_PATH=/home/lxq/Softwares/robot_lab/tmp/highstep_historical_0707_exact_new_teacher_20260714/v171_infrastructure_amendment.json
+Environment=HIGHSTEP_HISTORICAL_0707_EXACT_REBINDING_SHA256=268849538630278e6c34dcd875d5131489f0983a15232796fc17dc9c3f01e0bb
+Environment=CODEX_MODEL=gpt-5.6-sol
+Environment=CODEX_REASONING_EFFORT=max
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_historical_0707_exact_supervisor.py
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=75
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_historical_0707_exact_new_teacher_20260714/supervisor.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_historical_0707_exact_new_teacher_20260714/supervisor.log
+
+[Install]
+WantedBy=default.target

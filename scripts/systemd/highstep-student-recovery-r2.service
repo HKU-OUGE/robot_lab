@@ -1,0 +1,20 @@
+[Unit]
+Description=Spec-locked highstep Student R2 recovery supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=highstep-student-recovery-r2 --why=spec-locked-R2-training --mode=block /home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_student_recovery_r2_supervisor.py
+Restart=no
+TimeoutStopSec=75
+KillMode=control-group
+SuccessExitStatus=130
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v11_20260712/r2_supervisor_service.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v11_20260712/r2_supervisor_service.log
+
+[Install]
+WantedBy=default.target

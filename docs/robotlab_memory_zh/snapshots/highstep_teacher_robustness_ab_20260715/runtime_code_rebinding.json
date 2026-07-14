@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "highstep_teacher_robustness_ab_v111_runtime_code_rebinding",
+  "workflow_id": "highstep_teacher_robustness_ab_20260715",
+  "spec_sha256": "445b322302f1e1b64a621208670c7fa8736d7f1a64dec2d000f6b629e936076a",
+  "preregistration_sha256": "1b2bd47960d9111cf1b98676ece01524d89a889fc4b55cfc1ed08174782f2a55",
+  "contract_sha256": "7e8efb36a4baefba03e5fc8d33d054e1a3456ff902f4ae1a8e56b7a26a95cf91",
+  "supervisor_sha256": "139e56c000df63501a0d4b57d2ba6cff41896e47658d2a7b43ec38fe878ec276",
+  "executor_sha256": "d7cd87d2f1796d094a311dda424a12c9f631f39338b585707c158d8859c1fb7d",
+  "monitor_sha256": "dcf6ebb25d197101b4f6877a402b91bed333ed50206c8dfccfcda1e21b809da5",
+  "test_contract_sha256": "628052504e9c4a62641f245c7dc137f623983bb8a60eed82b8fa63966721d5e4",
+  "test_runtime_sha256": "6dd18a9dfd8f708aeeb392e2a916d1d14d9c10e4ddc42a84c36de0cb5b4b3ce2",
+  "training_semantics_changed": false,
+  "evaluation_only": true,
+  "bound_at": "2026-07-15T04:26:07+08:00"
+}

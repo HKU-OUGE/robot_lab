@@ -1,0 +1,31 @@
+[Unit]
+Description=Highstep autonomous training and Codex control loop
+After=network-online.target highstep-xray-main.service
+Wants=network-online.target
+Requires=highstep-xray-main.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=all
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment="PATH=/home/lxq/.nvm/versions/node/v24.16.0/bin:/home/lxq/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="HIGHSTEP_CODEX_BIN=/home/lxq/.nvm/versions/node/v24.16.0/bin/codex"
+Environment="ALL_PROXY=socks5h://127.0.0.1:10808"
+Environment="all_proxy=socks5h://127.0.0.1:10808"
+Environment="HIGHSTEP_CODEX_PROXY=socks5h://127.0.0.1:10808"
+Environment="NO_PROXY=127.0.0.1,localhost,::1"
+Environment="no_proxy=127.0.0.1,localhost,::1"
+ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle --who=highstep-auto-loop --why=highstep-autonomous-control --mode=block /usr/bin/python3 /home/lxq/Softwares/robot_lab/tmp/highstep_goal_orchestrator.py --thread-id 019f4c6b-0fbd-73d2-91cc-6c72e8c8c35c --check-interval-seconds 300 --periodic-review-ckpt-interval 0 --wake-cooldown-seconds 7200 --failed-wake-retry-seconds 600 --monitor-heartbeat-stale-seconds 600 --training-log-stale-seconds 600 --evaluation-heartbeat-stale-seconds 1500 --min-free-disk-gib 15 --critical-free-disk-gib 5 --codex-model gpt-5.6-sol --codex-reasoning-effort max --codex-timeout-seconds 600
+Restart=always
+RestartSec=15
+WatchdogSec=45min
+TimeoutStopSec=30
+KillMode=control-group
+SuccessExitStatus=130
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_goal_orchestrator.nohup.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_goal_orchestrator.nohup.log
+
+[Install]
+WantedBy=default.target

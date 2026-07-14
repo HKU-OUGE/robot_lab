@@ -1,0 +1,28 @@
+[Unit]
+Description=RobotLab highstep 0707 exact new-Teacher supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=ALL_PROXY=socks5h://127.0.0.1:10808
+Environment=HTTP_PROXY=http://127.0.0.1:10809
+Environment=HTTPS_PROXY=http://127.0.0.1:10809
+Environment=NO_PROXY=127.0.0.1,localhost
+Environment=HIGHSTEP_0707_EXACT_PREREGISTRATION_PATH=/home/lxq/Softwares/robot_lab/tmp/highstep_0707_exact_new_teacher_20260713/preregistration.json
+Environment=HIGHSTEP_0707_EXACT_PREREGISTRATION_SHA256=6c98daa2d7ba92bd0b118d3dac3aacb418ea54f31444f34c82b7153c1e033336
+Environment=CODEX_MODEL=gpt-5.6-sol
+Environment=CODEX_REASONING_EFFORT=max
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_0707_exact_new_teacher_supervisor.py
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=75
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_0707_exact_new_teacher_20260713/supervisor.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_0707_exact_new_teacher_20260713/supervisor.log
+
+[Install]
+WantedBy=default.target

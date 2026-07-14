@@ -1,0 +1,25 @@
+[Unit]
+Description=RobotLab highstep Student recovery v1.5 supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=ALL_PROXY=socks5h://127.0.0.1:10808
+Environment=HTTP_PROXY=http://127.0.0.1:10809
+Environment=HTTPS_PROXY=http://127.0.0.1:10809
+Environment=NO_PROXY=127.0.0.1,localhost
+Environment=HIGHSTEP_V15_PREREGISTRATION_SHA256=0be872b32062fe6d162a6b25435ba81c7b45fbc30a703eb0d7597a29a8ff0421
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_student_recovery_v15_supervisor.py
+Restart=on-failure
+RestartSec=30
+KillMode=control-group
+TimeoutStopSec=75
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v15_20260713/supervisor.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_student_recovery_v15_20260713/supervisor.log
+
+[Install]
+WantedBy=default.target

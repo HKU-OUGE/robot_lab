@@ -1,0 +1,14 @@
+[Unit]
+Description=Local HTTP to existing SOCKS bridge for highstep W&B
+After=highstep-xray-main.service
+Requires=highstep-xray-main.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/home/lxq/.local/share/v2rayN/bin/xray/xray run -c /home/lxq/Softwares/robot_lab/scripts/systemd/highstep-wandb-http-proxy-bridge.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

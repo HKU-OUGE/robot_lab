@@ -1,0 +1,25 @@
+[Unit]
+Description=Spec-locked directional highstep real-robot trial candidate supervisor
+After=network-online.target
+Wants=network-online.target
+OnFailure=highstep-directional-trial-repair.service
+StartLimitIntervalSec=900
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_directional_trial_supervisor.py
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=1 2
+TimeoutStopSec=75
+KillMode=control-group
+SuccessExitStatus=130
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_directional_real_robot_trial_20260713/supervisor_service.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_directional_real_robot_trial_20260713/supervisor_service.log
+
+[Install]
+WantedBy=default.target

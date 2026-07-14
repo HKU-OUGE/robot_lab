@@ -602,7 +602,7 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
     use_cache=False,
     sub_terrains={
         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.25,
+            proportion=0.18,
             step_height_range=(0.04, 0.22),
             step_width=0.30,
             platform_width=3.0,
@@ -617,7 +617,7 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.12,
+            proportion=0.05,
             step_height_range=(0.04, 0.22),
             step_width=0.30,
             platform_width=3.0,
@@ -632,8 +632,8 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "box": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
-            proportion=0.31,
-            box_height_range=(0.08, 0.35),
+            proportion=0.52,
+            box_height_range=(0.06, 0.35),
             platform_width=3.0,
             double_box=False,
             size=(8.0, 8.0),
@@ -646,7 +646,7 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "box_hard": terrain_gen.mesh_terrains_cfg.MeshBoxTerrainCfg(
-            proportion=0.08,
+            proportion=0.10,
             box_height_range=(0.30, 0.38),
             platform_width=3.0,
             double_box=False,
@@ -660,7 +660,7 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "pit": terrain_gen.mesh_terrains_cfg.MeshPitTerrainCfg(
-            proportion=0.12,
+            proportion=0.05,
             pit_depth_range=(0.04, 0.35),
             platform_width=3.0,
             double_pit=False,
@@ -700,7 +700,7 @@ HIGHSTEP_TERRAINS_CFG = TerrainGeneratorCfg(
             },
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.07,
+            proportion=0.05,
             noise_range=(0.01, 0.04),
             noise_step=0.005,
             border_width=0.25,

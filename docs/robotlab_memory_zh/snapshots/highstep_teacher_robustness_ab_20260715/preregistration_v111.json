@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "kind": "highstep_teacher_robustness_ab_v111_preregistration",
+  "workflow_id": "highstep_teacher_robustness_ab_20260715",
+  "authority": {
+    "version": "v1.11",
+    "spec_path": "/home/lxq/Softwares/robot_lab/docs/robotlab_memory_zh/library/highstep_student_recovery_spec_20260712.md",
+    "spec_sha256": "445b322302f1e1b64a621208670c7fa8736d7f1a64dec2d000f6b629e936076a",
+    "decision_memory_path": "/home/lxq/Softwares/robot_lab/docs/robotlab_memory_zh/library/highstep_teacher_robustness_ab_decision_20260715.md",
+    "decision_memory_sha256": "09e78befe0c050b358965530b09e29fd2d8d78ed949bb0fa0f79f66a67c973ea"
+  },
+  "teacher_order": ["A", "B"],
+  "teachers": {
+    "A": {
+      "role": "old_teacher_control",
+      "checkpoint": "/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-04_01-45-21/model_151399.pt",
+      "checkpoint_sha256": "d34d560ee7c2b3d8c3df00b04c4514e6c69be4779ec38aeee6d176dec0640b1d",
+      "snapshot_mode": "capture"
+    },
+    "B": {
+      "role": "new_teacher_candidate",
+      "checkpoint": "/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-11_11-22-23/model_172300.pt",
+      "checkpoint_sha256": "dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35",
+      "snapshot_mode": "replay"
+    }
+  },
+  "single_control_variable": "teacher_checkpoint",
+  "training_allowed": false,
+  "backward_allowed": false,
+  "optimizer_step_allowed": false,
+  "checkpoint_writes_allowed": false,
+  "environment": {
+    "task": "RobotLab-Isaac-Velocity-HighstepActionScoreRobust-ArcdogAdjustableLeg-v0",
+    "ordinary_random_events": "disabled",
+    "action_prior": "enabled_required",
+    "action_prior_scale": 1.0,
+    "real_gains": {
+      "hip": {"kp": 55.0, "kd": 1.5},
+      "thigh": {"kp": 65.0, "kd": 1.5},
+      "calf": {"kp": 80.0, "kd": 2.5}
+    },
+    "action_delay_steps": 0,
+    "fixed_velocity_command": [0.45, 0.0, 0.0],
+    "terrain_type": "box",
+    "terrain_level": 9,
+    "front_step_side": "x-",
+    "front_step_edge_gap_m": 0.55,
+    "lateral_offset_m": 0.0,
+    "yaw_offset_deg": 0.0,
+    "max_steps": 600,
+    "seeds": [11, 22, 33],
+    "legacy_schedule_fallback": true
+  },
+  "matrix": {
+    "generator": "tools.highstep_teacher_robustness_ab.build_matrix",
+    "total_rows_per_teacher": 102,
+    "families": {"nominal": 3, "inward": 36, "impulse": 54, "combined": 9},
+    "inward_widths_m": [0.34, 0.30, 0.26, 0.22],
+    "inward_modes": ["symmetric", "rl_only", "rr_only"],
+    "impulse_phases": ["approach", "front_support", "first_rear"],
+    "impulse_directions": ["left", "right"],
+    "impulse_delta_v_mps": [0.10, 0.20, 0.30],
+    "combined_binding": {
+      "width_m": 0.26,
+      "phase": "first_rear",
+      "delta_v_mps": 0.20,
+      "symmetric": {"seed11": "left", "seed22": "right", "seed33": "left"},
+      "rl_only": "left",
+      "rr_only": "right"
+    }
+  },
+  "initial_snapshot": {
+    "capture_teacher": "A",
+    "replay_teacher": "B",
+    "fields": [
+      "root_pose_w", "root_velocity_w", "joint_position", "joint_velocity",
+      "joint_names", "terrain_origin", "front_step_context", "initial_rear_y_body"
+    ],
+    "target_width_tolerance_m": 0.002,
+    "replay_abs_tolerance": 0.000001,
+    "snapshot_files_read_only": true
+  },
+  "impulse_contract": {
+    "kind": "single_root_lateral_velocity_increment",
+    "left_direction": "positive_robot_heading_frame_y",
+    "right_direction": "negative_robot_heading_frame_y",
+    "approach_trigger_step": 15,
+    "front_support_trigger": "first tracker phase front_top_support",
+    "first_rear_trigger": "first confirmed rear top contact",
+    "phase_not_reached": "valid_behavior_failure_with_impulse_not_applied"
+  },
+  "recovery_definition": {
+    "start": "step_zero_without_impulse_else_impulse_application_step",
+    "stable_consecutive_frames": 10,
+    "rear_width_min_m": 0.32,
+    "rear_min_abs_y_min_m": 0.08,
+    "rear_feet_must_remain_on_original_centerline_sides": true,
+    "root_lateral_speed_abs_max_mps": 0.08,
+    "roll_metric_abs_max": 0.25,
+    "timeout_steps": 600
+  },
+  "validity": {
+    "checkpoint_and_tensor_sha_unchanged": true,
+    "optimizer_step_calls": 0,
+    "backward_calls": 0,
+    "runner_learn_calls": 0,
+    "schedule_valid": true,
+    "reset_valid": true,
+    "action_prior_runtime_match": true,
+    "action_delay_runtime_match": true,
+    "fixed_command_match": true,
+    "random_events_disabled": true,
+    "snapshot_binding_match": true,
+    "target_width_match_when_requested": true
+  },
+  "level_gates": {
+    "nominal_not_regressed": [
+      "new.valid>=old.valid", "new.full_climb>=old.full_climb",
+      "new.rear_hold>=old.rear_hold", "new.recovery>=old.recovery",
+      "new.falls<=old.falls", "new.centerline_crossings<=old.centerline_crossings"
+    ],
+    "inward_level": {"denominator": 9, "valid": 9, "full_climb": 7, "rear_hold": 7, "recovery": 7},
+    "required_inward_level_improvement_m": 0.04,
+    "impulse_level": {"denominator": 18, "valid": 18, "full_climb": 14, "rear_hold": 14, "recovery": 14},
+    "required_impulse_level_improvement_mps": 0.10,
+    "combined_new_teacher": {"denominator": 9, "valid": 9, "full_climb": 7, "rear_hold": 7, "recovery": 7},
+    "all_four_conditions_required": true,
+    "thresholds_may_not_change_after_results": true
+  },
+  "preserved_v110": {
+    "workflow_id": "highstep_e1400_continuation_ab_20260715",
+    "state_path": "/home/lxq/Softwares/robot_lab/tmp/highstep_e1400_continuation_ab_20260715/state.json",
+    "state_sha256_at_pause": "f622de529ea37bbf8e73ecf88493505c7b4a25d20874edbdc10016029e1e47b7",
+    "preregistration_path": "/home/lxq/Softwares/robot_lab/tmp/highstep_e1400_continuation_ab_20260715/preregistration_v110.json",
+    "preregistration_sha256": "b570e454b7f0068786f43faf0685f084580f6858268c79c8bb5cde69e088f202",
+    "status": "user_paused_pending_teacher_comparison",
+    "must_not_resume_automatically": true
+  },
+  "terminal_behavior": {
+    "start_training": false,
+    "resume_v110": false,
+    "report_teacher_comparison_only": true,
+    "service_disabled_on_terminal": true
+  }
+}

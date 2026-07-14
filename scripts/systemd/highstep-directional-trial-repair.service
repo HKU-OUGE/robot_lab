@@ -1,0 +1,20 @@
+[Unit]
+Description=External Codex fail-closed recovery for directional highstep supervisor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment="PATH=/home/lxq/.nvm/versions/node/v24.16.0/bin:/home/lxq/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="ALL_PROXY=socks5h://127.0.0.1:10808"
+Environment="all_proxy=socks5h://127.0.0.1:10808"
+ExecStart=/usr/bin/python3 /home/lxq/Softwares/robot_lab/tools/highstep_directional_failure_wake_codex.py
+Restart=on-failure
+RestartSec=600
+TimeoutStartSec=1000
+SuccessExitStatus=0
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_directional_real_robot_trial_20260713/failure_repair_service.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_directional_real_robot_trial_20260713/failure_repair_service.log

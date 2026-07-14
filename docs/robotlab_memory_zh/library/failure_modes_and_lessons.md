@@ -1,5 +1,100 @@
 # 失败模式与经验教训
 
+## 有依据地进入 Student 不等于可以跳过真机可行性门槛（2026-07-12）
+
+用户催进度时，正确的加速方式是删除没有证据的重复训练，不是降低证据门槛。本轮冻结 Teacher 在 Standard 与实测 gains 中心 core9 都为 9/9，所以直接开始一次 Robust Student 蒸馏可以 defend；继续为了“更 Robust”盲改 Teacher reward 反而可能破坏已满足两后足上台的动作。但最初只准备评估最后一个 Student checkpoint，并且没有验证仿真执行器容量是否超过真机，属于真实遗漏。
+
+固定规则：
+
+```text
+Teacher 已通过用户物理终点时，Student 是部署必经阶段，不是投机跳步。
+Student 的 loss/训练 reward 不能证明继承成功；至少比较早/中/末 checkpoint，防止蒸馏后期把动作平滑掉。
+Isaac asset 的配置上限不等于 policy 的实际力矩需求，不能只比较 80 与 44.4 就升级成阻断门槛。
+先查真实 sim-to-sim 链：本机 MuJoCo hip/thigh/calf 实际上限是 23.7/23.7/45.43 N·m，gear=1，仍能轻松上35 cm；这与人提机身卸载后仍动作失败共同排除了单纯力矩不足主假设。
+effort/velocity telemetry 可以保留为可选诊断，但不得脱离行为证据变成自动重训理由；主线继续看后腿轨迹、相位、中线塌缩和边缘卡住。
+```
+
+本轮还发现 Stage2 Student 的独立 `vae_optimizer` 和 `student_distill_update_count` 没有进入旧 checkpoint。为了看起来“谨慎”而中断当前连续进程，会实际制造无法无缝恢复的断点。规则是：
+
+```text
+不要把有 checkpoint 文件误写成可无缝续训。
+新 checkpoint 必须版本化保存算法自有 optimizer/count；full-resume 缺状态默认 fail closed。
+旧 Student 只能显式迁移精确 count，并明确 Adam moments 已丢失；否则 weights-only/reset 新分支。
+当前连续运行健康时，不为形式审查中断一个无法完整恢复的旧进程。
+```
+
+## 成功定义错位和聚合器失败不能冒充 policy 失败（2026-07-12）
+
+用户真正需要的是整机上台：RL/RR 双后足在顶面承载、机身进入并稳定到可以手动切 `fixed stand`。FL 随后是否放下、双前足持续承载、严格接触时序和后足继续深入 `0.18 m` 可以是改进目标，但不是这轮最低成功条件。旧门槛把这些诊断项升成硬条件，曾把实际能完成用户目标的 `model_172300.pt` 错报为失败，导致方案变复杂并延误推进。
+
+固定规则：
+
+```text
+先把用户的物理终点写成直接可观测门槛，再训练或淘汰 checkpoint。
+代理 reward、kinematic hold、前足姿态和严格事件链不得替代物理终点。
+低优先级缺陷不得阻塞已经满足最高目标的候选。
+```
+
+同轮 real-gain 评估又出现一次基础设施假失败：9 场 raw 均 rc0、schema7、rear-platform pass，但 aggregate 因 legacy schedule 分支只接受 `role=teacher`、漏掉合法 `teacher_robust` 而给出 `valid_count=0`。后续所有聚合失败统一遵守：
+
+```text
+先检查 raw 行为、checkpoint SHA、task/role、schedule/runtime contract；
+定位 valid_eval 的第一个实际拒绝条件；
+只有 raw 行为也失败时才修改训练；
+基础设施修复必须窄绑定任务/角色/固定 checkpoint/run-dir/SHA，并补正反例；
+已有完整 raw 可安全重聚合时，不重复 GPU 评估。
+```
+
+本轮还确认：实测 gains 门禁应对同一冻结 checkpoint 单变量复评，固定 delay=0 并关闭额外随机事件；通过后直接进入 Robust Student，不为“流程完整”强制再训 Robust Teacher。`action_scale`、`joint_pos.clip`、`default_dof_pos` 和 observation/action 顺序是永久兼容合同，任何微调都不得触碰。
+
+## ActionScore 失败：诚实指标不是有效训练机制
+
+2026-07-03 失败 run：
+
+```text
+logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-03_05-40-48
+source checkpoint:
+logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_vae_Teacher/2026-07-01_06-52-29/model_141000.pt
+last saved:
+model_141500.pt
+```
+
+观察：
+
+```text
+entry_score tail20 ~= 0.975
+support_score tail20 ~= 0.344 < support_floor 0.45
+support_floor_violation_rate tail20 ~= 0.992
+terrain_levels tail20 ~= 0.185
+post_lead_body_drive tail20 ~= 0.00627
+```
+
+经验：
+
+```text
+support_floor_violation_rate 能诚实暴露失败，但它本身不能训练出支撑动作。
+如果 support reward 仍允许 forward progress、second score 或 floor 项补偿，策略会学到往前蹭/局部抬升，而不是第一后腿搭台后支撑身体。
+terrain 降低后 total 变好不是高台能力变好。
+```
+
+硬规则：
+
+```text
+新 ActionScore 或支撑指标上线前，必须先用正负样本做零训练评分校准。
+正样本至少包括 2026-07-01_06-52-29/model_141000.pt。
+负样本至少包括后期退化 checkpoint 和 2026-07-03_05-40-48/model_141500.pt。
+若指标不能把正样本判高、负样本判低，不准开训。
+```
+
+修改边界：
+
+```text
+下一版先只修 support 判定/支撑奖励；
+不要同时改 yaw、lin_vel、terrain 分布、普通 locomotion 权重和 student 蒸馏；
+forward progress 不能补偿 support 主分；
+teacher 稳定前不要用蒸馏验证 teacher 是否正确。
+```
+
 ## Terrain 曲线会骗人
 
 不要只优化 `terrain_levels`。
@@ -210,4 +305,144 @@ Highstep 必须分开看 RL-first 和 RR-first。
 2. 复制原文件为 *_<suffix>.py。
 3. 只做必要修改。
 4. 记录建议从哪个 run/checkpoint 接着训。
+```
+
+## ActionScore bodyflat 迁移失败：不要只补后段，先打通第一后腿链路
+
+2026-07-03 检查并停止的失败 run：
+
+```text
+logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-03_00-48-49
+source checkpoint:
+logs/rsl_rl/arclab_arcdog_adjustable_leg_bodyflat_vae_Teacher/2026-06-04_13-18-36/model_49600.pt
+stop checkpoint:
+model_50100.pt
+event final:
+50127
+```
+
+失败经验：
+
+```text
+1. bodyflat -> highstep ActionScore 迁移时，不能只把 post-lead reward 提早打开。
+   如果 commit_gate 长期很低、rear_first_preclearance 近 0，后段 reward 的输入条件本身就是空的。
+
+2. 这次 post-lead 在 50100 后刚开始非零，但 stage_ramp_updates=350，
+   到 50120 左右只打开了很小一段。以后不能把“刚过 stage_start 后 signal 很小”
+   直接等同于“post-lead 阶段完全失败”；必须同时看 stage/ramp 进度。
+
+3. 更硬的失败证据是：
+   commit_gate_mean tail 很低（约 0.016），rear_first_foot_highstep_preclearance 几乎为 0，
+   support_score 仍在 1e-4 量级，support_floor_violation_rate=1，
+   bad_orientation 已经升到约 0.015-0.017。
+
+4. terrain warmup 不能太长。support 为 0 时 terrain_levels 已经升到约 1.7，
+   这会在主链未形成前增加难度，并复现“terrain 先涨、真实动作没接上”的早期版本。
+
+5. `2026-07-01_18-19-06` 链路仍然是重要正例：流畅高台动作能训出来。
+   这次失败不能解释为任务不可学，而应解释为 ActionScore 迁移期 gate/stage/诊断设计还没对齐。
+```
+
+修正原则：
+
+```text
+1. 保留后期 support bottleneck，不回到 terrain/reward 虚高。
+2. 迁移早期给第一后腿预清台一个 terrain-triggered soft commit 通道，
+   避免 commit_gate 太低时 rear_first reward 完全归零。
+3. action prior 更早 ramp，帮助 bodyflat checkpoint 进入高台 box-joint 相位。
+4. terrain 早期最高 level 更保守，score warmup 更早结束。
+5. post-lead watchdog 必须 ramp-aware。
+```
+
+## 2026-07-03 01:31 后 ActionScore 修改失败：禁止自动副作用补丁
+
+失败 run：
+
+```text
+logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-03_02-53-22
+source checkpoint:
+logs/rsl_rl/arclab_arcdog_adjustable_leg_bodyflat_vae_Teacher/2026-06-04_13-18-36/model_49600.pt
+```
+
+本地 event / wandb 关键证据：
+
+```text
+Curriculum/highstep_action_score/support_score tail100 ~= 0.106
+Curriculum/highstep_action_score/support_floor_violation_rate tail100 = 1.0
+Curriculum/highstep_action_score/post_lead_drive_gate_mean tail100 ~= 0.00039
+Curriculum/highstep_action_score/post_lead_drive_height_mean tail100 ~= 0.0106
+Curriculum/highstep_action_score/score_drop_from_best tail100 ~= 0.756
+Episode_Reward/highstep_action_score tail100 ~= 0.00030
+Train/mean_reward tail100 ~= 54.0
+```
+
+结论：
+
+```text
+这次修改不能算成功。
+普通 locomotion/步态 reward 仍能给出较高总 reward，但真正的 post-lead support 几乎没有学出来。
+warmup/fake bottleneck gate 会让 total 在早期看起来不低，但 hard_total/support_score 暴露真实支撑仍失败。
+```
+
+必须吸取的教训：
+
+```text
+1. 禁止再使用会自动修改代码、自动杀训练、自动重启训练的 watchdog 脚本。
+   这类工具副作用太大，会制造新的不可审计变量。
+
+2. support_bottleneck_warmup_min_gate 不能用来制造“假通过”。
+   support 不达标时，total/hard_total 必须诚实地低。
+
+3. bodyflat -> ActionScore 迁移不能靠普通行走 reward 过渡。
+   如果 Train/mean_reward 上升而 highstep_action_score/support_score 仍接近 0，
+   说明目标函数仍被普通 locomotion 占主导。
+
+4. 继续从 bodyflat checkpoint 短训可以作为诊断，但不能再当成已验证有效路线。
+   `2026-07-01_18-19-06` 及其 teacher `model_141000` 仍是证明流畅动作可训出的正例。
+```
+
+本轮代码处理：
+
+```text
+删除 scripts/tools/highstep_action_score_watchdog.py。
+ActionScore 配置中 support_bottleneck_warmup_min_gate 改为 0.0。
+降低 track_lin_vel_xy_exp / track_ang_vel_z_exp / feet_air_time / feet_gait 对专用高台任务的竞争。
+提高 rear_first、rear_second、lead_rear_support_drive、post_lead_body_drive 的密度和权重。
+post_lead_body_drive 更偏向 body height，而不是让 forward progress 掩盖身体没有上台。
+```
+
+## 2026-07-03 复核另一个对话补丁：撤回 fake bottleneck warmup
+
+另一个对话把 ActionScore 配置改为：
+
+```text
+support_gate_floor: 0.22 -> 0.08
+support_bottleneck_warmup_min_gate: 0.0 -> 0.35
+track_ang_vel_z_exp.weight: 1.20 -> 1.55
+lin_vel_x: (-0.08, 0.70) -> (-0.28, 0.72)
+```
+
+复核结论：
+
+```text
+1. support_gate_floor=0.08 可以暂时 defend。
+   它只是在 support_score 刚超过 0.08 后给 composite score 一点稀疏梯度；
+   support_floor 仍是 0.45，support_floor_violation_rate 仍会诚实显示失败。
+
+2. support_bottleneck_warmup_min_gate=0.35 不能 defend。
+   这会让 total / Episode_Reward/highstep_action_score 在 support 不达标时产生假分，
+   和 2026-07-03_02-53-22 的失败教训冲突。
+
+3. 恢复 yaw 跟踪和后退能力方向合理，但 lin_vel_x=-0.28 会让短训中过多样本不触发 highstep reward。
+   当前折中为 lin_vel_x=(-0.18, 0.72)：保留后退控制，同时让训练更集中在上台。
+```
+
+本轮处理：
+
+```text
+highstep_env_cfg.py:
+  reward / terrain curriculum / metrics 三处 support_bottleneck_warmup_min_gate 均改回 0.0。
+  support_gate_floor 保持 0.08。
+  track_ang_vel_z_exp.weight 保持 1.55，后续监控其是否压过 highstep_action_score。
+  commands.base_velocity.ranges.lin_vel_x 改为 (-0.18, 0.72)。
 ```

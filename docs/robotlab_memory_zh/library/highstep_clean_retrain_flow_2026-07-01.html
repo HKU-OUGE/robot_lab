@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang='zh-CN'>
+<head>
+<meta charset='utf-8' />
+<meta name='viewport' content='width=device-width, initial-scale=1' />
+<title>Highstep 从 0 到当前 checkpoint 完整链路报告</title>
+<style>
+  :root {
+    --ink:#172033; --muted:#667085; --line:#d7dde8; --bg:#f6f8fb; --panel:#ffffff;
+    --blue:#1f5fbf; --blue2:#e8f1ff; --green:#157347; --green2:#eaf8ef; --red:#b42318; --red2:#fff0ee;
+    --amber:#a15c00; --amber2:#fff4df; --purple:#6b3fa0; --purple2:#f1eafd;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans CJK SC','Microsoft YaHei',Arial,sans-serif; color:var(--ink); background:var(--bg); line-height:1.55; }
+  .page { max-width:1180px; margin:0 auto; padding:32px 24px 64px; }
+  .hero { background:linear-gradient(135deg,#ffffff 0%,#eef5ff 100%); border:1px solid var(--line); border-radius:18px; padding:28px 30px; box-shadow:0 10px 30px rgba(18,39,78,.08); }
+  h1 { margin:0 0 12px; font-size:30px; line-height:1.18; letter-spacing:0; }
+  h2 { margin:34px 0 14px; font-size:22px; border-left:5px solid var(--blue); padding-left:12px; }
+  h3 { margin:24px 0 10px; font-size:18px; }
+  p { margin:8px 0; }
+  code { background:#eef2f7; padding:2px 5px; border-radius:5px; font-family:'SFMono-Regular',Consolas,monospace; font-size:.92em; }
+  pre { background:#111827; color:#e5e7eb; padding:16px; border-radius:12px; overflow:auto; font-size:13px; }
+  .meta { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px; background:#fff; border:1px solid var(--line); color:#344054; font-size:13px; }
+  .notice { margin-top:16px; padding:14px 16px; border-radius:12px; background:#fff7e6; border:1px solid #ffd591; }
+  .cards { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:18px 0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:15px; min-height:128px; }
+  .card strong { display:block; font-size:16px; margin-bottom:6px; }
+  .card .big { font-size:20px; font-weight:800; color:var(--blue); }
+  .flow { display:grid; grid-template-columns:repeat(7,minmax(120px,1fr)); gap:10px; align-items:stretch; margin:18px 0 8px; }
+  .flow-step { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; min-height:128px; }
+  .flow-step::after { content:'→'; position:absolute; right:-14px; top:45%; color:#7b8798; font-weight:800; }
+  .flow-step:last-child::after { content:''; }
+  .flow-step .n { display:inline-block; min-width:24px; height:24px; text-align:center; line-height:24px; border-radius:50%; background:var(--blue); color:#fff; font-weight:800; font-size:13px; }
+  .flow-step .t { display:block; font-weight:800; margin:8px 0 4px; }
+  .flow-step .d { color:var(--muted); font-size:13px; }
+  .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:14px; background:#fff; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { border-bottom:1px solid #e8edf5; padding:10px 9px; vertical-align:top; }
+  th { position:sticky; top:0; background:#f2f6fc; z-index:1; font-weight:800; text-align:left; }
+  tr:nth-child(even) td { background:#fbfcff; }
+  .stage-id { display:inline-flex; align-items:center; justify-content:center; min-width:32px; padding:3px 7px; border-radius:8px; background:#eef2ff; color:#1d3f8f; font-weight:800; }
+  .tag { display:inline-block; padding:3px 7px; border-radius:8px; background:#f1f5f9; color:#334155; font-weight:700; }
+  .status { display:inline-block; padding:3px 7px; border-radius:8px; font-weight:800; white-space:nowrap; }
+  .status.ok { background:var(--green2); color:var(--green); } .status.warn { background:var(--amber2); color:var(--amber); } .status.muted { background:#eef2f7; color:#475467; }
+  .good { color:var(--green); font-weight:900; } .bad { color:var(--red); font-weight:900; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .box { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .box h3 { margin-top:0; }
+  .legend { display:flex; gap:10px; flex-wrap:wrap; color:var(--muted); font-size:13px; margin:8px 0 14px; }
+  .footer { margin-top:28px; color:var(--muted); font-size:12px; text-align:center; }
+  @media print {
+    body { background:white; } .page { max-width:none; padding:18mm; } .hero,.card,.flow-step,.box,.table-wrap { box-shadow:none; }
+    .table-wrap { overflow:visible; } table { font-size:10px; } th,td { padding:6px; } h2 { page-break-after:avoid; }
+    .flow { grid-template-columns:repeat(4,1fr); } .flow-step::after { content:''; } .cards { grid-template-columns:repeat(2,1fr); }
+  }
+  @media (max-width:900px) { .cards,.two { grid-template-columns:1fr; } .flow { grid-template-columns:1fr; } .flow-step::after { content:''; } }
+</style>
+</head>
+<body>
+<div class='page'>
+  <section class='hero'>
+    <h1>Highstep 从 0 到当前 checkpoint 完整历史链路报告</h1>
+    <p>这版报告把历史链路从 <code>Bodyflat fresh / 0 轮</code> 写到当前最新保存的 <code>2026-07-01_06-52-29/model_148700.pt</code>，并单独标出哪些是当前直接父链、哪些只是试错/对照分支。</p>
+    <div class='meta'>
+      <span class='pill'>更新时间：2026-07-01</span>
+      <span class='pill'>任务：RobotLab-Isaac-Velocity-Highstep-ArcdogAdjustableLeg-v0</span>
+      <span class='pill'>报告，不改训练代码</span>
+      <span class='pill'>依据：记忆库 + run params + checkpoint 文件</span>
+    </div>
+    <div class='notice'>
+      <strong>最高优先级：</strong>上高台能力永远优先。第一后腿搭台、第一后腿搭上后支撑身体、第二后腿清台，不应为了 terrain level 数字、平地姿态美观或 branch balance 被牺牲。
+    </div>
+  </section>
+
+  <section class='cards'>
+    <div class='card'><strong>当前最新保存</strong><div class='big'>model_148700</div><p><code>2026-07-01_06-52-29</code>，不是当前动作最佳。</p></div>
+    <div class='card'><strong>当前推荐候选</strong><div class='big'>model_142300</div><p>HighstepScore 最高；备选 <code>model_142100</code>。</p></div>
+    <div class='card'><strong>关键矛盾</strong><div class='big'>terrain≠动作</div><p>148000+ terrain 高，但支撑身体能力明显下降。</p></div>
+    <div class='card'><strong>重训策略</strong><div class='big'>warm → short hard</div><p>先 warm 从 0 训主体动作，再短 hard refine。</p></div>
+  </section>
+
+  <h2>一页流程图</h2>
+  <div class='flow'>
+    <div class='flow-step'><span class='n'>0</span><span class='t'>Bodyflat 从 0</span><span class='d'>05-08 到 06-04，建立普通 locomotion 和 box joint 基础。</span></div>
+    <div class='flow-step'><span class='n'>1</span><span class='t'>Highstep 迁移</span><span class='d'>06-15 到 06-17，从 49600 切到 highstep，形成 68199。</span></div>
+    <div class='flow-step'><span class='n'>2</span><span class='t'>稳定性修正</span><span class='d'>06-18 到 06-22，后退稳定、box default、resume gate-free，到 95398。</span></div>
+    <div class='flow-step'><span class='n'>3</span><span class='t'>基底分支</span><span class='d'>06-24 到 06-25，95398 -> 108000 -> 111800 -> 112599 -> 124598。</span></div>
+    <div class='flow-step'><span class='n'>4</span><span class='t'>06-28 试错</span><span class='d'>不是最终父链，但得出：不能用全局前腿护栏压掉爬台能力。</span></div>
+    <div class='flow-step'><span class='n'>5</span><span class='t'>阶段任务重构</span><span class='d'>06-30 到 07-01，124598 -> 133597 -> 136596 -> 137500 -> 140400。</span></div>
+    <div class='flow-step'><span class='n'>6</span><span class='t'>轻量 hard refine</span><span class='d'>140400 -> 148700；最佳窗口在 142100/142300，不是最后。</span></div>
+  </div>
+
+  <h2>从 0 到当前的逐阶段明细</h2>
+  <p>表中“是否当前父链”用于区分真实继承和对照/试错分支。`06-23_00-52-26` 很重要，但它不是当前 07-01 链路的直接父链；`06-24_00-36-54` 才是通往 `124598` 的直接基底分支。</p>
+  <div class='legend'><span>绿色：当前直接父链</span><span>灰/橙：对照或试错分支</span></div>
+  <div class='table-wrap'>
+  <table>
+    <thead><tr><th>阶段</th><th>分组</th><th>run</th><th>输入 checkpoint</th><th>选用输出</th><th>max_iterations</th><th>父链</th><th>目的/配置变化</th><th>结果与教训</th></tr></thead>
+    <tbody>
+    <tr>
+      <td><span class='stage-id'>0</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>arclab_arcdog_adjustable_leg_bodyflat_vae/2026-05-08_08-59-28</code></td>
+      <td><code>fresh / resume=false / 0 轮随机初始化</code></td>
+      <td><code>model_12400.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>从 0 建立可伸缩腿机器狗的基础 locomotion：平地、普通地形、box joint 基础协同。</td>
+      <td>尾段 terrain≈5.682、command=1.0、time_out≈0.995；这是后续所有 teacher 的最早祖先。<br><strong>教训：</strong>不要从 0 直接 highstep；历史上先 bodyflat 预训练明显更稳。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>1</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>bodyflat_vae_Teacher/2026-05-11_09-20-46</code></td>
+      <td><code>2026-05-08_08-59-28/model_12400.pt</code></td>
+      <td><code>model_25300.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>迁移到 Teacher 实验名并继续稳定基础步态。</td>
+      <td>继续积累稳定步态和 terrain curriculum 能力。<br><strong>教训：</strong>这是命名/runner 迁移阶段，不是 highstep 专项。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>2</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>bodyflat_vae_Teacher/2026-05-11_21-33-05</code></td>
+      <td><code>2026-05-11_09-20-46/model_25300.pt</code></td>
+      <td><code>model_27000.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>短接续，筛选更稳 bodyflat 父模型。</td>
+      <td>作为后续 bodyflat/sidestep 链路中间节点。<br><strong>教训：</strong>历史链路不是一次完整长训，而是多次人工筛选 checkpoint。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>3</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>bodyflat_vae_Teacher/2026-05-31_16-58-47</code></td>
+      <td><code>2026-05-11_21-33-05/model_27000.pt</code></td>
+      <td><code>model_29600.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>延长 bodyflat teacher 稳定训练。</td>
+      <td>给后续 bodyflat/sidestep 和 highstep 共同提供动作基础。<br><strong>教训：</strong>稳定性指标比某个单轮 terrain 数字更重要。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>4</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>bodyflat_vae_Teacher/2026-06-03_21-47-54</code></td>
+      <td><code>2026-05-31_16-58-47/model_29600.pt</code></td>
+      <td><code>model_45500.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>继续 bodyflat 稳定化，形成较成熟的普通运动能力。</td>
+      <td>该 run 最后到 46599，本链路选 45500；用于下一段 bodyflat。<br><strong>教训：</strong>选择 checkpoint 可以基于行为质量，不必机械取最后一个。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>5</span></td>
+      <td><span class='tag'>Bodyflat 基础</span></td>
+      <td><code>bodyflat_vae_Teacher/2026-06-04_13-18-36</code></td>
+      <td><code>2026-06-03_21-47-54/model_45500.pt</code></td>
+      <td><code>model_49600.pt</code></td>
+      <td>17000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>形成 highstep 迁移前的 bodyflat 父模型。</td>
+      <td>尾段 terrain≈5.391、command=1.0、time_out≈0.993、mean_reward≈195.91。<br><strong>教训：</strong>这就是 highstep 主链最重要的 bodyflat 父节点。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>6</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-15_23-16-43</code></td>
+      <td><code>bodyflat_Teacher/2026-06-04_13-18-36/model_49600.pt</code></td>
+      <td><code>model_52200.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>从 bodyflat 切入 Highstep teacher，开始学习前腿搭台、后腿抬高、box joint 上台动作。</td>
+      <td>尾段 terrain≈2.516、command≈0.4675；高台能力刚起步。<br><strong>教训：</strong>highstep terrain_levels 和 bodyflat 5.x 不能直接比较。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>7</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-16_02-44-57</code></td>
+      <td><code>2026-06-15_23-16-43/model_52200.pt</code></td>
+      <td><code>model_53200.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>短接续，稳定 highstep 初始动作。</td>
+      <td>作为 06-16 后续强化的中间节点。<br><strong>教训：</strong>这一时期主要解决“能不能开始上台”，不是精调后腿。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>8</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-16_04-22-56</code></td>
+      <td><code>2026-06-16_02-44-57/model_53200.pt</code></td>
+      <td><code>model_57699.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>继续 highstep 迁移。</td>
+      <td>记忆中标记为视觉上开始能上 highstep 的阶段。<br><strong>教训：</strong>视频/play 已经开始比 terrain 数字更关键。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>9</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-16_22-07-48</code></td>
+      <td><code>2026-06-16_04-22-56/model_57699.pt</code></td>
+      <td><code>model_60400.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>加强接近高台和逆向地形分布。</td>
+      <td>高台接近动作继续增强。<br><strong>教训：</strong>地形分布会显著改变 curriculum 曲线含义。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>10</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-17_00-56-56</code></td>
+      <td><code>2026-06-16_22-07-48/model_60400.pt</code></td>
+      <td><code>model_61900.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>继续提升 terrain levels，命令等级仍偏保守。</td>
+      <td>terrain levels 上升，但 command 仍低。<br><strong>教训：</strong>只看 terrain 不够，command 释放也影响行为。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>11</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-17_03-05-16</code></td>
+      <td><code>2026-06-17_00-56-56/model_61900.pt</code></td>
+      <td><code>model_63700.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>放宽 command 到约 0.6375，使策略不只会低速上台。</td>
+      <td>command 覆盖更接近后续部署需求。<br><strong>教训：</strong>command gate 会影响上台动作和退化判断。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>12</span></td>
+      <td><span class='tag'>Highstep 迁移</span></td>
+      <td><code>highstep_vae_Teacher/2026-06-17_05-07-05</code></td>
+      <td><code>2026-06-17_03-05-16/model_63700.pt</code></td>
+      <td><code>model_68199.pt</code></td>
+      <td>4500</td>
+      <td><span class='status ok'>是</span></td>
+      <td>形成第一版较强 highstep teacher。</td>
+      <td>尾段 terrain≈3.274、command≈0.6375；视频中运动能力基本满足初期要求。<br><strong>教训：</strong>后续 student 蒸馏从这里暴露后退 bad_orientation 和真机部署差距。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>13</span></td>
+      <td><span class='tag'>稳定性与部署前修正</span></td>
+      <td><code>2026-06-18_05-10-44_teacher_backward_stability_long_from_68199</code></td>
+      <td><code>2026-06-17_05-07-05/model_68199.pt</code></td>
+      <td><code>model_80198.pt</code></td>
+      <td>12000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>加入/强化后退 command 覆盖和 pitch 稳定，处理 student/teacher 后退容易后仰的问题。</td>
+      <td>后退稳定性改善，但 terrain levels 不一定比 06-17 更高。<br><strong>教训：</strong>真机/部署问题会改变优化重点，不能只追求爬台曲线。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>14</span></td>
+      <td><span class='tag'>稳定性与部署前修正</span></td>
+      <td><code>2026-06-18_21-19-11_teacher_box_default_gate_from_80198</code></td>
+      <td><code>2026-06-18_05-10-44/model_80198.pt</code></td>
+      <td><code>model_82100.pt</code></td>
+      <td>5000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>修复平地/普通运动中 box joint 位置异常偏移；box joint 应主要在上高台阶段起作用。</td>
+      <td>box default gate 进入主线。<br><strong>教训：</strong>伸缩腿不能为了高台动作长期偏离默认位，否则部署风险高。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>15</span></td>
+      <td><span class='tag'>稳定性与部署前修正</span></td>
+      <td><code>2026-06-18_23-20-22_teacher_box_default_resume_gate_free_from_82100</code></td>
+      <td><code>2026-06-18_21-19-11/model_82100.pt</code></td>
+      <td><code>model_84400.pt</code></td>
+      <td>3000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>resume/refine 时放宽 command terrain gate，避免从已有 checkpoint 继续时重新被早期门控卡住。</td>
+      <td>resume gate-free 机制成为后续 train.py 的重要经验。<br><strong>教训：</strong>--resume 时 staged reward 和 command gate 必须单独处理。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>16</span></td>
+      <td><span class='tag'>稳定性与部署前修正</span></td>
+      <td><code>2026-06-19_01-42-04</code></td>
+      <td><code>2026-06-18_23-20-22/model_84400.pt</code></td>
+      <td><code>model_87399.pt</code></td>
+      <td>3000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>形成真机测试前相对稳定的 teacher 来源。</td>
+      <td>尾段 terrain≈2.812、bad_orientation≈0.00073、time_out≈0.999；仿真效果可用。<br><strong>教训：</strong>真机测试暴露电机高频抖动、整机摇晃和后腿抬高不足，说明仿真目标仍不等价于真实任务。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>17</span></td>
+      <td><span class='tag'>稳定性与部署前修正</span></td>
+      <td><code>2026-06-22_12-41-28</code></td>
+      <td><code>2026-06-19_01-42-04/model_87399.pt</code></td>
+      <td><code>model_95398.pt</code></td>
+      <td>8000</td>
+      <td><span class='status ok'>是</span></td>
+      <td>继续 teacher 精修，成为后续多条分支的干净父节点。</td>
+      <td>尾段 terrain≈2.834、command≈0.6375、bad_orientation≈0.00132；被反复作为较干净 anchor。<br><strong>教训：</strong>95398 比 97300 更干净，因为尚未吸收后续旧 reward shaping 的偏置。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>17A</span></td>
+      <td><span class='tag'>对照分支</span></td>
+      <td><code>2026-06-23_00-52-26</code></td>
+      <td><code>2026-06-22_12-41-28/model_95398.pt</code></td>
+      <td><code>model_97300.pt / model_105397.pt</code></td>
+      <td>10000</td>
+      <td><span class='status muted'>不是当前父链</span></td>
+      <td>旧 reward mix 下尝试继续增强高台动作。</td>
+      <td>97300 仍能上台，右后腿先登台更顺；105397 左后腿先登台失败倾向增强。<br><strong>教训：</strong>该分支是重要对照，但不作为当前 07-01 链路父节点。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>18</span></td>
+      <td><span class='tag'>通往 124598 的直接基底</span></td>
+      <td><code>2026-06-24_00-36-54</code></td>
+      <td><code>2026-06-22_12-41-28/model_95398.pt</code></td>
+      <td><code>model_108000.pt（后续父节点）；另有 110000/112700 视频对比</code></td>
+      <td>110000 configured / 实际手动中止</td>
+      <td><span class='status ok'>是，通往124598</span></td>
+      <td>从 95398 开启另一条高台强化基底，观察 110000 和 112700 行为差异。</td>
+      <td>用户观察 112700 比 110000 略好但差异不大；左后腿先登台仍更常见。<br><strong>教训：</strong>`max_iterations=110000` 是额外训练上限，历史上这里曾造成理解混乱；实际选用 108000 接下一段。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>19</span></td>
+      <td><span class='tag'>通往 124598 的直接基底</span></td>
+      <td><code>2026-06-24_22-59-55</code></td>
+      <td><code>2026-06-24_00-36-54/model_108000.pt</code></td>
+      <td><code>model_111800.pt</code></td>
+      <td>4000</td>
+      <td><span class='status ok'>是，通往124598</span></td>
+      <td>继续从 108000 调整高台能力。</td>
+      <td>111800 曾用于和 06-17/06-19 链路对比；整体稳定些但后腿后半段力量感仍不如早期部分策略。<br><strong>教训：</strong>不能只追求更稳，后腿后半段支撑动作质量也必须保留。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>20</span></td>
+      <td><span class='tag'>通往 124598 的直接基底</span></td>
+      <td><code>2026-06-25_04-35-54</code></td>
+      <td><code>2026-06-24_22-59-55/model_111800.pt</code></td>
+      <td><code>model_112599.pt</code></td>
+      <td>800</td>
+      <td><span class='status ok'>是，通往124598</span></td>
+      <td>短训微调 111800。</td>
+      <td>作为 06-25 长段的直接父 checkpoint。<br><strong>教训：</strong>短训可用来验证方向，但不能把未收敛结果当最终。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>21</span></td>
+      <td><span class='tag'>通往 124598 的直接基底</span></td>
+      <td><code>2026-06-25_05-59-47</code></td>
+      <td><code>2026-06-25_04-35-54/model_112599.pt</code></td>
+      <td><code>model_124598.pt</code></td>
+      <td>12000</td>
+      <td><span class='status ok'>是，通往当前阶段任务重构</span></td>
+      <td>形成 06-30 阶段任务重构前的重要可用基底。</td>
+      <td>上台能力勉强可用，后续 student 蒸馏也曾基于它；但第一后腿/后半段动作仍不够理想。<br><strong>教训：</strong>124598 不是从 0 的干净点，但它是后续阶段任务重构的实际起点。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>22</span></td>
+      <td><span class='tag'>06-28 试错分支</span></td>
+      <td><code>2026-06-28_06-05-11 / 08-23-04 / 09-53-57 / 12-46-05 等</code></td>
+      <td><code>多次从 2026-06-25_05-59-47/model_124598.pt 重启</code></td>
+      <td><code>多组 125k-127k checkpoint</code></td>
+      <td>多为4000</td>
+      <td><span class='status warn'>不是最终直接父链</span></td>
+      <td>围绕第一后腿搭台、post-lead 支撑、前腿异常高抬进行多轮试错。</td>
+      <td>08-23 除前腿异常高抬外，第一后腿搭台和撑身体很有希望；09-53 前腿护栏压掉后腿能力；support_pose_scale=0 分支 hard fail 后被 supervisor 回滚。<br><strong>教训：</strong>全局前腿护栏和过强姿态约束会牺牲爬台主能力；后续改成阶段任务逻辑。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>23</span></td>
+      <td><span class='tag'>阶段任务重构</span></td>
+      <td><code>2026-06-30_01-45-31</code></td>
+      <td><code>2026-06-25_05-59-47/model_124598.pt</code></td>
+      <td><code>model_133597.pt</code></td>
+      <td>9000</td>
+      <td><span class='status ok'>是，07-01主父链</span></td>
+      <td>把 highstep 从普通 dense reward 调参改为阶段任务：approach -&gt; front_commit -&gt; rear_first_clear -&gt; lead_rear_support -&gt; second_rear_clear -&gt; post_clear_recovery。</td>
+      <td>视频 00112_2026-06-30_01-45-31_model_133597 显示爬高台能力肉眼显著提升。<br><strong>教训：</strong>这是当前最关键的方法论转折：目标函数必须贴近真实动作链。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>24</span></td>
+      <td><span class='tag'>阶段任务重构</span></td>
+      <td><code>2026-06-30_18-52-50</code></td>
+      <td><code>2026-06-30_01-45-31/model_133597.pt</code></td>
+      <td><code>model_136596.pt</code></td>
+      <td>3000</td>
+      <td><span class='status ok'>是，07-01主父链</span></td>
+      <td>加入 post_clear_recovery=0.30、scanner_pretrigger_penalty=-0.08，尝试减弱上台后仍像准备上台和台前预触发。</td>
+      <td>上台动作很好且流畅，但阶段判定异常仍明显：远处会抬前腿，上台后仍保持上台姿态。<br><strong>教训：</strong>不能让姿态恢复/预触发约束压过爬台能力；后续切换为 highstep-only + FSM。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>25</span></td>
+      <td><span class='tag'>阶段任务重构</span></td>
+      <td><code>2026-07-01_01-46-33</code></td>
+      <td><code>2026-06-30_18-52-50/model_136596.pt</code></td>
+      <td><code>model_137500.pt / model_137600.pt</code></td>
+      <td>4000</td>
+      <td><span class='status ok'>是，07-01主父链</span></td>
+      <td>继续 136596，用户 play 后决定：上高台能力优先，平地/上台后普通行走后续用部署端 FSM 切换其它策略。</td>
+      <td>用户确认上台能力有保持，但非高台状态问题仍在。<br><strong>教训：</strong>目标边界改变后，不能再为了平地步态牺牲高台主能力。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>26</span></td>
+      <td><span class='tag'>阶段任务重构</span></td>
+      <td><code>2026-07-01_03-28-38</code></td>
+      <td><code>2026-07-01_01-46-33/model_137500.pt</code></td>
+      <td><code>model_140400.pt</code></td>
+      <td>4000</td>
+      <td><span class='status ok'>是，07-01主父链</span></td>
+      <td>撤掉主爬台 reward 上过强 phase-exit 门控；post_clear_recovery 0.30-&gt;0.12，scanner_pretrigger -0.08-&gt;-0.02，保留轻量切入/切出姿态兼容。</td>
+      <td>视频 00112_2026-07-01_03-28-38_model_140400：上高台能力可以接受，用户决定可轻量加回 box_hard。<br><strong>教训：</strong>上台能力专用策略路线成立，但仍必须用视频+score 选 checkpoint。</td>
+    </tr>
+    <tr>
+      <td><span class='stage-id'>27</span></td>
+      <td><span class='tag'>轻量 hard refine</span></td>
+      <td><code>2026-07-01_06-52-29</code></td>
+      <td><code>2026-07-01_03-28-38/model_140400.pt</code></td>
+      <td><code>最新保存 model_148700.pt；推荐行为窗口 model_142100/model_142300</code></td>
+      <td>13400</td>
+      <td><span class='status ok'>是，当前最新</span></td>
+      <td>terrain 从 warm 切到 final：box 0.58 + box_hard 0.04，高度 0.30-0.38m，轻量增加硬高台样本。</td>
+      <td>142100/142300 score 高；148000/148700 terrain 更高但 support 崩。<br><strong>教训：</strong>当前目标函数仍不保证越训越好；hard refine 应短训并选择早期高分 checkpoint，不默认取最后。</td>
+    </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>关键 checkpoint 评分证据</h2>
+  <p>这段解释为什么 <code>model_148700</code> 是最新保存，但不是当前最推荐动作 checkpoint。`terrain_levels` 上升不等于“上高台动作更好”；这里支撑身体能力是硬指标。</p>
+  <div class='table-wrap'>
+  <table>
+    <thead><tr><th>checkpoint</th><th>HighstepScore</th><th>Entry</th><th>Support</th><th>terrain</th><th>解释</th></tr></thead>
+    <tbody>
+    <tr>
+      <td><code>model_142100</code></td><td class='good'>74.6</td><td>62.2</td><td class='good'>87.3</td><td>2.24</td><td>early hard refine，肉眼比 148000 流畅</td>
+    </tr>
+    <tr>
+      <td><code>model_142300</code></td><td class='good'>82.0</td><td>82.5</td><td class='good'>89.7</td><td>2.36</td><td>数据评分最高，当前推荐候选之一</td>
+    </tr>
+    <tr>
+      <td><code>model_148000</code></td><td class='bad'>38.0</td><td>70.9</td><td class='bad'>8.9</td><td>4.27</td><td>terrain 高，但支撑动作崩</td>
+    </tr>
+    <tr>
+      <td><code>model_148700</code></td><td class='bad'>27.9</td><td>56.1</td><td class='bad'>4.9</td><td>4.38</td><td>最新保存，但不等于最佳动作</td>
+    </tr></tbody>
+  </table>
+  </div>
+
+  <h2>为什么不复刻全部历史</h2>
+  <div class='two'>
+    <div class='box'>
+      <h3>应保留的经验</h3>
+      <p>1. Bodyflat 预训练作为基础。</p>
+      <p>2. Highstep 改成阶段任务，而不是无约束叠 dense reward。</p>
+      <p>3. 第一后腿搭台、post-lead 支撑、第二后腿清台必须作为动作链判断。</p>
+      <p>4. hard terrain 可以短 refine，但不能默认长训到底。</p>
+    </div>
+    <div class='box'>
+      <h3>不应复刻的冗余</h3>
+      <p>1. 06-23/06-24/06-25 多个旧 reward mix 分支不应机械全复现。</p>
+      <p>2. 06-28 的前腿护栏过强分支、support_pose_scale=0 分支不应作为主线。</p>
+      <p>3. 07-01 从 140400 长训到 148700 的后半段已经显示支撑能力退化。</p>
+    </div>
+  </div>
+
+  <h2>新的干净重训方案</h2>
+  <div class='flow'>
+    <div class='flow-step'><span class='n'>A</span><span class='t'>Warm 从 0</span><span class='d'><code>box=0.62</code>，禁用 <code>box_hard</code>，保留当前阶段任务 reward，训约 100000。</span></div>
+    <div class='flow-step'><span class='n'>G</span><span class='t'>Gate A</span><span class='d'>看 Entry + Support + play，不默认取最后。</span></div>
+    <div class='flow-step'><span class='n'>B</span><span class='t'>Final 短 refine</span><span class='d'><code>box=0.58</code> + <code>box_hard=0.04</code>，高度 0.30-0.38m，只额外 2500。</span></div>
+    <div class='flow-step'><span class='n'>G</span><span class='t'>Gate B</span><span class='d'>重点 play start+1600、+1900、+2200；优先 support。</span></div>
+    <div class='flow-step'><span class='n'>C</span><span class='t'>冻结 teacher</span><span class='d'>确认第一后腿、支撑、第二后腿三段动作后再蒸馏。</span></div>
+  </div>
+
+  <h2>命令模板</h2>
+  <h3>Phase A：warm terrain 从 0</h3>
+  <pre><code>cd /home/lxq/Softwares/robot_lab
+
+/home/lxq/miniconda3/envs/env_isaaclab/bin/python scripts/rsl_rl/base/train.py   --task RobotLab-Isaac-Velocity-Highstep-ArcdogAdjustableLeg-v0   --logger wandb   --headless   --max_iterations 100000</code></pre>
+  <p><code>--max_iterations 100000</code> 表示从 0 开始额外训练 100000 个 update，不是训练到某个外部 model 编号。</p>
+
+  <h3>Phase B：final terrain 短 hard refine</h3>
+  <pre><code>cd /home/lxq/Softwares/robot_lab
+
+/home/lxq/miniconda3/envs/env_isaaclab/bin/python scripts/rsl_rl/base/train.py   --task RobotLab-Isaac-Velocity-Highstep-ArcdogAdjustableLeg-v0   --logger wandb   --headless   --resume   --checkpoint &lt;PHASE_A_BEST_CHECKPOINT&gt;   --max_iterations 2500</code></pre>
+  <p><code>--max_iterations 2500</code> 表示从 <code>&lt;PHASE_A_BEST_CHECKPOINT&gt;</code> 额外训练 2500 个 update。历史上 <code>140400 -> 142100/142300</code> 对应的早期 hard-refine 窗口更好，不建议默认取最后。</p>
+
+  <p class='footer'>Generated from robot_lab memory files, run params, and highstep_clean_retrain_plan_2026-07-01.md. This document is a report artifact; it does not modify training code.</p>
+</div>
+</body>
+</html>

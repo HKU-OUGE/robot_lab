@@ -1,0 +1,19 @@
+[Unit]
+Description=Persistent Xray proxy for Codex Remote and Highstep automation
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/.local/share/v2rayN/guiConfigs
+Environment="V2RAY_LOCATION_ASSET=/home/lxq/.local/share/v2rayN/bin"
+Environment="XRAY_LOCATION_ASSET=/home/lxq/.local/share/v2rayN/bin"
+ExecStartPre=/home/lxq/.local/share/v2rayN/bin/xray/xray run -test -c /home/lxq/.local/share/v2rayN/guiConfigs/config.json
+ExecStart=/home/lxq/.local/share/v2rayN/bin/xray/xray run -c /home/lxq/.local/share/v2rayN/guiConfigs/config.json
+Restart=always
+RestartSec=1
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target
