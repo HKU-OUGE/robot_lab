@@ -1,0 +1,95 @@
+# Read-only evidence reference extracted from the six identical
+# /rl_deployment_manifest messages in:
+# /home/lxq/log/rosbag2_2026_07_23-15_25_01
+#
+# This is NOT an active deployment config and must not overwrite config.yaml.
+# The bag records FNV-1a fingerprints, not a SHA256 of the onboard files.
+
+model_name_policy2: "policy_student_b300_rl_preedge_E7700_model_181198.pt"
+framework: "isaacsim"
+decimation: 4
+num_of_dofs: 16
+
+# Production Student contract recorded by the manifest.
+student_history_input_dim: 570
+policy_output_dim: 16
+
+joint_order:
+  - FL_hip_joint
+  - FR_hip_joint
+  - RL_hip_joint
+  - RR_hip_joint
+  - FL_thigh_joint
+  - FR_thigh_joint
+  - RL_thigh_joint
+  - RR_thigh_joint
+  - FL_calf_joint
+  - FR_calf_joint
+  - RL_calf_joint
+  - RR_calf_joint
+  - FL_box_joint
+  - FR_box_joint
+  - RL_box_joint
+  - RR_box_joint
+
+rl_kp: [50, 50, 50, 50,
+        55, 55, 55, 55,
+        70, 70, 70, 70,
+        2, 2, 2, 2]
+
+rl_kd: [1.5, 1.5, 1.5, 1.5,
+        1.5, 1.5, 1.5, 1.5,
+        2.5, 2.5, 2.5, 2.5,
+        3.0, 3.0, 3.0, 3.0]
+
+action_scale: [0.1, 0.1, 0.1, 0.1,
+               0.1, 0.1, 0.1, 0.1,
+               0.1, 0.1, 0.1, 0.1,
+               0.02, 0.02, 0.02, 0.02]
+
+default_dof_pos: [0.0, 0.0, 0.0, 0.0,
+                  0.7, 0.7, 0.7, 0.7,
+                  -1.3, -1.3, -1.3, -1.3,
+                  0.03, 0.03, 0.03, 0.03]
+
+physical_dof_pos_lower: [-1.221730471, -1.221730471, -1.221730471, -1.221730471,
+                         -1.570799947, -1.570799947, -1.570799947, -1.570799947,
+                         -2.775073528, -2.775073528, -2.775073528, -2.775073528,
+                         0.0, 0.0, 0.0, 0.0]
+
+physical_dof_pos_upper: [1.221730471, 1.221730471, 1.221730471, 1.221730471,
+                         3.490700006, 3.490700006, 3.490700006, 3.490700006,
+                         -0.6457718015, -0.6457718015, -0.6457718015, -0.6457718015,
+                         0.06, 0.06, 0.06, 0.06]
+
+output_dof_pos_lower: [-60.0, -60.0, -60.0, -60.0,
+                       -60.0, -60.0, -60.0, -60.0,
+                       -60.0, -60.0, -60.0, -60.0,
+                       0.0, 0.0, 0.0, 0.0]
+
+output_dof_pos_upper: [60.0, 60.0, 60.0, 60.0,
+                       60.0, 60.0, 60.0, 60.0,
+                       60.0, 60.0, 60.0, 60.0,
+                       0.06, 0.06, 0.06, 0.06]
+
+clip_actions_lower: [-60.0, -60.0, -60.0, -60.0,
+                     -60.0, -60.0, -60.0, -60.0,
+                     -60.0, -60.0, -60.0, -60.0,
+                     -60.0, -60.0, -60.0, -60.0]
+
+clip_actions_upper: [60.0, 60.0, 60.0, 60.0,
+                     60.0, 60.0, 60.0, 60.0,
+                     60.0, 60.0, 60.0, 60.0,
+                     60.0, 60.0, 60.0, 60.0]
+
+rear_hip_guard_enabled: false
+policy2_fixed_motion_enabled: false
+policy2_one_shot_enabled: false
+teacher_virtual_terrain_enabled: false
+teacher_prior_application_count: 1
+
+# Onboard evidence identities recorded by the bag.
+model_fingerprint: "fnv1a64:7677c5120d02eb7b:bytes:3535560"
+config_fingerprint: "fnv1a64:dd18f7e06b513bd1:bytes:4049"
+bag_metadata_sha256: "f5ea4a71a7199ca08ab6493b19aa95a93523a6328eecb400bd0cd22883722000"
+bag_db3_sha256: "9282a3951e43913d61f220702e7ee59beee3432a359d3ceca2384cea23c56363"

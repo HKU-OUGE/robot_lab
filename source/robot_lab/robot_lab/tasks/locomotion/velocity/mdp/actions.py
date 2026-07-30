@@ -143,6 +143,72 @@ def compute_phased_highstep_post_prior(
     )
 
 
+def compute_phase_only_highstep_post_prior(
+    raw_actions: torch.Tensor,
+    processed_actions: torch.Tensor,
+    box_action_ids: torch.Tensor,
+    action_scale: float | torch.Tensor,
+    action_offset: float | torch.Tensor,
+    phase: torch.Tensor,
+    *,
+    phase_split: float = 0.15,
+    terminal_epsilon: float = 1.0e-6,
+    front_reach_box_bias: float = -0.020,
+    rear_approach_box_bias: float = 0.002,
+    front_support_box_bias: float = 0.002,
+    rear_push_box_bias: float = -0.022,
+    min_box_target: float = 0.000,
+    max_box_target: float = 0.060,
+) -> PhasedHighstepPostPriorResult:
+    """Apply the frozen sensor-free policy2 prior from joystick-integrated phase.
+
+    This is the deployable fixed-platform transform.  It intentionally does
+    not read terrain, foot height, camera, raycast, or any other external
+    signal.  The caller owns phase integration and supplies the exact phase
+    used in the Student's additional eight input features.
+    """
+
+    phase = torch.clamp(phase.reshape(-1).to(processed_actions), 0.0, 1.0)
+    terminal = phase >= (1.0 - terminal_epsilon)
+    moving = (phase > 0.0) & ~terminal
+    reach_gate = (moving & (phase < phase_split)).to(processed_actions.dtype)
+    push_gate = (moving & (phase >= phase_split)).to(processed_actions.dtype)
+
+    reach_bias = torch.tensor(
+        [front_reach_box_bias, front_reach_box_bias, rear_approach_box_bias, rear_approach_box_bias],
+        device=processed_actions.device,
+        dtype=processed_actions.dtype,
+    )
+    push_bias = torch.tensor(
+        [front_support_box_bias, front_support_box_bias, rear_push_box_bias, rear_push_box_bias],
+        device=processed_actions.device,
+        dtype=processed_actions.dtype,
+    )
+    box_bias = reach_gate.unsqueeze(1) * reach_bias + push_gate.unsqueeze(1) * push_bias
+
+    physical_targets = processed_actions.clone()
+    unclamped_box_targets = processed_actions[:, box_action_ids] + box_bias
+    box_clip_mask = (unclamped_box_targets < min_box_target) | (unclamped_box_targets > max_box_target)
+    box_targets = torch.clamp(unclamped_box_targets, min=min_box_target, max=max_box_target)
+    physical_targets[:, box_action_ids] = box_targets
+
+    box_scale = action_scale[:, box_action_ids] if isinstance(action_scale, torch.Tensor) else action_scale
+    box_offset = action_offset[:, box_action_ids] if isinstance(action_offset, torch.Tensor) else action_offset
+    raw_equivalent_actions = raw_actions.clone()
+    raw_equivalent_actions[:, box_action_ids] = (box_targets - box_offset) / box_scale
+
+    return PhasedHighstepPostPriorResult(
+        raw_equivalent_actions=raw_equivalent_actions,
+        physical_targets=physical_targets,
+        box_bias=box_bias,
+        gate=torch.maximum(reach_gate, push_gate),
+        reach_gate=reach_gate,
+        push_gate=push_gate,
+        box_clip_mask=box_clip_mask,
+        prior_scale=1.0,
+    )
+
+
 def _reset_action_delay(term, env_ids: Sequence[int] | None) -> None:
     if term._action_delay_buffer is None:
         return
@@ -459,6 +525,7 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
         self._last_phased_highstep_push_gate = torch.zeros(self.num_envs, device=self.device)
         self._last_phased_highstep_height_delta = torch.zeros(self.num_envs, device=self.device)
         self._last_phased_highstep_prior_scale = 0.0
+        self._phase_only_deployment_phase: torch.Tensor | None = None
 
         self._height_sensor = None
         self._front_ray_mask = None
@@ -487,6 +554,28 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
 
     def process_actions(self, actions: torch.Tensor):
         super().process_actions(actions)
+
+        if self._phase_only_deployment_phase is not None:
+            result = compute_phase_only_highstep_post_prior(
+                self._raw_actions,
+                self._processed_actions,
+                self._box_action_ids,
+                self._scale,
+                self._offset,
+                self._phase_only_deployment_phase,
+                min_box_target=self.cfg.min_box_target,
+                max_box_target=self.cfg.max_box_target,
+            )
+            self._processed_actions[:] = result.physical_targets
+            self._last_phased_highstep_box_bias[:] = result.box_bias
+            self._last_phased_highstep_gate[:] = result.gate
+            self._last_phased_highstep_reach_gate[:] = result.reach_gate
+            self._last_phased_highstep_push_gate[:] = result.push_gate
+            self._last_phased_highstep_height_delta.zero_()
+            self._last_phased_highstep_prior_scale = result.prior_scale
+            if self._action_delay_buffer is not None:
+                self._processed_actions = self._action_delay_buffer.compute(self._processed_actions)
+            return
 
         height_delta = torch.zeros(self.num_envs, device=self.device)
         command_x = torch.zeros_like(height_delta)
@@ -546,6 +635,17 @@ class PhasedHighstepBoxBiasJointPositionAction(JointPositionAction):
         self._last_phased_highstep_prior_scale = result.prior_scale
         if self._action_delay_buffer is not None:
             self._processed_actions = self._action_delay_buffer.compute(self._processed_actions)
+
+    def set_phase_only_deployment_phase(self, phase: torch.Tensor) -> None:
+        """Select the sensor-free deployment prior and bind its current phase."""
+
+        if phase.numel() != self.num_envs or not bool(torch.all(torch.isfinite(phase)).item()):
+            raise ValueError("phase-only deployment prior requires one finite phase per environment")
+        self._phase_only_deployment_phase = torch.clamp(
+            phase.detach().reshape(self.num_envs).to(device=self.device, dtype=self._processed_actions.dtype),
+            0.0,
+            1.0,
+        )
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         super().reset(env_ids)

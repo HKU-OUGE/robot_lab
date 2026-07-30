@@ -1,12 +1,20 @@
 # RobotLab 记忆索引
 
-更新时间：2026-07-15，Asia/Hong_Kong。
+更新时间：2026-07-30，Asia/Hong_Kong。
 
 这是未来新对话的常驻入口。先读这个文件，再根据问题按需打开下层细节文件。
 
+## 2026-07-30 Highstep 最终阶段入口
+
+- [Highstep E7700 真机成功上台阶段归档](library/highstep_stage_archive_20260730.md)：当前最高入口。记录最终 Teacher→E5700→E7700 链、真机视频/rosbag、实际部署合同、成功结论、经验和未来恢复边界。
+- [E7700 2026-07-23 真机参考配置](library/config_e7700_real_test_20260723_reference.yaml)：从 bag 的 6 条一致 deployment manifest 提取；只读参考，不覆盖任何机器的活动 `config.yaml`。
+- 当前状态：阶段已归档；无自动训练、评估或真机部署。后续开发继续使用现有 `dev_lxq_new` 分支。
+
+下方 2026-07-15 及更早“当前”“最高优先级”均保留为历史链，不得覆盖本节。
+
 ## 2026-07-15 当前入口（覆盖下方旧“当前”描述）
 
-- [Codex 新电脑/新会话起点](../CODEX_START_HERE.md)：区分原工作站实时 authority 与 GitHub 冻结快照；克隆后必须先读。
+- [Codex 新电脑/新会话起点](CODEX_START_HERE.md)：区分原工作站实时 authority 与 GitHub 冻结快照；克隆后必须先读。
 - [可直接分享的 Highstep 协作者交接 PDF](deliverables/highstep_collaborator_handoff_20260715.pdf)：面向新协作者的执行手册，包含克隆、Codex 首条指令、当前状态、历史链、代码地图、外部 artifact 和禁区。
 - [GitHub 可移植交接：代码、历史与 v1.11 当前进度](library/highstep_repository_transfer_handoff_20260715.md)：本分支的代码范围、历史阅读顺序、外部 checkpoint/日志边界、当前只读 Teacher A/B 流程及恢复限制。
 - [Highstep Student 恢复与自动化规范 v1.11](library/highstep_student_recovery_spec_20260712.md)：当前正式最高规范。顶部 v1.11 覆盖所有冲突旧章节；v1.10 及以下仅为历史证据。

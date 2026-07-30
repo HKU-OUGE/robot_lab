@@ -1,4 +1,4 @@
-# Highstep Student 恢复与自动化规范 v1.11
+# Highstep Teacher/Student 恢复与自动化规范 v1.14
 
 - 状态：用户已批准
 - 批准日期：2026-07-12
@@ -17,12 +17,274 @@
 - v1.9 批准日期：2026-07-14（v1.8 E1400 按预注册失败后封顶；先做同 checkpoint oracle prior-delta A/B，只有行为恢复才允许训练独立 4 维 blind prior residual head）
 - v1.10 批准日期：2026-07-15（用户指出 E1400 与 terrain/support/score/warmup 多个切换边界重合，批准从同一 E1400 完整 checkpoint 做受限的 estimator-only 与历史 post-warmup box-row continuation A/B；两支最多各增加 300 updates，并在每 100 updates 做同规格评估）
 - v1.11 批准日期：2026-07-15（暂停 v1.10 continuation，不启动训练；优先执行旧 Teacher model_151399 与新 Teacher model_172300 的零训练、同环境、同物理快照鲁棒性 A/B）
+- v1.12 批准日期：2026-07-15（用户依据 0707 真机/仿真逐阶段复核与 v1.11 A/B 结果，批准固定 model_172300 起点、只替换后腿支撑动作合同并立即执行受监督长训）
+- v1.12.1 批准日期：2026-07-15（用户人工观看 v1.12 behavior-best E1000，接受后腿动作，并批准只修左前足预接触回收/落点；本次授权覆盖代码、测试和新对话 handoff，不自动启动训练）
+- v1.12.2 批准日期：2026-07-16（用户以正确视频 00155 复核并确认：后腿动作保持；唯一问题是 FL 足端卡台；采用 A 型、6 cm 短暂后缩，任何 FL 立面接触均判失败，固定 0/15 门禁，并要求训练实时同步 W&B）
+- v1.12.2 有限训练 amendment 批准日期：2026-07-16（用户指定当前恢复执行线程为唯一执行 authority，明确要求完成测试、smoke、W&B fail-closed 与合法启动，除真实外部阻塞外不得等待）
+- v1.12.3 批准日期：2026-07-16（2×2 冻结诊断闭环后，用户批准 reward 内部低侧 lift、稠密回收和逐 episode 单调 release latch 的单一几何合同，并批准不可修改 paired A/B）
+- v1.13 批准日期：2026-07-16（用户人工选择并冻结 B-E300；批准以 B-E300 为唯一 Teacher，保持 0707 Stage-2 混合 action-prior 蒸馏合同和 B-E300 完整环境分布，连续长训一套 Student，并改为多 checkpoint 人工 play 选择）
+- v1.13.1 批准日期：2026-07-16（仅将尚未启动的单次连续 Student 长训预算由 2500 增加至 4000 effective updates；其余 Teacher、环境、0707 混合 action-prior、loss、optimizer、冻结范围、保存间隔、W&B 和人工验收合同全部不变）
+- v1.14 批准日期：2026-07-18（用户根据 E4000 单 buffer 冻结诊断，批准仅修复 Student actor-facing latent 的 hard-clamp 反向梯度，保持其前向与全部其它蒸馏、环境和部署语义不变）
 - 最高目标：得到能够完成约 35 cm 高台动作、可用于下一次真机实验的 Student policy
-- 适用范围：Highstep Student 蒸馏、仿真行为评估、候选导出与视频
+- 适用范围：Highstep Teacher 动作改进、Student 蒸馏、仿真行为评估、候选导出与视频
+
+### v1.14：B-E300 Student clamp-gradient repair
+
+本节是当前最高执行依据。v1.13.1 E4000 的 checkpoint、optimizer、W&B、日志和失败事实完整保留为 historical-only；禁止继续其 optimizer、追加 update、筛选其它 v1.13.1 checkpoint，或恢复 fixed-motion、Direct-Action、phase-only、one-shot、DAgger、reward、action-prior A/B 与其它已终止路线。
+
+#### 唯一起点、根因证据与单一变量
+
+唯一 Teacher 和 fresh Student weights-only 起点仍为：
+
+```text
+/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_treatment_Teacher/2026-07-16_05-09-30_v1123_B-E300_20260716_050924/model_173499.pt
+SHA256=d97ad3ac886c419f59e31d1b30e69353d70ab294a1f890887358d9bc4efb5431
+```
+
+根因报告为：
+
+```text
+/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/diagnostics/E4000_frozen_one_buffer/diagnostic_report.json
+SHA256=41922a71c40036611d37c884ee60042bc161f22773b6e017b7039b96e21b66ab
+```
+
+它固定证明：Teacher 与 Student actor 的 12 维 nonbox 输出在同一 Teacher latent 下逐元素一致；换入 Teacher latent 后 Student 12 维 nonbox 动作误差下降 100%；raw Student mu 超界约 9.62%，后腿关键阶段 43256 个超界且错误的元素经 hard clamp 后 action 梯度 100% 被截为零。唯一根因分类为 `clamp_supervision_contract_error`。
+
+唯一训练语义变量命名为 `student_actor_latent_clamp_backward`：
+
+| 字段 | v1.13.1 | v1.14 | 是否变化 |
+|---|---|---|---|
+| actor-facing latent 前向 | `clamp(mu,-1,1)` | 与左侧逐元素相同 | 否 |
+| actor-facing latent 反向 | clamp 区外梯度为 0 | straight-through identity | **唯一变化** |
+| rollout/导出/部署前向 | hard clamp | hard clamp | 否 |
+
+训练实现固定为 `safe_mu = mu + (clamp(mu,-1,1) - mu).detach()`；只允许用于 Student estimator 的训练 action-loss 图。rollout、play、导出与部署继续使用普通 hard clamp。禁止改成 tanh、softsign、取消边界或修改 Teacher latent。
+
+#### 永久冻结的蒸馏、环境和部署合同
+
+以下相对 v1.13.1 全部不变：Teacher 与 Teacher prior；570 维 observation history、64 维 latent、16 维动作；网络；Student 自主 rollout 与同状态 Teacher 标签；PPO 永久关闭；loss 系数 `10/50/20/5/0.5/0.1`；estimator Adam `1e-3`、box rows/bias Adam `1e-5`、每 update 4 个 VAE epochs；warmup=`1400`；pre-prior 主 action target；phase scale=`2.0`、rear-box scale=`1.5`；warmup prior-box loss=`0`；update 1400 后只开放最后 4 个 box rows/bias；B-E300 Student 环境、DR、command/curriculum、delay；`action_scale`、`joint_pos.clip`、default offset、kp/kd、tau_ff 和部署接口。禁止继承 v1.13.1 E4000 optimizer 或任何旧 Student optimizer。
+
+#### 启动前最小验证
+
+只允许 static/task registry、双 checkpoint 与冻结范围 binding、以及 `1--5 update` throwaway smoke。smoke 必须证明：STE 与 hard clamp 前向逐元素一致；超界 mu 的 action 梯度恢复为非零；warmup 只有 estimator 参数发生更新；Student/Teacher 独立；source Teacher SHA 不变；Student 与 optimizer 均 fresh，未继承 E4000。smoke checkpoint 禁止作为正式恢复源。禁止增加其它启动测试、行为评估、A/B 或诊断。
+
+#### 保存点、机制门禁与行为门禁
+
+1. 保存点固定为 E100、E300、E700、E1400、E1800；只有本节明确允许时才可到 E2500。E100 只保存基线，不做行为淘汰。
+2. E300 只检查 NaN/Inf、STE 梯度仍被截断、mu 超界相对 E100 明显恶化或绑定/机制错误；不得使用 action MSE 相对 E100 必须下降 10% 的旧草案门禁。
+3. 训练前必须冻结 E4000 comparison manifest，绑定上述 diagnostic SHA、完全相同的 buffer/阶段划分/统计口径，以及 first-rear、second-rear、rear-hold 的 actor-facing clamped-latent 和 12 维 nonbox pre-prior action 基线。阈值不得看 v1.14 结果后修改。
+4. E700 是第一道硬止损：使用冻结 comparison buffer。若 critical-phase clamped-latent 与 12 维 nonbox pre-prior action 两类误差均未优于 E4000，停止；任一明确改善且另一项没有明显恶化，允许到 E1400。
+5. E1400 只作 estimator/latent 机制门禁：critical-phase clamped-latent 与 12 维 nonbox pre-prior action 相对 E4000 的目标均为约 20% 改善；同时记录 raw-mu 超界率、饱和错误元素和自主 rollout。box-head 此时尚未获得有效 post-prior 适配，不得用 full/rear-hold 行为不足单独否决路线。
+6. E1400 机制门禁通过后，保持完全相同合同继续至 E1800，使最后 4 个 box rows/bias 获得 400 updates post-prior 适配。不得同时修改 prior 或其它 loss。
+7. E1800 首次执行行为门禁，并分开记录 Teacher pre-prior、Teacher post-prior、Student 12 维 nonbox、Student 4 维 box。自主 rollout `full_climb>=3/9` 且 `rear_hold>=3/9` 时立即停止新增 iteration，导出精确 checkpoint，进入 MuJoCo exploratory smoke；这不是最终候选或真机批准。
+8. 若 E1800 为 `1--2/9`，仅当 clamped-latent、nonbox 和 post-prior box 误差仍明确改善时允许 E2500；若 `0/9` 或指标平台化则停止。E2500 是绝对上限。
+9. 最终候选门禁仍为 valid=`15/15`、full climb `>=12/15`、rear hold `>=12/15`，但不作为进入 MuJoCo 初步 sim-to-sim 的前置条件。未经用户视觉批准禁止真机部署。
+
+#### 自动化与 W&B
+
+新路线必须使用独立 workflow/state/lock/heartbeat/handoff 和独立 W&B online run(s)，group 绑定 workflow。每个正式训练 child 的 config/history/summary/checkpoint SHA 必须可核验；网络或评估基础设施故障不得改判行为失败。supervisor 只执行上述保存点和门禁，禁止自动增加训练变量、放宽阈值或恢复旧 service。训练启动无需再次确认，但必须回报 spec/preregistration SHA、真实 train PID、W&B run 和冻结 E4000 比较基线。
+
+### v1.13.1：B-E300 的 0707 混合 action-prior Student 长训
+
+本节是当前最高执行依据。v1.12.3 的 Teacher paired A/B、人工 play 结果和所有旧 Teacher/Student checkpoint、W&B、manifest、state 与失败事实完整保留为历史证据；与本节冲突的旧 Student 路线、自动 core9/directional 门禁、按 checkpoint 暂停训练和自动行为判定均为 historical-only，不得恢复为本轮执行 authority。
+
+#### 唯一 Teacher 与 fresh Student 起点
+
+唯一 Teacher 为：
+
+```text
+/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_treatment_Teacher/2026-07-16_05-09-30_v1123_B-E300_20260716_050924/model_173499.pt
+SHA256=d97ad3ac886c419f59e31d1b30e69353d70ab294a1f890887358d9bc4efb5431
+```
+
+冻结证据为：
+
+```text
+/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_geometry_v1123_20260716/teacher_frozen_user_selected_B_E300_manifest.json
+SHA256=b8717f6777cb31d592b467aabe87b330571d7cedcff50fc80f2fa7ce9e2d644f
+```
+
+Student 必须从上述 B-E300 checkpoint 做 fresh weights-only 初始化；独立 frozen Teacher 读取相同 checkpoint bytes。禁止从任何旧 Student、v1.5--v1.10 optimizer、B500、model_172300 或中断 checkpoint 恢复。Student 与 Teacher 必须存储独立，Teacher actor 与 privileged encoder 永久冻结。
+
+#### 0707 Stage-2 蒸馏合同
+
+本轮不新建蒸馏算法，严格复用已由 0707 链路验证的混合 action-prior Stage-2 合同：
+
+- Student 自主驱动 rollout；Teacher 在 Student 访问的同一状态上提供监督；
+- PPO 永久关闭，任务 reward 不进入 Student 梯度；reward 只保留环境、日志和既有 curriculum 所需计算；
+- `student_actor_warmup_updates=1400`，warmup 期间只训练 estimator；
+- `student_vae_epochs=4`；
+- estimator Adam `lr=1e-3`；warmup 后四个 box rows/bias Adam `lr=1e-5`；
+- velocity/latent/Teacher-action/prior-box/reconstruction/KL 系数固定为 `10/50/20/5/0.5/0.1`；
+- warmup 主 action target 固定为 Teacher pre-prior 16 维动作；
+- `phase_scale=2.0`、`rear_box_scale=1.5` 从训练开始参与 estimator 的 Teacher-action loss；
+- warmup 期间额外 post-prior box loss 严格为零；
+- update 1400 后才允许最后四个 box action rows及 bias 有界适配，并使用 0707 条件式 post-prior box loss；其余 actor rows、actor body、critic 和 Student privileged encoder 永久冻结；
+- Student 部署 action term 不运行 Teacher action prior，但训练标签继续包含上述 0707 混合处理；
+- 网络、570 维输入、16 维输出、关节顺序、`action_scale`、`joint_pos.clip`、default offset 和真机部署合同全部不变。
+
+禁止把本轮改成纯 post-prior 16 维主目标、纯 pre-prior 且无 box 适配、Student PPO、任务 reward 优化或全 actor 微调。
+
+#### B-E300 Student 环境合同
+
+Student 环境必须从 B-E300 保存配置机械派生。除将 Teacher 的 `PhasedHighstepBoxBiasJointPositionAction` 替换为无 prior 的 `DelayedJointPositionAction` 外，必须保留 B-E300 的：
+
+- observation、command、curriculum、termination 和 episode 合同；
+- 质量、COM、材料、摩擦、执行器增益和 screw/box joint 随机化；
+- reset joint/base、足端特殊初始化、关节观测偏置；
+- root/limb 外力与 interval push；
+- action delay `0..1`、关节顺序、box/revolute scale、clip 和 default offset。
+
+这些随机事件定义 Student 采样分布，不是额外 reward 学习。未经新批准不得删减、分阶段开启或替换环境 profile。
+
+#### 连续长训、保存和人工选择
+
+1. 本轮只训练一套 Student，固定 `4000 effective updates`；`save_interval=100`，保留所有周期 checkpoint 和最终完整 checkpoint。相对 v1.13 的唯一训练语义变化是预算由 2500 增加到 4000；不得借本 amendment 修改其它训练变量。
+2. 训练不得因 E100/E300/E500/E700 等中间行为指标暂停或提前停止；仅 NaN/Inf、checkpoint/Teacher绑定错误、进程/GPU错误、W&B不可恢复错误等基础设施故障可 fail-closed。
+3. 不自动执行 core9、directional matrix、自动视频判定、same-state 根因树或其它行为门禁；不得以自动指标替代用户目测。
+4. 长训完成后，用户可从多个 checkpoint 运行同一手动 play 脚本，目测完整上台、后腿保持、FL 撞墙和整体动作，并人工选择 checkpoint。自动状态最多写 `student_checkpoints_ready_for_user_manual_play_review`。
+5. 未经用户人工选择和后续单独批准，不得称为真机候选、导出部署或自动真机部署。
+
+#### W&B 与最小正确性验证
+
+- 正式长训使用一个独立 W&B online run，`group=workflow_id`；config 绑定 spec/preregistration、Teacher、环境、代码、冻结范围、optimizer 和训练预算，history 必须随 update 增长，summary 记录全部 checkpoint manifest。
+- 正式启动前仅执行：静态导入/task registry、双 checkpoint/冻结范围/tensor storage binding、以及 `1--5 update` throwaway smoke。smoke checkpoint 永久禁止作为正式恢复源。
+- 本节明确禁止把旧规范中的大规模自动评估、方向矩阵、视频自动判定或多层诊断重新包装成“启动测试”。
+- 正式训练启动前必须先向用户汇报最终 task、checkpoint/SHA、spec/preregistration SHA、环境差异、可训练 tensor、optimizer、更新预算、W&B group/run 计划和准确启动命令，并等待一次最终启动确认。
+
+### v1.12.3：FL 预接触 reward 几何合同 paired A/B
+
+本节是当前最高执行依据。v1.12.2 `FLR-E100`、`model_173299.pt` rejected、`behavior_gate_failed`、baseline `full_climb=15/15`、`rear_hold=15/15`、E100 `full_climb=6/15`、`rear_hold=6/15`、以及两者 FL 禁止接触均为 `15/15` 的历史事实全部保留，不得改判、覆盖或从 rejected checkpoint 恢复。冻结 2×2 诊断为 `/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_placement_v1122_20260716/diagnostic_two_by_two_lift_retraction_model_173200_readonly.json`，SHA256=`bf2f6b22f03ca9323d51d0c6d84cb0175e42b093966546108315097f5d3c5d7c`；它证明 lift-only 仍受时间错位抑制，而 `L1+R1` 在三个 seed 的独立参考窗口均达到 100% 非零，但没有单调状态时会在越过释放线后重新激活。
+
+#### 唯一训练语义变量
+
+唯一变量命名为 `left_front_precontact_reward_geometry_contract`。它是一个不可拆分的 reward 内部合同，同时固定以下三项：
+
+1. 低侧地面 lift：`low_plane_z = front_terrain_z - detected_step_height`，`low_plane_clearance = FL_world_z - low_plane_z`，`lift_score = clamp((low_plane_clearance - 0.02) / (0.18 - 0.02), 0, 1)`。
+2. 稠密 6 cm 回收目标：`retraction_score = exp(-0.5 - ((FL_body_x - 0.30) / 0.06) ** 2)`。
+3. 每个 env、每个 episode 独立的单调 release latch：episode 开始或对应 env reset 时 `released=false`；首次满足 FL 相对平台顶面 clearance `>=0.04 m` 时置为 `true`；此后该 episode 内本 reward 永久为零，即使 FL 再次落到释放线以下也不得重新激活。latch 只属于 reward 内部训练状态，不得进入 policy observation、action、checkpoint 部署输入、runtime deployment contract 或真机代码。
+
+reward weight 固定为 `0.10`，6 cm 目标、terrain/cmd/precommit/below-release/stage gate、FR 与两条后腿、其它 reward、Teacher action prior、网络、PPO、optimizer、LR、`action_scale`、`joint_pos.clip`、observation/action contract、DR、部署输入和真机 gains 全部冻结。control 与 treatment 必须走同一 v1.12.3 代码路径；control 唯一差异是本项 weight=`0.0`，treatment 为 `0.10`。
+
+#### 实现、冻结 preflight 与启动门禁
+
+1. 代码和正反测试必须证明 latch 逐 env 独立、crossing 后永久归零、episode reset 后恢复、未 crossing 时 P11 关键窗口保持有效、不进入 observation/action，以及 FR/后腿和其它 reward 配置无差异。static、task registry、tensor/optimizer binding 与 W&B config 均须 fail-closed。
+2. 从受保护的 `model_173200.pt` 对 seeds=`1101,1108,1115` 执行冻结 preflight；固定 box level 9、command=`[0.45,0,0]`、action delay 0、max steps 600。三个 seed 的独立关键参考窗口均须 reward 非零比例=`100%`、q50 `>1e-3`，首次 crossing 后所有后续帧严格为零，且 checkpoint、model tensor、optimizer SHA 前后完全不变；禁止 `runner.learn`、backward、optimizer step 和 checkpoint 写入。
+3. 只有上述全部通过，才可创建不可修改 paired A/B preregistration 并直接启动；无需再次等待确认。任何失败均禁止训练。
+
+#### 不可扩展 paired A/B 与 W&B
+
+1. A control：从受保护的 `model_173200.pt` 及其原 Adam/iteration 完整加载，使用相同 v1.12.3 代码路径但本 FL reward weight=`0`，连续训练到 A-E100。
+2. B treatment：从同一个 `model_173200.pt` 及同一原 Adam/iteration 重新完整加载，只启用上述 FL reward contract，连续训练到 E300，并保存 B-E100 和 B-E300。B 不得在 E100 中断或 resume；禁止借 terrain 恢复缺口声称 process-exact resume。
+3. A/B 均固定 `num_envs=4096`、seed=`42`、相同 fresh 环境初始化、相同初始 `terrain_levels`/`terrain_types` SHA 与直方图、相同 command curriculum、相同初始 model/optimizer/iteration。合法声明仅为“相同 fresh 初始训练分布”，不是 process-exact resume。
+4. A/B 使用独立 W&B online run、相同 workflow group；每支必须在 active child 期间远端 step 增长，并在进入下一支或评估前核验 remote state=`finished`、目标 iteration、checkpoint SHA 与 summary。外部 W&B 故障仅分类为 infrastructure fault，不得改变行为判定。
+5. 统一评估 A-E100、B-E100、B-E300，均使用 seeds=`1101..1115` 与 v1.12.2 原固定条件。硬门禁不放宽：valid=`15/15`、FL 禁止接触=`0/15`、full climb=`15/15`、rear hold=`15/15`，且无 FR、后腿或明确安全退化。按 B-E100、B-E300 顺序选择第一个满足门禁的 B checkpoint；若均失败则停止，不得追加 E500。
+6. 数值通过最多进入 `teacher_candidate_pending_user_visual_review`；禁止自动 Student 训练、真机部署或扩大训练变量。
+
+### v1.12.2：6 cm 左前足预接触回收单变量修订
+
+本节是当前最高执行依据。v1.12 长训、nominal 评估、checkpoint、optimizer、W&B 和 behavior-best E1000 选择保持原判。v1.12.1 的代码草案在任何新训练开始前被本节纠正：它误把对称 `front_legs_reach` 从 `0.45` 降到 `0.35`，会间接改变 FR，违反“只有 FL”范围；该拆分从未获得训练结果，不得恢复。
+
+#### 冻结证据、人工判定和起点
+
+1. 唯一行为起点为 `/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_rear_support_v112_Teacher/2026-07-15_10-52-45_v112_long_attempt1_20260715_105240/model_173200.pt`，SHA256=`962fd3ce3983e4a478092be8f7a636e87ed872b79496c4fa3134191838d9b80d`。它是 v1.12 预注册选择的 behavior-best E1000；不得换成 E500/E2000/E4000/E6000 或旧 model_172300。
+2. 唯一视频证据为 `/home/lxq/Videos/Kazam_screencast_00155.mp4`，SHA256=`5350ab46fa2cfe1e966f99e6717b738b60b32b9edcbd1f4a323205a55f2c128e`，时长约 `74.22 s`。可见 14 次完整尝试：6 次完整成功，8 次因 FL 足端撞上台阶立面/顶沿下方并被卡住而由用户 reset；末尾另有 1 次未完成尝试，不计入 14 次分母。
+3. 这 8 次失败构成同一种残余行为，不得扩散到 FR、RL、RR。用户已经接受现有后腿动作；FR 与两条后腿不是本轮优化对象。
+4. 人工判定固定为：任何 FL 足端接触台阶竖直立面或顶沿下方都算失败，即使随后自行恢复也不改判。首轮验收必须达到 FL 卡台 `0/15`。
+5. 用户选择 A 型动作：FL 在准备上台时先短暂向 body-frame 后方回收，再延迟约 `0.1–0.2 s` 恢复原有向前落足；回收幅度固定 `0.06 m`。该时间只作行为诊断，不引入历史状态机或新的 observation/action contract。
+
+#### 唯一训练语义变量与控制变量表
+
+唯一语义变量命名为 `left_front_precontact_retraction`。相对 v1.12 的冻结差异如下；除第一行新增项外不得有训练语义差异：
+
+| 项目 | v1.12 baseline | v1.12.2 | 状态 |
+|---|---:|---:|---|
+| `left_front_precontact_retraction` | 不存在 / `0.00` | `0.10`，FL-only | 唯一变化 |
+| FL body-frame 预接触目标 | 无独立目标 | `0.36 → 0.30 m`（6 cm） | 属于唯一变化 |
+| `front_legs_reach` | `0.45` | `0.45` | 冻结；不得把 `0.10` 从对称项中扣除 |
+| FR 动作/关节/足端目标 | 原值 | 原值 | 冻结 |
+| RL/RR reward、动作与阶段合同 | 原值 | 原值 | 冻结 |
+| 其余 reward、网络、优化器、环境 | 原值 | 原值 | 冻结 |
+
+1. 新项只在以下条件同时成立时生效：前方高台 gate、正向 command、前足尚未 commit、FL 尚未越过平台顶面释放线、FL 已经开始抬起。实现只读取 `FL_foot` 的 body-frame 前后位置与相对高度；FR/RL/RR 只可参与既有阶段 gate，不得获得新动作、关节或足端目标。
+2. 固定参数为：`retraction_start_x=0.36 m`、`retraction_target_x=0.30 m`、`relative_lift_min=-0.30 m`、`relative_lift_target=-0.12 m`、`clearance_release=0.04 m`、`clearance_window=0.12 m`。FL 越过台面后新项必须衰减为零，由未改变的对称 reach/support reward 完成落足承重。
+3. 当前 task 继续固定为 `RobotLab-Isaac-Velocity-HighstepRearSupportFrontPlacementV1121-ArcdogAdjustableLeg-v0`，experiment namespace 为 `arclab_arcdog_adjustable_leg_highstep_rear_support_front_placement_v1121`。v1.12.2 通过新 code/spec/preregistration SHA 与 v1.12.1 草案区分；禁止拿旧 code SHA 启动训练。
+4. v1.12 的 `rear_support_motion_contract=2.30`、旧 rear-drive 两项为零、Teacher action prior、网络、observation/action contract、optimizer/LR/PPO/schedule、domain randomization、`action_scale`、`joint_pos.clip`、default pose、真机 gains 与部署输入全部冻结。
+
+#### 训练、实时 W&B 与验收门禁
+
+1. 训练前必须从上述 E1000 做 task-only full-resume rebinding，逐项证明 actor、critic、optimizer、iteration、schedule/runtime state 完整恢复，source checkpoint SHA 不变；通过 static、配置单变量 diff、tensor binding 和 1–5 update smoke 后，必须先冻结有限训练预算、保存点与停止条件 amendment。禁止恢复旧 v1.12 6000-update service，禁止从 final E6000 继续。
+2. 每个正式训练阶段必须建立独立 W&B run，`group=workflow_id`，使用实时在线同步；config 必须绑定 spec/preregistration/code/source-checkpoint SHA、唯一变量、optimizer、iteration 预算与 task。state/heartbeat 必须记录 run id、URL、online/sync 状态和远端最新 step。
+3. 正式训练期间必须看到远端 history step 随 effective updates 增长；网络或 W&B 故障时保留本地日志和完整 checkpoint，并在安全边界 fail-closed。远端数据未核验完整前不得进入下一训练阶段或正式评估。summary 必须记录 output checkpoint SHA、effective updates、评估指标、门禁结论与 manifest 路径；禁止只离线记录后静默推进。
+4. 每个候选必须做 15 场同规格自主 rollout。硬门禁为：valid=`15/15`、FL 立面/顶沿下方接触=`0/15`；完整上台和 rear hold 不得低于冻结 E1000 的同规格基线。FR 与后腿动作完整记录作非退化检查；在 FL 门禁相同的候选间，后腿动作保持或轻微增强只能作 tie-breaker，不能覆盖任何 FL 接触失败。
+5. 本轮不得自动启动 Student 或真机部署。数值通过后只可进入 `teacher_fl_retraction_candidate_pending_user_visual_review`，并生成机器人全程清晰可见、包含成功与全部失败尝试的对照视频，等待用户人工接受。
+6. 先前的 `implementation_ready_pending_finite_training_amendment` 已由下述不可修改有限训练 amendment 正式解除；它保留为迁移前历史状态，不再阻止本轮唯一的 `FLR-E100` 启动。
+
+#### v1.12.2 有限训练启动 amendment（不可扩展）
+
+本 amendment 只固定运行预算、保存边界、评估样本和在线证据条件，不增加第二个训练语义变量。用户已经指定当前恢复执行线程为唯一执行 authority，并明确要求在没有真实外部阻塞时完成合法启动；因此不再等待另一个已永久缺失的对话线程确认。
+
+1. 唯一正式训练阶段命名为 `FLR-E100`：从 source iteration=`173200` 的上述 E1000 完整恢复，增加且仅增加 `100 effective updates`，`num_envs=4096`、seed=`42`、save interval=`100`，目标 final iteration=`173299`。这是本轮绝对上限；完成后无论门禁通过或失败都停止，不得自动追加 E200/E300/E500，也不得恢复旧 6000-update service。
+2. 正式阶段前固定执行独立的 `64 env × 3 updates` full-resume smoke。smoke 必须证明 model tensor signature、23 项 Adam state、iteration、算法附加 state、schedule/runtime、command curriculum 与 moving-best 连续恢复；source SHA 前后不变。smoke 产物只作实现证据，不是候选且不得成为正式训练起点。
+3. 在正式 optimizer step 前，先以冻结 E1000 对 seeds=`1101..1115` 做 15 场同规格 baseline。每场固定：box level 9、command=`[0.45,0,0]`、front-step x- reset、edge gap=`0.55 m`、lateral/yaw offset=`0`、action delay=`0`、最多 600 steps、关闭 play 随机化。baseline 必须 valid=`15/15`，否则属于评估基础设施阻塞并禁止训练。
+4. 正式候选使用完全相同的 15 个 seeds 和条件。任何时刻只要 FL 直接接触竖直立面或顶沿下方，episode 的失败位永久置一，之后自救不得清除。首轮硬门禁固定为 valid=`15/15`、FL 禁止接触=`0/15`，且候选 full-climb count 与 rear-hold count 均不得低于同批 E1000 baseline；任何一项不满足即写 `teacher_fl_retraction_first_round_gate_failed` 并停止。
+5. `FLR-E100` 必须使用一个独立 W&B online run，entity=`xinqili551-the-university-of-hong-kong`、project=`isaaclab`、group=`highstep_teacher_front_placement_v1122_20260716`。run config 在启动时绑定 spec/preregistration/code/source SHA、唯一变量、完整 optimizer binding、预算和 task。active child 期间必须至少两次看到远端 `lastHistoryStep` 严格增长；阶段结束必须看到 remote state=`finished` 且远端 step 至少达到 `173299`。
+6. 远端训练 gate 完整通过前禁止候选正式评估。评估结束后远端 summary 必须回读核验 output checkpoint SHA、effective updates、valid、FL contact、full climb、rear hold、gate decision 和 manifest path。网络/W&B 失败只分类为 infrastructure fault，保留最近完整 checkpoint，在同一有限阶段 fail-closed，不得改判行为或放宽 0/15。
+7. 数值通过后只进入 `teacher_fl_retraction_candidate_pending_user_visual_review`，并生成 15 场 side-top 可视证据；数值失败则停止在第 4 条终态。两种终态均禁止自动 Student、候选导出、真机部署或扩大 FL/FR/后腿训练变量。
+8. authority 迁移必须整体绑定本节 spec SHA、新有限 preregistration、runtime code/supervisor SHA、dashboard、state、heartbeat、handoff 和 systemd service。static、正反回归、task registry、tensor/freeze binding 与 smoke 全部通过前，service 不得启动正式训练。
+
+### v1.12.1：被 v1.12.2 纠正的未训练草案
+
+本节仅保留历史事实：v1.12.1 首次加入 FL-only reward 函数和隔离 task，但错误地将对称 `front_legs_reach` 从 `0.45` 降至 `0.35`，且绑定了错误视频 00154。该草案没有启动训练、没有 optimizer step、没有产生候选；从 v1.12.2 起为 `historical-only`，不得恢复其 code SHA 或权重拆分。
+
+### v1.12：后腿双支撑—同步抬身动作合同 Teacher 长训
+
+本节从 v1.12.1 起为 `historical-only`。v1.11 的 204 场零训练 A/B 已正常终止为 `new_teacher_robustness_not_clearly_improved`，其原始结果、snapshot、checkpoint 和失败事实全部保留，不删除、不覆盖、不改判。v1.11 及以下章节均为 `historical-only`，不得恢复旧服务或旧训练；本节只作为已完成 v1.12 长训的冻结合同和证据来源。
+
+#### 固定起点、目标与唯一语义变量
+
+1. 唯一起点为 `/home/lxq/Softwares/robot_lab/logs/rsl_rl/arclab_arcdog_adjustable_leg_highstep_action_score_vae_Teacher/2026-07-11_11-22-23/model_172300.pt`，SHA256=`dee40bff6b1c1e15b29012aaa19767a5e9d28ddaffd759b472564a5d5ef4eb35`。必须完整恢复 actor/critic、原 Adam、iteration=`172300` 与已保存算法状态；不得 weights-only、fresh optimizer 或换 Teacher。
+2. 本轮目标仅是重塑上台入口和后腿接续阶段的后腿动作：前腿接触只作为阶段触发；第一条后腿离地前，两条后足在世界系近似锚定、相对 body 中线镜像，左右后腿同步抬升并稳定机身；随后允许既有左右后腿先后上台，但支撑腿必须保持中心线安全余量并抑制 roll/yaw 失稳。
+3. 唯一训练语义变量固定为 `rear_support_motion_contract`：
+   - baseline=`rear_legs_power_drive_bonus(weight=1.10) + highstep_rear_push_posture_bonus(weight=1.20)`；
+   - v1.12=`highstep_rear_support_motion_contract(weight=2.30)`。
+   旧两项在 v1.12 task 中严格置零，新项只以相同总权重 `2.30` 替换，禁止叠加导致总奖励尺度增加。
+4. 新合同只使用以下量：后足双接触及接触力平衡、接触期世界系足端滑移、后足宽度/min-abs-y、左右后足前后差与横向中心偏移、RL/RR hip 的反号镜像以及 thigh/calf 的同号镜像、body roll/roll-rate/yaw-rate、body 抬升进度、前足 commit 阶段信号、第一/第二后足上台阶段信号。
+5. “后腿不内收”定义为不进入危险中心线走廊，而非逐帧横向速度必须为零：训练参考线固定为 rear width `>=0.34 m`、rear min-abs-y `>=0.15 m`；评估仍保留既有 fail-closed 严重内收定义，不得用该参考线事后改写历史结果。
+6. 伸缩 box joint 不加入镜像动作目标；已完成的 box 限速/延迟与 MuJoCo 闭环校准保留，但本轮不得继续调整。前腿 reward、Teacher action prior、网络、observation/action 顺序与维度、`action_scale`、`joint_pos.clip`、default pose、真机 gains、部署输入、domain randomization、随机外力、terrain/command curriculum、PPO/optimizer/LR/entropy/KL/schedule 和所有其它 reward 全部保持 model_172300 路线原值。
+
+#### 证据基础与禁止误读
+
+1. 0707 真机日志/视频的既有只读证据记录为：approach 后足仍近似对称，但前支撑建立至第一后腿阶段出现显著前后分叉、横向中心偏移和后腿关节不对称，随后发生极窄 rear width/min-abs-y；这些事实支持优先约束后腿支撑和机身稳定，不支持把未经证明的“前腿弹射/腾空”作为本轮训练前提。
+2. MuJoCo 在 box 响应降速后仍能完成约 35 cm 上台，说明 box 闭环差异不是本轮解释仿真—真机落差的首要变量；本轮不得以 box 调参替代后腿动作改进。
+3. SWAP 论文/视频只作为动作结构启发：双侧接触阶段利用左右对称后腿保持稳定，再进入任务特定的顺序后腿上台。不得把论文的完整网络、world model、前腿动作或训练目标并入本轮。
+4. v1.11 A/B 中 model_172300 未证明相对旧 Teacher 有清晰的 nominal/内收/冲量/组合全域提升；因此本轮从已接受的 model_172300 精确续训，不得把 v1.11 终态改判为通过，也不得以旧 Teacher 替换起点。
+
+#### 实现真实性与启动门禁
+
+1. 新 task 固定为 `RobotLab-Isaac-Velocity-HighstepRearSupportV112-ArcdogAdjustableLeg-v0`，只能继承当前 Robust Teacher task，并仅在 reward 配置中执行第 3 条替换。必须有代码级测试证明旧两项权重为零、新项为 `2.30`，box 不在镜像 joint pairs 中，hip 镜像符号为 `-1`、thigh/calf 为 `+1`。
+2. 训练前必须完成：authority 审计、source checkpoint/optimizer scope 与 SHA 审计、Python/static 检查、task 注册和配置差异检查、64 env 的 3-update full-resume smoke。smoke 只证明实现/恢复机制，不得解释为行为成功。
+3. smoke 前后 source checkpoint SHA 必须不变；smoke 产物与长训产物必须位于独立 experiment/workflow，不得写入 model_172300 原目录。
+4. 创建独立 workflow/state/lock/heartbeat/handoff、不可修改 preregistration/runtime rebinding、独立 systemd user service 和显式 dashboard authority。v1.11 及更早训练 service 保持 disabled。
+
+#### 强制长训与自动恢复
+
+1. static/binding/smoke 通过后，从 model_172300 完整 checkpoint 连续追加 `6000 effective updates`；`num_envs=4096`、seed=`42`、save interval=`100`。最终目标 runner iteration 固定为 `178299`；不得看到中间行为或 loss 后缩短、延长或改变合同。
+2. 保存审查点固定为新增 E500/E1000/E2000/E4000/E6000；所有每 100 update checkpoint 同样保留。长训期间不运行会抢占 GPU 的 play/eval/video，不以中间单场失败中断长训。
+3. 训练、网络、W&B 或进程异常属于基础设施故障：supervisor 必须从最近一个 SHA 与 full optimizer scope 均通过的完整 checkpoint 自动恢复，最多连续 8 次基础设施重试；不得从正在写入、损坏或只有 weights 的 checkpoint 恢复，也不得把基础设施失败改判为行为失败。
+4. 长训使用独立 W&B run，`group=workflow_id`，config/summary 必须绑定 spec、preregistration、source/output checkpoint、唯一变量、optimizer、updates 和 manifest。离线上传失败可保留本地分片继续训练，但在任何后续 Student 路线前必须完整 sync/远端核验；禁止静默缺失。
+5. supervisor 必须每 5 秒写 heartbeat，state 必须报告真实 supervisor PID、train/eval child PID、current iteration、effective updates、checkpoint、W&B run、retry count 和最新日志。systemd 使用 `Restart=on-failure`；终态自动 disable，旧路线不得因重启复活。
+
+#### 训练后评估、终态与后续边界
+
+1. E500/E1000/E2000/E4000/E6000 仅在长训结束后按同一代码、Robust Teacher task、action prior、real gains、delay=`0`、固定命令/平台/reset、seeds=`11/22/33` 执行候选自主 nominal 对照。记录 valid/full climb/rear hold/no-severe-inward，以及 approach/critical 的后足前后差、横向中心偏移、rear width/min-abs-y、接触/滑移、roll/yaw 和动作阶段时序。
+2. 行为最佳点按 `min(full_climb,rear_hold)`、二者总和、no-severe-inward、较早 checkpoint 的预注册顺序选择。不得用训练 reward、loss 或 same-state 代替自主行为。
+3. 本轮只允许终态 `teacher_rear_support_long_run_complete_pending_motion_review` 或无法自动恢复时的 `infrastructure_failed_at_safe_checkpoint`。长训完成后停止，不自动启动 Student、不称为真机候选、不自动部署。
+4. 后续只有在用户复核后腿动作证据并另行批准后，才允许选择某个 v1.12 Teacher 做 Student 蒸馏。若后腿合同没有改善，不得再给同一路线追加 iteration；必须保留全部中间 checkpoint 用于单变量比较。
 
 ### v1.11：新旧 Teacher 零训练鲁棒性 A/B
 
-本节是当前最高执行依据。v1.10 workflow 必须保持 `user_paused_pending_teacher_comparison`，其 checkpoint、optimizer、W&B、state、preregistration 和 handoff 不修改、不覆盖、不启动训练。v1.10 及以下章节均为 `historical-only`，除本节明确引用的固定行为合同外不再拥有启动 authority。
+本节从 v1.12 起为 `historical-only`。v1.10 workflow 必须保持 `user_paused_pending_teacher_comparison`，其 checkpoint、optimizer、W&B、state、preregistration 和 handoff 不修改、不覆盖、不启动训练。v1.10 及以下章节同样不再拥有启动 authority。
 
 #### 唯一变量与只读约束
 

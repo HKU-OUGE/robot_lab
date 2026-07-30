@@ -10,6 +10,262 @@ import torch.nn.functional as F
 from rsl_rl.modules import ActorCritic
 from rsl_rl.algorithms import PPO
 
+
+HIGHSTEP_DIAGONAL_ACTION_INDICES = (1, 2, 5, 6, 9, 10)
+HIGHSTEP_FRONT_DIAGONAL_ACTION_INDICES = (1, 5, 9)
+HIGHSTEP_REAR_DIAGONAL_ACTION_INDICES = (2, 6, 10)
+
+
+def highstep_diagonal_action_loss(
+    squared_action_error: torch.Tensor,
+    post_prior_gate: torch.Tensor,
+    scale: float,
+) -> torch.Tensor:
+    """Return the preregistered gated FR/RL six-joint pre-prior loss."""
+    if squared_action_error.ndim != 2 or squared_action_error.shape[-1] < 12:
+        raise ValueError("diagonal action loss requires a [batch, >=12] squared-error tensor")
+    indices = torch.as_tensor(
+        HIGHSTEP_DIAGONAL_ACTION_INDICES,
+        device=squared_action_error.device,
+        dtype=torch.long,
+    )
+    return (
+        float(scale)
+        * post_prior_gate.detach()
+        * torch.mean(torch.index_select(squared_action_error, dim=-1, index=indices), dim=-1)
+    )
+
+
+def highstep_phase_diagonal_action_loss(
+    squared_action_error: torch.Tensor,
+    front_phase_gate: torch.Tensor,
+    rear_phase_gate: torch.Tensor,
+    front_scale: float,
+    rear_scale: float,
+) -> torch.Tensor:
+    """Return the preregistered positive FR/RL phase-specific add-on.
+
+    The explicit 0.5 before each three-element mean is essential: with the
+    frozen ``2 * mean(error[:12])`` base loss and scale 2.0, a gated joint has
+    exactly three times the per-element coefficient of an ordinary nonbox
+    joint, never five times.
+    """
+    if squared_action_error.ndim != 2 or squared_action_error.shape[-1] < 12:
+        raise ValueError("phase diagonal loss requires [batch, >=12] squared errors")
+    front_indices = torch.as_tensor(
+        HIGHSTEP_FRONT_DIAGONAL_ACTION_INDICES,
+        device=squared_action_error.device,
+        dtype=torch.long,
+    )
+    rear_indices = torch.as_tensor(
+        HIGHSTEP_REAR_DIAGONAL_ACTION_INDICES,
+        device=squared_action_error.device,
+        dtype=torch.long,
+    )
+    front_loss = 0.5 * torch.mean(
+        torch.index_select(squared_action_error, -1, front_indices), dim=-1
+    )
+    rear_loss = 0.5 * torch.mean(
+        torch.index_select(squared_action_error, -1, rear_indices), dim=-1
+    )
+    return (
+        float(front_scale) * front_phase_gate.detach() * front_loss
+        + float(rear_scale) * rear_phase_gate.detach() * rear_loss
+    )
+
+
+def highstep_critical_transition_window_masks(
+    stage_context: torch.Tensor,
+    dones: torch.Tensor,
+    radius: int = 10,
+    threshold: float = 0.5,
+    require_complete_window: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Build episode-safe +/- ``radius`` windows around four stage entries."""
+    if stage_context.ndim != 3 or stage_context.shape[-1] != 4:
+        raise ValueError("stage_context must have shape [time, env, 4]")
+    done = dones.squeeze(-1).to(dtype=torch.bool)
+    if done.shape != stage_context.shape[:2]:
+        raise ValueError("dones must match stage_context [time, env]")
+    if radius < 0:
+        raise ValueError("transition radius must be non-negative")
+
+    active = stage_context >= float(threshold)
+    episode_id = torch.zeros_like(done, dtype=torch.long)
+    if done.shape[0] > 1:
+        episode_id[1:] = torch.cumsum(done[:-1].to(dtype=torch.long), dim=0)
+    previous = torch.zeros_like(active)
+    if active.shape[0] > 1:
+        same_episode = episode_id[1:] == episode_id[:-1]
+        previous[1:] = active[:-1] & same_episode.unsqueeze(-1)
+    rising = active & ~previous
+    # The first row has no previous frame in this rollout and is therefore not
+    # promoted into a synthetic transition event.
+    rising[0] = False
+    front_event = torch.any(rising[..., :2], dim=-1)
+    rear_event = torch.any(rising[..., 2:], dim=-1)
+
+    if require_complete_window:
+        complete = torch.zeros_like(done)
+        if done.shape[0] >= 2 * radius + 1:
+            center = slice(radius, done.shape[0] - radius)
+            # Episode ids are monotonic. Equal ids at both endpoints prove
+            # every frame in the full +/- radius interval belongs to the same
+            # env episode as the event center.
+            complete[center] = (
+                (episode_id[center] == episode_id[: done.shape[0] - 2 * radius])
+                & (episode_id[center] == episode_id[2 * radius :])
+            )
+        front_event &= complete
+        rear_event &= complete
+
+    def expand(events: torch.Tensor) -> torch.Tensor:
+        window = torch.zeros_like(events)
+        time = events.shape[0]
+        for offset in range(-radius, radius + 1):
+            if offset < 0:
+                source = slice(-offset, time)
+                target = slice(0, time + offset)
+            elif offset > 0:
+                source = slice(0, time - offset)
+                target = slice(offset, time)
+            else:
+                source = slice(0, time)
+                target = slice(0, time)
+            same_episode = episode_id[source] == episode_id[target]
+            window[target] |= events[source] & same_episode
+        return window
+
+    return expand(front_event), expand(rear_event)
+
+
+def highstep_cross_rollout_transition_windows(
+    stage_context: torch.Tensor,
+    dones: torch.Tensor,
+    radius: int,
+    carry_stage_context: torch.Tensor | None = None,
+    carry_dones: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, int]:
+    """Build full windows from a bounded prior-rollout carry plus live rollout.
+
+    The carry is always prepended along time for the same env slots. Only
+    events with all ``2 * radius + 1`` real frames available in one episode
+    are promoted. Events near the live rollout tail are therefore deferred to
+    the next update instead of producing truncated windows.
+    """
+    if (carry_stage_context is None) != (carry_dones is None):
+        raise ValueError("critical transition carry context and dones must be paired")
+    carry_steps = 0
+    if carry_stage_context is not None:
+        if carry_stage_context.ndim != 3 or carry_stage_context.shape[-1] != 4:
+            raise ValueError("carry stage context must have shape [time, env, 4]")
+        if carry_stage_context.shape[1:] != stage_context.shape[1:]:
+            raise ValueError("critical transition carry/live env axes disagree")
+        if carry_dones.shape[:2] != carry_stage_context.shape[:2]:
+            raise ValueError("critical transition carry dones axes disagree")
+        if carry_stage_context.shape[0] > 2 * radius:
+            raise ValueError("critical transition carry exceeds the bounded 2*radius FIFO")
+        carry_steps = int(carry_stage_context.shape[0])
+        stage_context = torch.cat((carry_stage_context, stage_context), dim=0)
+        dones = torch.cat((carry_dones, dones), dim=0)
+    front, rear = highstep_critical_transition_window_masks(
+        stage_context,
+        dones,
+        radius=radius,
+        require_complete_window=True,
+    )
+    return front, rear, carry_steps
+
+
+def highstep_rl_preedge_window_mask(
+    stage_context: torch.Tensor,
+    dones: torch.Tensor,
+    pre_steps: int = 30,
+    post_steps: int = 10,
+) -> torch.Tensor:
+    """Return complete, episode-safe ``[-pre_steps,+post_steps]`` RL pre-edge windows."""
+    if stage_context.ndim != 3 or stage_context.shape[-1] != 5:
+        raise ValueError("RL pre-edge context must have shape [time, env, 5]")
+    done = dones.squeeze(-1).to(dtype=torch.bool)
+    if done.shape != stage_context.shape[:2]:
+        raise ValueError("RL pre-edge dones must match context time/env axes")
+    if pre_steps < 0 or post_steps < 0:
+        raise ValueError("RL pre-edge window extents must be non-negative")
+    episode_id = torch.zeros_like(done, dtype=torch.long)
+    if done.shape[0] > 1:
+        episode_id[1:] = torch.cumsum(done[:-1].to(dtype=torch.long), dim=0)
+    active = stage_context[..., 4] >= 0.5
+    previous = torch.zeros_like(active)
+    if active.shape[0] > 1:
+        same_episode = episode_id[1:] == episode_id[:-1]
+        previous[1:] = active[:-1] & same_episode
+    event = active & ~previous
+    event[0] = False
+    complete = torch.zeros_like(event)
+    if event.shape[0] >= pre_steps + post_steps + 1:
+        center = slice(pre_steps, event.shape[0] - post_steps)
+        complete[center] = (
+            (episode_id[center] == episode_id[: event.shape[0] - pre_steps - post_steps])
+            & (episode_id[center] == episode_id[pre_steps + post_steps :])
+        )
+    event &= complete
+    window = torch.zeros_like(event)
+    time = event.shape[0]
+    for offset in range(-pre_steps, post_steps + 1):
+        if abs(offset) >= time:
+            continue
+        if offset < 0:
+            source, target = slice(-offset, time), slice(0, time + offset)
+        elif offset > 0:
+            source, target = slice(0, time - offset), slice(offset, time)
+        else:
+            source, target = slice(0, time), slice(0, time)
+        window[target] |= event[source] & (episode_id[source] == episode_id[target])
+    return window
+
+
+def highstep_balanced_transition_indices(
+    front_window: torch.Tensor,
+    rear_window: torch.Tensor,
+    batch_size: int,
+    original_pool: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Draw exactly 25% front, 25% rear and 50% original-distribution samples."""
+    if front_window.shape != rear_window.shape or front_window.ndim != 1:
+        raise ValueError("front/rear windows must be same-shape flat masks")
+    if batch_size <= 0 or batch_size % 4:
+        raise ValueError("balanced transition batch_size must be positive and divisible by four")
+    front_pool = torch.nonzero(front_window, as_tuple=False).flatten()
+    rear_pool = torch.nonzero(rear_window, as_tuple=False).flatten()
+    if front_pool.numel() == 0 or rear_pool.numel() == 0:
+        raise RuntimeError(
+            "critical transition class is absent from the live rollout; refusing an unbalanced update"
+        )
+    quarter = batch_size // 4
+    half = batch_size // 2
+    front = front_pool[torch.randint(front_pool.numel(), (quarter,), device=front_pool.device)]
+    rear = rear_pool[torch.randint(rear_pool.numel(), (quarter,), device=rear_pool.device)]
+    if original_pool is None:
+        original_pool = torch.arange(front_window.numel(), device=front_pool.device)
+    if original_pool.ndim != 1 or original_pool.numel() == 0:
+        raise ValueError("original-distribution pool must be a non-empty flat index tensor")
+    original_pool = original_pool.to(device=front_pool.device, dtype=torch.long)
+    if torch.any(original_pool < 0) or torch.any(original_pool >= front_window.numel()):
+        raise ValueError("original-distribution pool contains an out-of-range index")
+    original = original_pool[
+        torch.randint(original_pool.numel(), (half,), device=front_pool.device)
+    ]
+    indices = torch.cat((front, rear, original), dim=0)
+    source = torch.cat(
+        (
+            torch.zeros(quarter, device=indices.device, dtype=torch.long),
+            torch.ones(quarter, device=indices.device, dtype=torch.long),
+            torch.full((half,), 2, device=indices.device, dtype=torch.long),
+        )
+    )
+    permutation = torch.randperm(batch_size, device=indices.device)
+    return indices[permutation], source[permutation]
+
 class PrivilegedEncoder(nn.Module):
     """特权信息编码器 (Teacher)：将上帝视角的观测压缩为 Latent 向量"""
     def __init__(self, input_dim, latent_dim, hidden_dims=[256, 128]):
@@ -118,9 +374,30 @@ class VAEActorCritic(ActorCritic):
         self.student_post_prior_mode = kwargs.pop("student_post_prior_mode", "lateral")
         self.student_highstep_phase_loss_scale = kwargs.pop("student_highstep_phase_loss_scale", 0.0)
         self.student_highstep_rear_box_loss_scale = kwargs.pop("student_highstep_rear_box_loss_scale", 0.0)
+        self.student_highstep_diagonal_action_loss_scale = kwargs.pop(
+            "student_highstep_diagonal_action_loss_scale", 0.0
+        )
+        self.student_critical_transition_balanced_sampling = kwargs.pop(
+            "student_critical_transition_balanced_sampling", False
+        )
+        self.student_critical_transition_window_radius = kwargs.pop(
+            "student_critical_transition_window_radius", 10
+        )
+        self.student_rl_preedge_sampling = kwargs.pop("student_rl_preedge_sampling", False)
+        self.student_rl_preedge_pre_steps = kwargs.pop("student_rl_preedge_pre_steps", 30)
+        self.student_rl_preedge_post_steps = kwargs.pop("student_rl_preedge_post_steps", 10)
+        self.student_front_diagonal_action_loss_scale = kwargs.pop(
+            "student_front_diagonal_action_loss_scale", 0.0
+        )
+        self.student_rear_diagonal_action_loss_scale = kwargs.pop(
+            "student_rear_diagonal_action_loss_scale", 0.0
+        )
         self.student_highstep_rear_hip_loss_scale = kwargs.pop("student_highstep_rear_hip_loss_scale", 0.0)
         self.student_highstep_rear_hip_min_abs = kwargs.pop("student_highstep_rear_hip_min_abs", 0.0)
         self.student_highstep_rear_hip_action_scale = kwargs.pop("student_highstep_rear_hip_action_scale", 0.1)
+        self.student_actor_latent_clamp_backward = kwargs.pop(
+            "student_actor_latent_clamp_backward", "hard"
+        )
         self.student_recovery_stage = kwargs.pop("student_recovery_stage", "none")
         self.student_recovery_actor_lr = kwargs.pop("student_recovery_actor_lr", 1.0e-5)
         self.student_recovery_epochs = kwargs.pop("student_recovery_epochs", 1)
@@ -157,6 +434,18 @@ class VAEActorCritic(ActorCritic):
         )
         self.student_recovery_historical_0707_exact_preregistration_sha256 = kwargs.pop(
             "student_recovery_historical_0707_exact_preregistration_sha256", ""
+        )
+        self.student_recovery_be300_0707_preregistration_path = kwargs.pop(
+            "student_recovery_be300_0707_preregistration_path", ""
+        )
+        self.student_recovery_be300_0707_preregistration_sha256 = kwargs.pop(
+            "student_recovery_be300_0707_preregistration_sha256", ""
+        )
+        self.student_recovery_b300_hybrid_preregistration_path = kwargs.pop(
+            "student_recovery_b300_hybrid_preregistration_path", ""
+        )
+        self.student_recovery_b300_hybrid_preregistration_sha256 = kwargs.pop(
+            "student_recovery_b300_hybrid_preregistration_sha256", ""
         )
         self.student_recovery_v18_preregistration_path = kwargs.pop(
             "student_recovery_v18_preregistration_path", ""
@@ -404,7 +693,7 @@ class VAEPPO(PPO):
                     return
                 if self.student_recovery_stage in {
                     "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-                    "E1400_CONTINUATION",
+                    "E1400_CONTINUATION", "BE300_0707", "B300_CANONICAL_HYBRID",
                 }:
                     self._initialize_student_recovery_v15()
                     return
@@ -440,6 +729,9 @@ class VAEPPO(PPO):
                 )
                 self.student_highstep_rear_box_loss_scale = getattr(
                     self.policy, "student_highstep_rear_box_loss_scale", 0.0
+                )
+                self.student_highstep_diagonal_action_loss_scale = getattr(
+                    self.policy, "student_highstep_diagonal_action_loss_scale", 0.0
                 )
                 self.student_highstep_rear_hip_loss_scale = getattr(
                     self.policy, "student_highstep_rear_hip_loss_scale", 0.0
@@ -2016,9 +2308,15 @@ class VAEPPO(PPO):
     def _load_v15_preregistration(self) -> tuple[dict, str, str]:
         zero_scale_ablation = self.student_recovery_stage == "0707_EXACT"
         historical_0707_exact = self.student_recovery_stage == "HISTORICAL_0707_EXACT"
+        be300_0707 = self.student_recovery_stage == "BE300_0707"
+        b300_hybrid = self.student_recovery_stage == "B300_CANONICAL_HYBRID"
         environment_curriculum_v18 = self.student_recovery_stage == "ENV_CURRICULUM_V18"
         e1400_continuation = self.student_recovery_stage == "E1400_CONTINUATION"
-        if e1400_continuation:
+        if b300_hybrid:
+            path_attr = "student_recovery_b300_hybrid_preregistration_path"
+            sha_attr = "student_recovery_b300_hybrid_preregistration_sha256"
+            authority_label = "B300 canonical hybrid preregistration SHA256"
+        elif e1400_continuation:
             path_attr = "student_recovery_e1400_continuation_preregistration_path"
             sha_attr = "student_recovery_e1400_continuation_preregistration_sha256"
             authority_label = "E1400 continuation v1.10 preregistration SHA256"
@@ -2030,6 +2328,10 @@ class VAEPPO(PPO):
             path_attr = "student_recovery_historical_0707_exact_preregistration_path"
             sha_attr = "student_recovery_historical_0707_exact_preregistration_sha256"
             authority_label = "historical 0707 exact preregistration SHA256"
+        elif be300_0707:
+            path_attr = "student_recovery_be300_0707_preregistration_path"
+            sha_attr = "student_recovery_be300_0707_preregistration_sha256"
+            authority_label = "B-E300 0707 distillation preregistration SHA256"
         elif zero_scale_ablation:
             path_attr = "student_recovery_0707_exact_preregistration_path"
             sha_attr = "student_recovery_0707_exact_preregistration_sha256"
@@ -2086,6 +2388,47 @@ class VAEPPO(PPO):
                     "highstep_historical_0707_exact_v171_preregistration",
                     "v1.7.1",
                     "140fd81d4f6877d25e72f3f1e05799cb6771dfdfc9775fe84a46ecf7d7a6a917",
+                ),
+            }
+        elif b300_hybrid:
+            accepted_authorities = {
+                (
+                    "highstep_b300_canonical_hybrid_prior_latent_preregistration",
+                    "1.0",
+                    "aff25865dadf6d191984c454d050517f1a8b793b381fe150d79abc2b54e78f8c",
+                )
+            }
+        elif be300_0707:
+            accepted_authorities = {
+                (
+                    "highstep_be300_0707_distillation_preregistration",
+                    "v1.13.1",
+                    "0307b9e5c5c9c81999499ce2c3f05c0beabaa98caedde24aac5ac7843d73d768",
+                ),
+                (
+                    "highstep_be300_clamp_gradient_repair_preregistration",
+                    "v1.14",
+                    "d3e69743993008a27bf1d30e5f78f634b8710a9dde1239b102cad4370ff84108",
+                ),
+                (
+                    "highstep_b300_0707_derived_single_run_7400_preregistration",
+                    "v1.0",
+                    "b73470a6b15a9fb5595b7153c7cb155878c2a2c4c63590b178b7b3f640af5fd3",
+                ),
+                (
+                    "highstep_b300_diagonal_imitation_fresh_7400_preregistration",
+                    "v1.0",
+                    "7c8ddc84a5653274981da6d4fc118a8d3c02156e6ec5adcc4d43c996085811e7",
+                ),
+                (
+                    "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration",
+                    "v1.0",
+                    "4d23ca975cfe5f91d6536b911af369d0807cee027a8e5f54bfacee83fda68575",
+                ),
+                (
+                    "highstep_b300_rl_preedge_continuation_e7700_preregistration",
+                    "v1.0",
+                    "b1a854ebc0c8ccf674bc25d869b6e088532cf8911e64a1404f0b365fdda59f08",
                 ),
             }
         elif environment_curriculum_v18:
@@ -2241,6 +2584,32 @@ class VAEPPO(PPO):
         loaded_checkpoint: str | None = None,
     ) -> dict:
         if getattr(self, "_v15_preregistration", {}).get("kind") == (
+            "highstep_b300_rl_preedge_continuation_e7700_preregistration"
+        ):
+            prereg = self._v15_preregistration
+            rebinding = prereg.get("resume_rebinding", {})
+            required = {
+                "kind": "highstep_b300_e5700_to_e7700_full_resume_rebinding",
+                "source_preregistration_sha256": source_preregistration_sha256,
+                "source_effective_updates": 5700,
+                "preserve_optimizer": True,
+                "preserve_schedule_runtime": True,
+            }
+            if effective_updates != 5700 or any(
+                rebinding.get(key) != value for key, value in required.items()
+            ):
+                raise ValueError("E5700 continuation resume rebinding contract mismatch")
+            source_path = os.path.realpath(str(rebinding.get("source_checkpoint", "")))
+            source_sha = str(rebinding.get("source_checkpoint_sha256", ""))
+            if self._sha256_file(source_path) != source_sha:
+                raise ValueError("E5700 continuation checkpoint SHA mismatch")
+            if loaded_checkpoint is not None and os.path.realpath(loaded_checkpoint) != source_path:
+                raise ValueError("E5700 continuation checkpoint path mismatch")
+            audit_path = os.path.realpath(str(rebinding.get("audit_path", "")))
+            if self._sha256_file(audit_path) != rebinding.get("audit_sha256"):
+                raise ValueError("E5700 continuation resume audit mismatch")
+            return copy.deepcopy(rebinding)
+        if getattr(self, "_v15_preregistration", {}).get("kind") == (
             "highstep_e1400_continuation_ab_v110_runtime_preregistration"
         ):
             prereg = self._v15_preregistration
@@ -2297,6 +2666,20 @@ class VAEPPO(PPO):
         self._v15_preregistration = prereg
         self._v15_preregistration_path = prereg_path
         self._v15_preregistration_sha256 = prereg_sha
+        expected_clamp_backward = (
+            "straight_through"
+            if prereg.get("kind") in {
+                "highstep_be300_clamp_gradient_repair_preregistration",
+                "highstep_b300_canonical_hybrid_prior_latent_preregistration",
+            }
+            else "hard"
+        )
+        if self.policy.student_actor_latent_clamp_backward != expected_clamp_backward:
+            raise RuntimeError(
+                "Student actor-facing latent clamp backward contract changed: "
+                f"expected {expected_clamp_backward!r}, got "
+                f"{self.policy.student_actor_latent_clamp_backward!r}"
+            )
 
         for parameter in self.policy.parameters():
             parameter.requires_grad = False
@@ -2363,9 +2746,94 @@ class VAEPPO(PPO):
         self.student_highstep_rear_box_loss_scale = getattr(
             self.policy, "student_highstep_rear_box_loss_scale", 1.5
         )
+        self.student_highstep_diagonal_action_loss_scale = getattr(
+            self.policy, "student_highstep_diagonal_action_loss_scale", 0.0
+        )
+        self.student_critical_transition_balanced_sampling = bool(getattr(
+            self.policy, "student_critical_transition_balanced_sampling", False
+        ))
+        self.student_critical_transition_window_radius = int(getattr(
+            self.policy, "student_critical_transition_window_radius", 10
+        ))
+        self.student_rl_preedge_sampling = bool(getattr(
+            self.policy, "student_rl_preedge_sampling", False
+        ))
+        self.student_rl_preedge_pre_steps = int(getattr(
+            self.policy, "student_rl_preedge_pre_steps", 30
+        ))
+        self.student_rl_preedge_post_steps = int(getattr(
+            self.policy, "student_rl_preedge_post_steps", 10
+        ))
+        self.student_front_diagonal_action_loss_scale = float(getattr(
+            self.policy, "student_front_diagonal_action_loss_scale", 0.0
+        ))
+        self.student_rear_diagonal_action_loss_scale = float(getattr(
+            self.policy, "student_rear_diagonal_action_loss_scale", 0.0
+        ))
+        self._critical_transition_fifo = None
         self.student_highstep_rear_hip_loss_scale = 0.0
         self.student_highstep_rear_hip_min_abs = 0.0
-        expected_warmup = 1200 if zero_scale_ablation else 1400
+        critical_balanced_route = prereg.get("kind") in {
+            "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration",
+            "highstep_b300_rl_preedge_continuation_e7700_preregistration",
+        }
+        if critical_balanced_route:
+            sampling = prereg.get("critical_transition_sampling", {})
+            extra_group = sampling.get("extra_rollout_group", {})
+            phase_loss = prereg.get("phase_diagonal_loss", {})
+            continuation = prereg.get("kind") == (
+                "highstep_b300_rl_preedge_continuation_e7700_preregistration"
+            )
+            expected_group = {
+                "name": "critical_transition",
+                "shape": [5] if continuation else [4],
+                "order": (
+                    ["front_lift", "front_support", "first_rear", "second_rear", "rl_preedge"]
+                    if continuation else
+                    ["front_lift", "front_support", "first_rear", "second_rear"]
+                ),
+                "policy_estimator_critic_torchscript_input": False,
+            }
+            expected_fractions = {
+                "front_transition": 0.25,
+                ("rl_preedge" if continuation else "rear_transition"): 0.25,
+                "original_distribution": 0.5,
+            }
+            if not (
+                extra_group == expected_group
+                and (
+                    sampling.get("front_window") == {"pre_steps": 10, "post_steps": 10}
+                    if continuation else sampling.get("window_radius_policy_steps") == 10
+                )
+                and sampling.get("minibatch_source_fractions") == expected_fractions
+                and sampling.get("episode_safe_windows") is True
+                and phase_loss.get("front_indices") == [1, 5, 9]
+                and phase_loss.get("rear_indices") == [2, 6, 10]
+                and phase_loss.get("front_scale") == 2.0
+                and phase_loss.get("rear_scale") == 2.0
+                and phase_loss.get("rear_term_sign") == "positive_addition"
+                and phase_loss.get("gated_total_per_element_weight_ratio") == 3.0
+                and phase_loss.get("legacy_unified_diagonal_scale") == 0.0
+                and phase_loss.get("box_target_or_weight_changed") is False
+                and (
+                    not continuation
+                    or (
+                        sampling.get("rl_preedge_window") == {"pre_steps": 30, "post_steps": 10}
+                        and sampling.get("rl_preedge_predicate") == {
+                            "vx_min": 0.65,
+                            "both_front_support": True,
+                            "rl_not_on_platform": True,
+                            "rl_near_edge_semantics": "frozen_first_rear_preclearance_boundary",
+                        }
+                        and phase_loss.get("additional_rl_only_weight") is False
+                    )
+                )
+            ):
+                raise RuntimeError("critical-transition balanced A+B contract changed")
+        expected_warmup = (
+            0 if self.student_recovery_stage == "B300_CANONICAL_HYBRID"
+            else 1200 if zero_scale_ablation else 1400
+        )
         if e1400_continuation:
             branch = str(getattr(self.policy, "student_recovery_e1400_continuation_branch", ""))
             branch_contract = prereg.get("branches", {}).get(branch, {})
@@ -2388,6 +2856,46 @@ class VAEPPO(PPO):
             or self.student_kl_loss_coef != 0.1
             or self.student_highstep_phase_loss_scale != (0.0 if zero_scale_ablation else 2.0)
             or self.student_highstep_rear_box_loss_scale != (0.0 if zero_scale_ablation else 1.5)
+            or self.student_highstep_diagonal_action_loss_scale
+            != (
+                1.0
+                if prereg.get("kind")
+                == "highstep_b300_diagonal_imitation_fresh_7400_preregistration"
+                else 0.0
+            )
+            or self.student_critical_transition_balanced_sampling
+            != (
+                prereg.get("kind") in {
+                    "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration",
+                    "highstep_b300_rl_preedge_continuation_e7700_preregistration",
+                }
+            )
+            or self.student_critical_transition_window_radius != 10
+            or self.student_rl_preedge_sampling
+            != (
+                prereg.get("kind")
+                == "highstep_b300_rl_preedge_continuation_e7700_preregistration"
+            )
+            or self.student_rl_preedge_pre_steps != 30
+            or self.student_rl_preedge_post_steps != 10
+            or self.student_front_diagonal_action_loss_scale
+            != (
+                2.0
+                if prereg.get("kind") in {
+                    "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration",
+                    "highstep_b300_rl_preedge_continuation_e7700_preregistration",
+                }
+                else 0.0
+            )
+            or self.student_rear_diagonal_action_loss_scale
+            != (
+                2.0
+                if prereg.get("kind") in {
+                    "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration",
+                    "highstep_b300_rl_preedge_continuation_e7700_preregistration",
+                }
+                else 0.0
+            )
             or self.student_post_prior_mode != "highstep"
         ):
             raise RuntimeError("fixed Stage-2 hyperparameters changed")
@@ -2398,6 +2906,250 @@ class VAEPPO(PPO):
         self._v15_extra_restored = False
         self._teacher_actor_synced = False
         self._validate_v15_optimizer_scope()
+        if self.student_recovery_stage == "B300_CANONICAL_HYBRID":
+            self._load_b300_canonical_hybrid_dataset()
+
+    def _load_b300_canonical_hybrid_dataset(self) -> None:
+        prereg = self._v15_preregistration
+        override_manifest = os.environ.get("HIGHSTEP_B300_HYBRID_TRAINING_DATASET_MANIFEST", "")
+        override_sha = os.environ.get("HIGHSTEP_B300_HYBRID_TRAINING_DATASET_MANIFEST_SHA256", "")
+        if override_manifest:
+            manifest_path = os.path.realpath(override_manifest)
+            manifest_sha = override_sha
+            if self._sha256_file(manifest_path) != manifest_sha:
+                raise RuntimeError("B300 DAgger aggregate manifest SHA mismatch")
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            if not (
+                manifest.get("kind") == "highstep_b300_hybrid_dagger_aggregate"
+                and manifest.get("workflow_id") == "highstep_b300_canonical_hybrid_prior_latent_20260718"
+                and manifest.get("preregistration_sha256") == self._v15_preregistration_sha256
+                and manifest.get("canonical_tensor_dataset_sha256")
+                == prereg.get("canonical_tensor_dataset_sha256")
+                and 1 <= int(manifest.get("round", 0)) <= 3
+            ):
+                raise RuntimeError("B300 DAgger aggregate authority mismatch")
+            dataset_path = os.path.realpath(str(manifest.get("dataset_path", "")))
+            dataset_sha = str(manifest.get("dataset_sha256", ""))
+        else:
+            manifest_path = os.path.realpath(str(prereg.get("canonical_tensor_manifest", "")))
+            manifest_sha = str(prereg.get("canonical_tensor_manifest_sha256", ""))
+            dataset_path = os.path.realpath(str(prereg.get("canonical_tensor_dataset", "")))
+            dataset_sha = str(prereg.get("canonical_tensor_dataset_sha256", ""))
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        if (
+            not manifest_path
+            or not dataset_path
+            or self._sha256_file(manifest_path) != manifest_sha
+            or self._sha256_file(dataset_path) != dataset_sha
+        ):
+            raise RuntimeError("B300 canonical tensor dataset binding changed")
+        if not override_manifest and not (
+            manifest.get("kind") == "highstep_b300_canonical_hybrid_tensor_trajectory"
+            and manifest.get("status") == "completed_and_centerline_verified"
+            and manifest.get("sample_count") == 138 and manifest.get("unique_episode_count") == 1
+            and manifest.get("dataset_sha256") == dataset_sha
+        ):
+            raise RuntimeError("B300 canonical tensor manifest contract changed")
+        payload = torch.load(dataset_path, map_location="cpu", weights_only=True)
+        sample_count = int(manifest.get("sample_count", 0))
+        expected = {
+            "student_obs_570": (sample_count, 570), "critic_obs": (sample_count, 162),
+            "teacher_latent_raw_64": (sample_count, 64),
+            "teacher_latent_clamped_64": (sample_count, 64),
+            "teacher_pre_prior_action_16": (sample_count, 16),
+            "teacher_post_prior_policy_action_16": (sample_count, 16),
+        }
+        dataset = {}
+        for name, shape in expected.items():
+            value = payload.get(name)
+            if (
+                not isinstance(value, torch.Tensor)
+                or tuple(value.shape) != shape
+                or not bool(torch.all(torch.isfinite(value)).item())
+            ):
+                raise RuntimeError(f"B300 canonical tensor invalid: {name}")
+            dataset[name] = value.to(self.device).detach().contiguous()
+        mixed = torch.cat(
+            (
+                dataset["teacher_pre_prior_action_16"][:, :12],
+                dataset["teacher_post_prior_policy_action_16"][:, 12:16],
+            ),
+            dim=-1,
+        )
+        dataset["mixed_action_target_16"] = mixed
+        self._b300_canonical_dataset = dataset
+        self._b300_canonical_dataset_path = dataset_path
+        self._b300_canonical_dataset_sha256 = dataset_sha
+        self._b300_canonical_manifest_path = manifest_path
+        self._b300_canonical_manifest_sha256 = manifest_sha
+        self._b300_training_unique_episode_count = int(manifest.get("unique_episode_count", 1))
+        self._b300_training_round = int(manifest.get("round", 0))
+
+    def _update_b300_canonical_hybrid(self) -> dict[str, float]:
+        """Offline canonical update; live rollout storage is never used as supervision."""
+        if not self._v15_binding_ready or not hasattr(self, "_v15_source_snapshot"):
+            raise RuntimeError("B300 canonical update requires completed dual-checkpoint binding")
+        self._validate_v15_optimizer_scope()
+        model = self.policy
+        data = self._b300_canonical_dataset
+        num_samples = int(data["student_obs_570"].shape[0])
+        batch_size = (num_samples + int(self.num_mini_batches) - 1) // int(self.num_mini_batches)
+        totals = {
+            "velocity": 0.0,
+            "latent": 0.0,
+            "reconstruction": 0.0,
+            "kl": 0.0,
+            "action": 0.0,
+            "prior_box": 0.0,
+            "nonbox": 0.0,
+            "box": 0.0,
+            "estimator_grad": 0.0,
+            "box_grad": 0.0,
+            "mu_oob": 0.0,
+        }
+        optimizer_steps = 0
+        for _ in range(self.student_vae_epochs):
+            order = torch.randperm(num_samples, device=self.device)
+            for start in range(0, num_samples, batch_size):
+                index = order[start : start + batch_size]
+                obs = data["student_obs_570"][index]
+                critic = data["critic_obs"][index]
+                target_latent = data["teacher_latent_raw_64"][index]
+                target_action = data["mixed_action_target_16"][index]
+                target_pre = data["teacher_pre_prior_action_16"][index]
+                target_post = data["teacher_post_prior_policy_action_16"][index]
+                target_velocity = critic[:, :3]
+
+                self.vae_optimizer.zero_grad(set_to_none=True)
+                velocity, reconstruction, mu, logvar, _ = model.estimator(obs)
+                velocity_loss = torch.mean(torch.square(velocity - target_velocity))
+                latent_loss = torch.mean(torch.square(mu - target_latent))
+                reconstruction_loss = torch.mean(torch.square(reconstruction - obs))
+                kl_loss = -0.5 * torch.sum(
+                    1 + logvar - torch.square(mu) - torch.exp(logvar), dim=-1
+                ).mean()
+                clamped = torch.clamp(mu, -1.0, 1.0)
+                safe_mu = mu + (clamped - mu).detach()
+                student_action = self._v15_actor_forward(torch.cat((obs, safe_mu), dim=-1))
+                squared = torch.square(student_action - target_action)
+                nonbox_per_sample = torch.mean(squared[:, :12], dim=-1)
+                box_per_sample = torch.mean(squared[:, 12:16], dim=-1)
+                rear_box_per_sample = torch.mean(squared[:, 14:16], dim=-1)
+                post_prior_gate = (
+                    torch.max(torch.abs(target_post[:, 12:16] - target_pre[:, 12:16]), dim=-1).values
+                    > 1.0e-6
+                ).to(squared.dtype)
+                command_speed = torch.linalg.norm(critic[:, 9:12], dim=-1)
+                moving_weight = 1.0 + torch.clamp(
+                    command_speed / self.student_prior_fade_speed, 0.0, 1.0
+                )
+                phase_weight = 1.0 + self.student_highstep_phase_loss_scale * post_prior_gate
+                per_sample_action = (
+                    2.0 * nonbox_per_sample
+                    + 0.5 * box_per_sample
+                    + self.student_highstep_rear_box_loss_scale
+                    * post_prior_gate
+                    * rear_box_per_sample
+                )
+                action_loss = torch.mean(per_sample_action * moving_weight * phase_weight)
+                low_speed_gate = torch.clamp(
+                    (self.student_prior_fade_speed - command_speed)
+                    / max(self.student_prior_fade_speed - self.student_low_speed_threshold, 1.0e-6),
+                    0.0,
+                    1.0,
+                )
+                is_static = (command_speed < self.student_low_speed_threshold).to(squared.dtype)
+                gravity = critic[:, 6:9]
+                tilt = torch.clamp(torch.linalg.norm(gravity[:, :2], dim=-1) / 0.25, 0.0, 1.0)
+                prior_weight = post_prior_gate * (
+                    0.15 + 1.25 * low_speed_gate + 1.0 * is_static + 0.75 * tilt
+                )
+                prior_box_loss = self._weighted_mean(box_per_sample, prior_weight)
+                total_loss = (
+                    self.student_vel_loss_coef * velocity_loss
+                    + self.student_latent_loss_coef * latent_loss
+                    + self.student_teacher_action_loss_coef * action_loss
+                    + self.student_prior_box_loss_coef * prior_box_loss
+                    + self.student_recon_loss_coef * reconstruction_loss
+                    + self.student_kl_loss_coef * kl_loss
+                )
+                if not torch.isfinite(total_loss):
+                    raise RuntimeError("B300 canonical hybrid loss is non-finite")
+                total_loss.backward()
+                estimator_grad = torch.sqrt(
+                    sum(
+                        torch.sum(torch.square(parameter.grad))
+                        for parameter in model.estimator.parameters()
+                        if parameter.grad is not None
+                    )
+                )
+                box_grad = torch.sqrt(
+                    sum(
+                        torch.sum(torch.square(parameter.grad))
+                        for parameter in (self.v15_box_weight, self.v15_box_bias)
+                        if parameter.grad is not None
+                    )
+                )
+                if not (float(estimator_grad) > 0.0 and float(box_grad) > 0.0):
+                    raise RuntimeError("B300 estimator/box rows did not both receive gradients")
+                for parameter in model.actor.parameters():
+                    if parameter.grad is not None and torch.count_nonzero(parameter.grad).item() != 0:
+                        raise RuntimeError("B300 frozen actor tensor accumulated a gradient")
+                nn.utils.clip_grad_norm_(
+                    list(model.estimator.parameters()) + [self.v15_box_weight, self.v15_box_bias],
+                    self.max_grad_norm,
+                )
+                self.vae_optimizer.step()
+                self._sync_v15_box_rows_to_actor()
+
+                totals["velocity"] += float(velocity_loss.detach())
+                totals["latent"] += float(latent_loss.detach())
+                totals["reconstruction"] += float(reconstruction_loss.detach())
+                totals["kl"] += float(kl_loss.detach())
+                totals["action"] += float(action_loss.detach())
+                totals["prior_box"] += float(prior_box_loss.detach())
+                totals["nonbox"] += float(torch.mean(nonbox_per_sample).detach())
+                totals["box"] += float(torch.mean(box_per_sample).detach())
+                totals["estimator_grad"] += float(estimator_grad.detach())
+                totals["box_grad"] += float(box_grad.detach())
+                totals["mu_oob"] += float(torch.mean((torch.abs(mu) > 1.0).to(mu.dtype)).detach())
+                optimizer_steps += 1
+
+        if optimizer_steps == 0:
+            raise RuntimeError("B300 canonical hybrid performed no optimizer step")
+        storage_before = int(self.storage.step)
+        self.storage.clear()
+        self.student_distill_update_count += 1
+        self._sync_v15_box_rows_to_actor()
+        self._assert_v15_frozen_unchanged()
+        self._validate_v15_optimizer_scope()
+        average = {name: value / optimizer_steps for name, value in totals.items()}
+        return {
+            "value_function": 0.0,
+            "surrogate": 0.0,
+            "entropy": 0.0,
+            "Loss/VAE_Vel_MSE": average["velocity"],
+            "Loss/Distill_Latent_MSE": average["latent"],
+            "Loss/VAE_Recon_MSE": average["reconstruction"],
+            "Loss/VAE_KL": average["kl"],
+            "Loss/Teacher_Action_MSE": average["action"],
+            "Loss/Prior_Box_Loss": average["prior_box"],
+            "Loss/B300_Hybrid_Nonbox_PrePrior_MSE": average["nonbox"],
+            "Loss/B300_Hybrid_Box_PostPrior_Policy_MSE": average["box"],
+            "Debug/B300_Canonical_Unique_Episodes": float(self._b300_training_unique_episode_count),
+            "Debug/B300_Canonical_Samples": float(num_samples),
+            "Debug/B300_Estimator_Grad_Norm": average["estimator_grad"],
+            "Debug/B300_Box_Rows_Grad_Norm": average["box_grad"],
+            "Debug/B300_Frozen_Nonbox_Grad_Norm": 0.0,
+            "Debug/B300_Box_Adapt_From_Update_Zero": 1.0,
+            "Debug/B300_Mixed_Target_Policy_Units": 1.0,
+            "Debug/Mu_Out_Of_Bounds_Ratio": average["mu_oob"],
+            "Debug/Student_Distill_Update_Count": float(self.student_distill_update_count),
+            "Debug/Buffer_Step_Before_Clear": float(storage_before),
+            "Debug/Buffer_Step_After_Clear": float(self.storage.step),
+        }
 
     def _v15_optimizer_parameter_names(self) -> tuple[str, ...]:
         names = tuple(f"estimator.{name}" for name, _ in self.policy.estimator.named_parameters())
@@ -2492,7 +3244,10 @@ class VAEPPO(PPO):
         if not hasattr(self, "_v15_source_snapshot"):
             raise RuntimeError("v1.5 frozen snapshot is missing")
         current = self.policy.state_dict()
-        allow_box_delta = self.student_distill_update_count > self.student_actor_warmup_updates
+        allow_box_delta = (
+            self.student_recovery_stage == "B300_CANONICAL_HYBRID"
+            or self.student_distill_update_count > self.student_actor_warmup_updates
+        )
         for key, before in self._v15_source_snapshot.items():
             now = current[key].detach().cpu()
             if key.startswith("estimator."):
@@ -2529,7 +3284,7 @@ class VAEPPO(PPO):
     ) -> dict:
         if self.student_recovery_stage not in {
             "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-            "E1400_CONTINUATION",
+            "E1400_CONTINUATION", "BE300_0707", "B300_CANONICAL_HYBRID",
         }:
             raise RuntimeError(
                 "isolated checkpoint binding requires V15, zero-scale ablation, "
@@ -2537,11 +3292,14 @@ class VAEPPO(PPO):
             )
         zero_scale_ablation = self.student_recovery_stage == "0707_EXACT"
         historical_0707_exact = self.student_recovery_stage == "HISTORICAL_0707_EXACT"
+        be300_0707 = self.student_recovery_stage == "BE300_0707"
+        b300_hybrid = self.student_recovery_stage == "B300_CANONICAL_HYBRID"
         environment_curriculum_v18 = self.student_recovery_stage == "ENV_CURRICULUM_V18"
         e1400_continuation = self.student_recovery_stage == "E1400_CONTINUATION"
         pre_prior_route = (
             zero_scale_ablation or historical_0707_exact
-            or environment_curriculum_v18 or e1400_continuation
+            or environment_curriculum_v18 or e1400_continuation or be300_0707
+            or b300_hybrid
         )
         source_path = os.path.realpath(str(self.policy.student_recovery_source_checkpoint))
         source_expected = str(self.policy.student_recovery_source_sha256)
@@ -2553,10 +3311,10 @@ class VAEPPO(PPO):
         source_state = source_checkpoint["model_state_dict"]
 
         if source_sha != teacher_sha or (not pre_prior_route and source_path != teacher_path):
-            raise RuntimeError("Student root and independent Teacher must bind the same model_172300 bytes")
+            raise RuntimeError("Student root and independent Teacher must bind the same checkpoint bytes")
         if checkpoint_load_mode == "weights_only":
             if loaded_path != source_path:
-                raise RuntimeError("fresh v1.5 must weights-only load the canonical model_172300")
+                raise RuntimeError("fresh Stage-2 must weights-only load the canonical Teacher checkpoint")
             for component_name, module in (
                 ("actor", self.policy.actor),
                 ("estimator", self.policy.estimator),
@@ -2652,7 +3410,7 @@ class VAEPPO(PPO):
                 "4baed191f98f9b746eec9181b3f31bcdd16e3cc147726b676d9949d7e1fe4425"
                 if zero_scale_ablation else
                 self._v15_preregistration.get("authority", {}).get("spec_sha256")
-                if historical_0707_exact or environment_curriculum_v18 or e1400_continuation
+                if historical_0707_exact or environment_curriculum_v18 or e1400_continuation or be300_0707 or b300_hybrid
                 else None
             ),
             "checkpoint_load_mode": checkpoint_load_mode,
@@ -2663,20 +3421,62 @@ class VAEPPO(PPO):
             "student_teacher_storage_independent": True,
             "student_actor_and_teacher_actor_same_root_weights": True,
             "student_ppo_permanently_disabled": True,
+            "critical_transition_balanced_sampling": bool(
+                self.student_critical_transition_balanced_sampling
+            ),
+            "critical_transition_window_radius": int(
+                self.student_critical_transition_window_radius
+            ),
+            "critical_transition_minibatch_fractions": (
+                [0.25, 0.25, 0.50]
+                if self.student_critical_transition_balanced_sampling else None
+            ),
+            "front_diagonal_indices": (
+                [1, 5, 9] if self.student_critical_transition_balanced_sampling else None
+            ),
+            "rear_diagonal_indices": (
+                [2, 6, 10] if self.student_critical_transition_balanced_sampling else None
+            ),
+            "phase_diagonal_weight_ratio": (
+                3.0 if self.student_critical_transition_balanced_sampling else None
+            ),
             "actor_body_frozen": True,
             "critic_frozen": True,
             "student_privileged_encoder_frozen": True,
             "post_warmup_trainable_action_rows": [12, 13, 14, 15],
+            "trainable_action_rows_from_update_zero": (
+                [12, 13, 14, 15] if b300_hybrid else []
+            ),
+            "student_actor_latent_clamp_backward": str(
+                self.policy.student_actor_latent_clamp_backward
+            ),
             "post_warmup_trainable_joint_names": [
                 "FL_box_joint", "FR_box_joint", "RL_box_joint", "RR_box_joint"
             ],
             "warmup_main_action_target": (
+                "teacher_pre_prior_nonbox_plus_post_prior_policy_unit_box"
+                if b300_hybrid else
                 "teacher_pre_prior" if pre_prior_route else "teacher_post_prior"
             ),
-            "warmup_prior_box_loss_coefficient": 0.0,
+            "warmup_prior_box_loss_coefficient": (
+                self.student_prior_box_loss_coef if b300_hybrid else 0.0
+            ),
             "phase_scale": 0.0 if zero_scale_ablation else 2.0,
             "rear_box_scale": 0.0 if zero_scale_ablation else 1.5,
         }
+        if b300_hybrid:
+            self._v15_binding_manifest.update(
+                {
+                    "canonical_tensor_dataset": self._b300_canonical_dataset_path,
+                    "canonical_tensor_dataset_sha256": self._b300_canonical_dataset_sha256,
+                    "canonical_tensor_manifest": self._b300_canonical_manifest_path,
+                    "canonical_tensor_manifest_sha256": self._b300_canonical_manifest_sha256,
+                    "canonical_unique_episode_count": self._b300_training_unique_episode_count,
+                    "canonical_sample_count": int(self._b300_canonical_dataset["student_obs_570"].shape[0]),
+                    "dagger_round": self._b300_training_round,
+                    "frozen_nonbox_action_rows": list(range(12)),
+                }
+            )
         if e1400_continuation:
             self._v15_binding_manifest["continuation_branch"] = self._e1400_continuation_branch
         if checkpoint_load_mode == "full" and rebinding is not None:
@@ -2766,7 +3566,7 @@ class VAEPPO(PPO):
             }
         elif getattr(self, "student_recovery_stage", "NONE") in {
             "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-            "E1400_CONTINUATION",
+            "E1400_CONTINUATION", "BE300_0707", "B300_CANONICAL_HYBRID",
         }:
             if not self._v15_binding_ready or not isinstance(self._v15_binding_manifest, dict):
                 raise RuntimeError("Cannot checkpoint v1.5 before all bindings succeed")
@@ -2939,7 +3739,7 @@ class VAEPPO(PPO):
 
         if getattr(self, "student_recovery_stage", "NONE") in {
             "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-            "E1400_CONTINUATION",
+            "E1400_CONTINUATION", "BE300_0707", "B300_CANONICAL_HYBRID",
         }:
             recovery_state = state.get("student_recovery")
             if not isinstance(recovery_state, dict) or recovery_state.get("schema_version") != 1:
@@ -3012,7 +3812,8 @@ class VAEPPO(PPO):
         """Explicitly migrate a legacy Student checkpoint with irrecoverable Adam state loss."""
         if getattr(self, "student_recovery_stage", "NONE") in {
             "B", "R2", "R3", "V15", "0707_EXACT", "HISTORICAL_0707_EXACT",
-            "ENV_CURRICULUM_V18", "E1400_CONTINUATION",
+            "ENV_CURRICULUM_V18", "E1400_CONTINUATION", "BE300_0707",
+            "B300_CANONICAL_HYBRID",
         }:
             raise RuntimeError(
                 f"Stage {self.student_recovery_stage} forbids legacy full-resume migration"
@@ -3032,12 +3833,14 @@ class VAEPPO(PPO):
         """Sync frozen teacher actor after runner.load() has restored checkpoint weights."""
         if getattr(self, "student_recovery_stage", "NONE") in {
             "B", "R2", "R3", "V15", "0707_EXACT", "HISTORICAL_0707_EXACT",
-            "ENV_CURRICULUM_V18", "E1400_CONTINUATION",
+            "ENV_CURRICULUM_V18", "E1400_CONTINUATION", "BE300_0707",
+            "B300_CANONICAL_HYBRID",
         }:
             if (
                 self.student_recovery_stage in {
                     "V15", "0707_EXACT", "HISTORICAL_0707_EXACT",
-                    "ENV_CURRICULUM_V18", "E1400_CONTINUATION",
+                    "ENV_CURRICULUM_V18", "E1400_CONTINUATION", "BE300_0707",
+                    "B300_CANONICAL_HYBRID",
                 }
                 and self._teacher_actor_synced
                 and self._v15_binding_ready
@@ -3912,6 +4715,8 @@ class VAEPPO(PPO):
         }
 
     def update(self):
+        if getattr(self, "student_recovery_stage", "NONE") == "B300_CANONICAL_HYBRID":
+            return self._update_b300_canonical_hybrid()
         if getattr(self, "student_recovery_stage", "NONE") == "R2":
             return self._update_student_recovery_r2()
         if getattr(self, "student_recovery_stage", "NONE") == "R3":
@@ -3952,11 +4757,11 @@ class VAEPPO(PPO):
             recovery_stage = getattr(self, "student_recovery_stage", "NONE")
             v15_active = recovery_stage in {
                 "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-                "E1400_CONTINUATION",
+                "E1400_CONTINUATION", "BE300_0707", "B300_CANONICAL_HYBRID",
             }
             pre_prior_0707_active = recovery_stage in {
                 "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
-                "E1400_CONTINUATION",
+                "E1400_CONTINUATION", "BE300_0707",
             }
             rear_hip_adapt_enabled = (
                 actor_adapt_enabled
@@ -3975,29 +4780,162 @@ class VAEPPO(PPO):
             
             if model.estimator is not None and self.num_learning_epochs > 0:
                 obs_storage = self.storage.observations
-                
+                rollout_steps = int(self.storage.step)
+                current_policy_time = None
+                current_est_input_time = None
+                current_critic_time = None
                 if hasattr(obs_storage, "keys"):
-                    policy_obs_full = obs_storage[model.policy_keys[0]].flatten(0, 1)
-                    est_input_full = obs_storage[model.estimator_keys[0]].flatten(0, 1)
-                    critic_obs_full = obs_storage[model.critic_keys[0]].flatten(0, 1)
+                    current_policy_time = obs_storage[model.policy_keys[0]][:rollout_steps]
+                    current_est_input_time = obs_storage[model.estimator_keys[0]][:rollout_steps]
+                    current_critic_time = obs_storage[model.critic_keys[0]][:rollout_steps]
+                    policy_obs_full = current_policy_time.flatten(0, 1)
+                    est_input_full = current_est_input_time.flatten(0, 1)
+                    critic_obs_full = current_critic_time.flatten(0, 1)
                 else:
-                    obs_batch = obs_storage.flatten(0, 1)
+                    obs_batch = obs_storage[:rollout_steps].flatten(0, 1)
                     policy_obs_full = obs_batch
                     est_input_full = obs_batch
                     critic_obs_full = obs_batch
 
                 if policy_obs_full.shape[-1] >= model.policy_obs_dim + model.vae_latent_dim:
                     policy_obs_full = policy_obs_full[..., :model.policy_obs_dim]
-                
+                    if current_policy_time is not None:
+                        current_policy_time = current_policy_time[..., :model.policy_obs_dim]
+
+                current_num_samples = est_input_full.shape[0]
+                critical_context_full = None
+                front_transition_window = None
+                rear_transition_window = None
+                original_distribution_pool = None
+                if self.student_critical_transition_balanced_sampling:
+                    if not hasattr(obs_storage, "keys") or "critical_transition" not in obs_storage.keys():
+                        raise RuntimeError(
+                            "balanced critical-transition route is missing its rollout-only label group"
+                        )
+                    stage_context_time = obs_storage["critical_transition"][:rollout_steps]
+                    if tuple(stage_context_time.shape[:2]) != tuple(self.storage.dones[:rollout_steps].shape[:2]):
+                        raise RuntimeError("critical-transition context/storage time axes disagree")
+                    current_dones_time = self.storage.dones[:rollout_steps]
+                    carry = self._critical_transition_fifo
+                    if self.student_rl_preedge_sampling:
+                        combined_context_time = (
+                            torch.cat((carry["stage_context"], stage_context_time), dim=0)
+                            if carry is not None else stage_context_time
+                        )
+                        combined_dones_time = (
+                            torch.cat((carry["dones"], current_dones_time), dim=0)
+                            if carry is not None else current_dones_time
+                        )
+                        front_window_time, _ = highstep_critical_transition_window_masks(
+                            combined_context_time[..., :4],
+                            combined_dones_time,
+                            radius=self.student_critical_transition_window_radius,
+                            require_complete_window=True,
+                        )
+                        rear_window_time = highstep_rl_preedge_window_mask(
+                            combined_context_time,
+                            combined_dones_time,
+                            pre_steps=self.student_rl_preedge_pre_steps,
+                            post_steps=self.student_rl_preedge_post_steps,
+                        )
+                        carry_steps = int(carry["stage_context"].shape[0]) if carry is not None else 0
+                    else:
+                        front_window_time, rear_window_time, carry_steps = highstep_cross_rollout_transition_windows(
+                            stage_context_time,
+                            current_dones_time,
+                            radius=self.student_critical_transition_window_radius,
+                            carry_stage_context=(carry or {}).get("stage_context"),
+                            carry_dones=(carry or {}).get("dones"),
+                        )
+                    if carry is not None:
+                        policy_obs_full = torch.cat(
+                            (carry["policy_obs"], current_policy_time), dim=0
+                        ).flatten(0, 1)
+                        est_input_full = torch.cat(
+                            (carry["est_input"], current_est_input_time), dim=0
+                        ).flatten(0, 1)
+                        critic_obs_full = torch.cat(
+                            (carry["critic_obs"], current_critic_time), dim=0
+                        ).flatten(0, 1)
+                        critical_context_full = torch.cat(
+                            (carry["stage_context"], stage_context_time), dim=0
+                        ).flatten(0, 1)
+                    else:
+                        critical_context_full = stage_context_time.flatten(0, 1)
+                    if self.student_rl_preedge_sampling and stage_context_time.shape[-1] != 5:
+                        raise RuntimeError("RL pre-edge continuation requires five rollout labels")
+                    front_transition_window = front_window_time.flatten()
+                    rear_transition_window = rear_window_time.flatten()
+                    if self.student_rl_preedge_sampling and (
+                        not bool(front_transition_window.any().item())
+                        or not bool(rear_transition_window.any().item())
+                    ):
+                        # Seed/advance the bounded FIFO without an optimizer or
+                        # effective update until both complete sampling classes
+                        # exist. This never substitutes truncated windows.
+                        keep = self.student_rl_preedge_pre_steps + self.student_rl_preedge_post_steps
+                        def _prefill_retain(key: str, current: torch.Tensor) -> torch.Tensor:
+                            combined = (
+                                torch.cat((carry[key], current), dim=0)
+                                if carry is not None else current
+                            )
+                            return combined[-keep:].detach().clone()
+                        self._critical_transition_fifo = {
+                            "policy_obs": _prefill_retain("policy_obs", current_policy_time),
+                            "est_input": _prefill_retain("est_input", current_est_input_time),
+                            "critic_obs": _prefill_retain("critic_obs", current_critic_time),
+                            "stage_context": _prefill_retain("stage_context", stage_context_time),
+                            "dones": _prefill_retain("dones", current_dones_time),
+                        }
+                        self.storage.clear()
+                        return {
+                            "value_function": 0.0,
+                            "surrogate": 0.0,
+                            "entropy": 0.0,
+                            "Debug/RL_PreEdge_FIFO_Prefill": 1.0,
+                            "Debug/RL_PreEdge_Current_Active_Fraction": float(
+                                stage_context_time[..., 4].float().mean().item()
+                            ),
+                            "Debug/RL_PreEdge_Front_Window_Count": float(
+                                front_transition_window.sum().item()
+                            ),
+                            "Debug/RL_PreEdge_Rear_Window_Count": float(
+                                rear_transition_window.sum().item()
+                            ),
+                            "Debug/Student_Distill_Update_Count": float(
+                                self.student_distill_update_count
+                            ),
+                        }
+                    num_samples = est_input_full.shape[0]
+                    if critical_context_full.shape[0] != num_samples:
+                        raise RuntimeError("critical-transition labels do not align with rollout samples")
+                    current_start = carry_steps * int(stage_context_time.shape[1])
+                    original_distribution_pool = torch.arange(
+                        current_start,
+                        num_samples,
+                        device=est_input_full.device,
+                        dtype=torch.long,
+                    )
+                    if original_distribution_pool.numel() != current_num_samples:
+                        raise RuntimeError("critical-transition original pool is not the live rollout")
+                else:
+                    num_samples = current_num_samples
+
+                # The minibatch budget remains exactly the unmodified live
+                # rollout budget. FIFO frames are eligible only for the 25/25
+                # transition portions and never inflate independent data size.
+                batch_size = current_num_samples // self.num_mini_batches
                 # 假设 critic 组的前 3 维就是真实的 base_lin_vel
-                target_vel_full = critic_obs_full[..., 0:3] 
+                target_vel_full = critic_obs_full[..., 0:3]
                 # 获取 Teacher 的目标 (Teacher Latent)
                 with torch.no_grad():
                     # <=== STRICT FIX 4: 蒸馏时，Teacher 依然只吃切除速度后的观测
                     target_latent_full = model.priv_encoder(critic_obs_full[..., 3:])
-                
-                num_samples = est_input_full.shape[0]
-                batch_size = num_samples // self.num_mini_batches
+                if self.student_critical_transition_balanced_sampling:
+                    if batch_size % 4:
+                        raise RuntimeError(
+                            "critical-transition minibatch size must be divisible by four for 25/25/50"
+                        )
                 
                 total_vel_loss = 0.0
                 total_recon_loss = 0.0
@@ -4018,6 +4956,11 @@ class VAEPPO(PPO):
                 total_highstep_rear_box_action_loss = 0.0
                 total_highstep_rear_hip_action_loss = 0.0
                 total_highstep_rear_hip_gate = 0.0
+                total_front_sampling_fraction = 0.0
+                total_rear_sampling_fraction = 0.0
+                total_original_sampling_fraction = 0.0
+                total_front_phase_gate = 0.0
+                total_rear_phase_gate = 0.0
                 update_steps = 0
 
                 # 【核心修复 3】：使用 Epoch 和 Mini-batch 训练 VAE
@@ -4025,13 +4968,37 @@ class VAEPPO(PPO):
                 # 阶段2蒸馏可以适当增加 epoch，这里设为 5 以加速蒸馏
                 vae_epochs = getattr(self, "student_vae_epochs", 4)
                 for epoch in range(vae_epochs):
-                    # 打乱数据
-                    indices = torch.randperm(num_samples, device=est_input_full.device)
+                    # Baseline route keeps the original random permutation.
+                    indices = (
+                        None
+                        if self.student_critical_transition_balanced_sampling
+                        else torch.randperm(num_samples, device=est_input_full.device)
+                    )
                     
                     for i in range(self.num_mini_batches):
-                        start = i * batch_size
-                        end = (i + 1) * batch_size
-                        batch_idx = indices[start:end]
+                        if self.student_critical_transition_balanced_sampling:
+                            batch_idx, sampling_source = highstep_balanced_transition_indices(
+                                front_transition_window,
+                                rear_transition_window,
+                                batch_size,
+                                original_pool=original_distribution_pool,
+                            )
+                            total_front_sampling_fraction += (sampling_source == 0).float().mean().item()
+                            total_rear_sampling_fraction += (sampling_source == 1).float().mean().item()
+                            total_original_sampling_fraction += (sampling_source == 2).float().mean().item()
+                            stage_context = critical_context_full[batch_idx]
+                            front_phase_gate = (
+                                torch.max(stage_context[:, :2], dim=-1).values >= 0.5
+                            ).to(dtype=est_input_full.dtype)
+                            rear_phase_gate = (
+                                torch.max(stage_context[:, 2:4], dim=-1).values >= 0.5
+                            ).to(dtype=est_input_full.dtype)
+                        else:
+                            start = i * batch_size
+                            end = (i + 1) * batch_size
+                            batch_idx = indices[start:end]
+                            front_phase_gate = est_input_full.new_zeros(batch_size)
+                            rear_phase_gate = est_input_full.new_zeros(batch_size)
                         
                         est_input = est_input_full[batch_idx]
                         policy_obs = policy_obs_full[batch_idx]
@@ -4063,7 +5030,18 @@ class VAEPPO(PPO):
                         # 0707 and archived zero-scale routes use Teacher pre-prior action; v1.5
                         # uses the post-prior target.  The separate box-prior term stays zero
                         # throughout warmup for both 0707 routes.
-                        safe_mu = torch.clamp(mu, min=-1.0, max=1.0)
+                        clamped_mu = torch.clamp(mu, min=-1.0, max=1.0)
+                        if model.student_actor_latent_clamp_backward == "straight_through":
+                            # v1.14 changes only the backward graph. Forward remains
+                            # exactly equal to the deployment hard clamp.
+                            safe_mu = mu + (clamped_mu - mu).detach()
+                        elif model.student_actor_latent_clamp_backward == "hard":
+                            safe_mu = clamped_mu
+                        else:
+                            raise RuntimeError(
+                                "unsupported student_actor_latent_clamp_backward: "
+                                f"{model.student_actor_latent_clamp_backward!r}"
+                            )
                         with torch.no_grad():
                             safe_target_latent = torch.clamp(target_latent, min=-1.0, max=1.0)
                             teacher_actor = getattr(self, "teacher_actor", model.actor)
@@ -4123,6 +5101,25 @@ class VAEPPO(PPO):
                             else:
                                 box_raw_weight = torch.ones_like(post_prior_gate)
                             per_sample_teacher_action_loss = 2.0 * non_box_loss + 0.5 * raw_box_loss * box_raw_weight
+                            per_sample_teacher_action_loss = (
+                                per_sample_teacher_action_loss
+                                + highstep_diagonal_action_loss(
+                                    teacher_action_error,
+                                    post_prior_gate,
+                                    getattr(
+                                        self,
+                                        "student_highstep_diagonal_action_loss_scale",
+                                        0.0,
+                                    ),
+                                )
+                                + highstep_phase_diagonal_action_loss(
+                                    teacher_action_error,
+                                    front_phase_gate,
+                                    rear_phase_gate,
+                                    self.student_front_diagonal_action_loss_scale,
+                                    self.student_rear_diagonal_action_loss_scale,
+                                )
+                            )
                         else:
                             per_sample_teacher_action_loss = torch.mean(teacher_action_error, dim=-1)
                             rear_box_action_loss = per_sample_teacher_action_loss
@@ -4251,12 +5248,49 @@ class VAEPPO(PPO):
                         total_highstep_rear_box_action_loss += highstep_rear_box_action_loss.item()
                         total_highstep_rear_hip_action_loss += rear_hip_action_loss.item()
                         total_highstep_rear_hip_gate += rear_hip_gate_mean.item()
+                        total_front_phase_gate += front_phase_gate.mean().item()
+                        total_rear_phase_gate += rear_phase_gate.mean().item()
                         update_steps += 1
                 
                 # ==========================================
                 # 【新增修改】：记录清空前的 buffer 指针位置，用于证明修复有效
                 # ==========================================
                 step_before_clear = self.storage.step
+
+                if self.student_critical_transition_balanced_sampling:
+                    keep_steps = min(
+                        (
+                            int(current_policy_time.shape[0])
+                            + int((self._critical_transition_fifo or {}).get(
+                                "policy_obs", current_policy_time[:0]
+                            ).shape[0])
+                        ),
+                        (
+                            self.student_rl_preedge_pre_steps
+                            + self.student_rl_preedge_post_steps
+                            if self.student_rl_preedge_sampling else
+                            2 * self.student_critical_transition_window_radius
+                        ),
+                    )
+                    if keep_steps <= 0:
+                        raise RuntimeError("critical-transition FIFO cannot retain zero steps")
+                    # Clone before storage.clear/next rollout overwrites the
+                    # underlying tensors. This is a bounded, same-env carry;
+                    # it is not counted as new independent dataset material.
+                    prior_fifo = self._critical_transition_fifo
+                    def _retain(key: str, current: torch.Tensor) -> torch.Tensor:
+                        combined = (
+                            torch.cat((prior_fifo[key], current), dim=0)
+                            if prior_fifo is not None else current
+                        )
+                        return combined[-keep_steps:].detach().clone()
+                    self._critical_transition_fifo = {
+                        "policy_obs": _retain("policy_obs", current_policy_time),
+                        "est_input": _retain("est_input", current_est_input_time),
+                        "critic_obs": _retain("critic_obs", current_critic_time),
+                        "stage_context": _retain("stage_context", stage_context_time),
+                        "dones": _retain("dones", current_dones_time),
+                    }
                 
                 # Stage 2 intentionally does not run PPO. The previous PPO path let the
                 # current reward mix overwrite teacher gait while chasing box posture.
@@ -4291,6 +5325,20 @@ class VAEPPO(PPO):
                     ),
                     "Debug/Highstep_Support_Phase_Weight_Mean": total_highstep_phase_weight / update_steps,
                     "Debug/Highstep_Rear_Hip_Approach_Gate": total_highstep_rear_hip_gate / update_steps,
+                    "Debug/Critical_Transition_Sampler_Enabled": float(
+                        self.student_critical_transition_balanced_sampling
+                    ),
+                    "Debug/Critical_Transition_Front_Sample_Fraction": (
+                        total_front_sampling_fraction / update_steps
+                    ),
+                    "Debug/Critical_Transition_Rear_Sample_Fraction": (
+                        total_rear_sampling_fraction / update_steps
+                    ),
+                    "Debug/Critical_Transition_Original_Sample_Fraction": (
+                        total_original_sampling_fraction / update_steps
+                    ),
+                    "Debug/Critical_Transition_Front_Phase_Gate": total_front_phase_gate / update_steps,
+                    "Debug/Critical_Transition_Rear_Phase_Gate": total_rear_phase_gate / update_steps,
                     "Debug/Post_Prior_Box_Gate": total_post_prior_gate / update_steps,
                     "Debug/Prior_Box_Loss_Weight": total_prior_box_weight / update_steps,
                     "Debug/Post_Prior_Box_Target_Delta": total_post_prior_box_delta / update_steps,

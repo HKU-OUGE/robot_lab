@@ -1,5 +1,11 @@
 # Highstep 训练链路
 
+> **2026-07-30 更新：**当前有效链路已推进到
+> `B300 Teacher model_173499 -> E5700 model_179198 -> E7700 model_181198`，
+> 并完成有人保护的真机整机上台。完整 SHA、W&B、视频、bag 和结论见
+> [highstep_stage_archive_20260730.md](highstep_stage_archive_20260730.md)。
+> 下文早期 run 排序保留为历史，不再代表当前候选。
+
 这个文件记录 highstep 训练主链路，以及 WandB 中哪些 run 值得保留对比。
 
 ## 目标

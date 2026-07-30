@@ -21,6 +21,7 @@ import math
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 from isaaclab.app import AppLauncher
 from isaaclab.utils.dict import print_dict
@@ -31,11 +32,43 @@ from isaaclab.utils.dict import print_dict
 # local imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import cli_args
+from play_joint_recorder import PlayJointRecorder
+from highstep_recorded_command_replay import RecordedCommandReplay
+from highstep_phase_residual_runtime import (
+    PhaseResidualReference,
+    PhaseResidualReferenceController,
+)
+from highstep_phase_residual_dataset import PhaseResidualDatasetCollector
+from highstep_phase_residual_dagger import PhaseResidualDaggerCollector
+from highstep_phase_residual_inference import (
+    PhaseResidualHybridController,
+    PhaseResidualPreroll,
+)
+from highstep_phase_direct_action_inference import PhaseDirectActionController
+from highstep_fixed_motion_direct_action import (
+    FixedMotionStudentController,
+    OracleDatasetCollector,
+    SafeMappedTargetAdapter,
+)
+from highstep_fixed_motion_raw_action import (
+    RawActionDaggerCollector,
+    RawActionStudentController,
+    RawPassthroughCollector,
+    load_phase_only_deployment_authority,
+    load_one_shot_deployment_authority,
+)
+from highstep_b300_hybrid_latent import CanonicalTensorCollector, DaggerTensorCollector
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument(
+    "--video_output_dir",
+    type=str,
+    default=None,
+    help="Optional exact output directory for play video; existing non-empty directories fail closed.",
+)
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -50,6 +83,240 @@ parser.add_argument("--real-time", action="store_true", default=False, help="Run
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
 parser.add_argument("--se2_gamepad", action="store_true", default=False, help="Whether to use se2_gamepad.")
 parser.add_argument("--debug", action="store_true", default=False, help="Print debug information (env config, action and observation spaces).")
+parser.add_argument(
+    "--record_joint_data",
+    "--record-joint-data",
+    action="store_true",
+    default=False,
+    help=(
+        "Record env0 policy/raw actions, the exact 16 mapped joint targets shown by --debug, "
+        "and measured joint state for offline Teacher/Student comparison."
+    ),
+)
+parser.add_argument(
+    "--record_student_tensors",
+    "--record-student-tensors",
+    action="store_true",
+    default=False,
+    help=(
+        "With --record_joint_data, also save the exact pre-step 570-D Student/estimator "
+        "observations, raw/clamped 64-D estimator mu, normalized 634-D actor input, and "
+        "3-D velocity prediction to student_tensors.pt."
+    ),
+)
+parser.add_argument(
+    "--joint_record_output",
+    "--joint-record-output",
+    type=str,
+    default=None,
+    help=(
+        "Exact new output directory for --record_joint_data. The default is a timestamped "
+        "directory under logs/play_joint_records. Existing directories are never overwritten."
+    ),
+)
+parser.add_argument(
+    "--joint_record_label",
+    "--joint-record-label",
+    type=str,
+    default=None,
+    help="Short Teacher/Student label stored in the recording manifest and default directory name.",
+)
+parser.add_argument(
+    "--phase_residual_reference",
+    type=str,
+    default=None,
+    help=(
+        "Independent fixed-condition experiment only: bypass the policy and replay a hash-bound "
+        "16-joint safe reference while preserving and exactly cancelling the live production prior."
+    ),
+)
+parser.add_argument(
+    "--phase_residual_reference_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_reference.",
+)
+parser.add_argument(
+    "--phase_residual_reference_blend_steps",
+    type=int,
+    default=25,
+    help="Quintic current-q to reference-start blend length for the independent replay experiment.",
+)
+parser.add_argument(
+    "--phase_residual_reference_restore_source_state",
+    action="store_true",
+    default=False,
+    help=(
+        "Independent fixed-condition experiment only: restore the hash-bound source root/joint "
+        "pose and velocity, use zero blend, and continue from the following reference frame."
+    ),
+)
+parser.add_argument(
+    "--phase_residual_dataset_output",
+    type=str,
+    default=None,
+    help="Exact new output directory for the independent 15-rollout Teacher dataset.",
+)
+parser.add_argument(
+    "--phase_residual_selected_reference_manifest",
+    type=str,
+    default=None,
+    help="Frozen selected-reference manifest required by --phase_residual_dataset_output.",
+)
+parser.add_argument(
+    "--phase_residual_selected_reference_manifest_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_selected_reference_manifest.",
+)
+parser.add_argument(
+    "--phase_residual_source_timing_amendment",
+    type=str,
+    default=None,
+    help="Frozen source-timing amendment required by Teacher dataset collection.",
+)
+parser.add_argument(
+    "--phase_residual_source_timing_amendment_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_source_timing_amendment.",
+)
+parser.add_argument(
+    "--phase_residual_training_manifest",
+    type=str,
+    default=None,
+    help="Frozen supervised-training manifest for the independent hybrid behavior gate.",
+)
+parser.add_argument(
+    "--phase_residual_training_manifest_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_training_manifest.",
+)
+parser.add_argument(
+    "--phase_residual_wandb_verification",
+    type=str,
+    default=None,
+    help="Read-only W&B remote-verification record required before the behavior gate.",
+)
+parser.add_argument(
+    "--phase_residual_wandb_verification_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_wandb_verification.",
+)
+parser.add_argument(
+    "--phase_residual_behavior_output",
+    type=str,
+    default=None,
+    help="Exact new output directory for one 15-rollout fixed-condition behavior gate.",
+)
+parser.add_argument(
+    "--phase_residual_preroll_manifest",
+    type=str,
+    default=None,
+    help="Frozen zero-command Teacher pre-roll manifest required by the behavior gate.",
+)
+parser.add_argument(
+    "--phase_residual_preroll_manifest_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_preroll_manifest.",
+)
+parser.add_argument(
+    "--phase_residual_disable_residual",
+    action="store_true",
+    default=False,
+    help="Run the exact same behavior gate with the residual forced to zero.",
+)
+parser.add_argument(
+    "--phase_direct_action",
+    action="store_true",
+    default=False,
+    help=(
+        "Independent fixed-condition branch only: interpret the supplied training/W&B "
+        "manifests as a phase-indexed complete safe-target model rather than a residual model."
+    ),
+)
+parser.add_argument(
+    "--fixed_motion_direct_action_mode",
+    choices=("oracle", "student", "dagger"),
+    default=None,
+    help="Independent user-approved fixed-motion branch mode.",
+)
+parser.add_argument("--fixed_motion_preregistration", type=str, default=None)
+parser.add_argument("--fixed_motion_preregistration_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_output", type=str, default=None)
+parser.add_argument("--fixed_motion_training_manifest", type=str, default=None)
+parser.add_argument("--fixed_motion_training_manifest_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_wandb_verification", type=str, default=None)
+parser.add_argument("--fixed_motion_wandb_verification_sha256", type=str, default=None)
+parser.add_argument(
+    "--fixed_motion_raw_action_mode",
+    choices=("smoke", "student", "dagger"),
+    default=None,
+    help="Independent user-approved fixed-motion raw-action branch mode.",
+)
+parser.add_argument("--fixed_motion_raw_preregistration", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_preregistration_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_output", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_training_manifest", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_training_manifest_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_wandb_verification", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_wandb_verification_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_raw_dagger_round", type=int, default=None)
+parser.add_argument(
+    "--b300_hybrid_canonical_output",
+    type=str,
+    default=None,
+    help="Collect exactly one hash-bound B300 canonical tensor trajectory.",
+)
+parser.add_argument("--b300_hybrid_collection_preregistration", type=str, default=None)
+parser.add_argument("--b300_hybrid_collection_preregistration_sha256", type=str, default=None)
+parser.add_argument(
+    "--b300_hybrid_behavior_preregistration",
+    type=str,
+    default=None,
+    help="Permit only the preregistered B300 Student task to reuse the frozen Teacher reset/command trace.",
+)
+parser.add_argument("--b300_hybrid_behavior_preregistration_sha256", type=str, default=None)
+parser.add_argument("--b300_hybrid_dagger_output", type=str, default=None)
+parser.add_argument("--b300_hybrid_dagger_stage_manifest", type=str, default=None)
+parser.add_argument("--b300_hybrid_dagger_stage_manifest_sha256", type=str, default=None)
+parser.add_argument("--b300_hybrid_narrow_route_amendment", type=str, default=None)
+parser.add_argument("--b300_hybrid_narrow_route_amendment_sha256", type=str, default=None)
+parser.add_argument(
+    "--b300_hybrid_initial_joint_delta_sign",
+    type=int,
+    choices=(-1, 0, 1),
+    default=0,
+    help="Preregistered small DAgger reset perturbation sign; zero outside DAgger.",
+)
+parser.add_argument("--fixed_motion_phase_only_deployment_preregistration", type=str, default=None)
+parser.add_argument("--fixed_motion_phase_only_deployment_preregistration_sha256", type=str, default=None)
+parser.add_argument("--fixed_motion_one_shot_preregistration", type=str, default=None)
+parser.add_argument("--fixed_motion_one_shot_preregistration_sha256", type=str, default=None)
+parser.add_argument(
+    "--phase_residual_dagger_output",
+    type=str,
+    default=None,
+    help=(
+        "Independent branch only: record same-state Teacher labels while the hybrid candidate "
+        "drives the fixed 15-environment behavior rollout. Requires the normal behavior gate."
+    ),
+)
+parser.add_argument(
+    "--phase_residual_dagger_preregistration",
+    type=str,
+    default=None,
+    help="Frozen DAgger round preregistration required by --phase_residual_dagger_output.",
+)
+parser.add_argument(
+    "--phase_residual_dagger_preregistration_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --phase_residual_dagger_preregistration.",
+)
 parser.add_argument("--seed", type=int, default=None, help="Seed used for deterministic play/eval comparisons.")
 parser.add_argument(
     "--play_terrain_level",
@@ -88,10 +355,40 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--highstep_0707_legacy_student_profile",
+    action="store_true",
+    default=False,
+    help=(
+        "Play the frozen 0707 deployed Student checkpoint with the hash-bound 0707 "
+        "Student environment and the historical non-recovery Stage-2 agent contract."
+    ),
+)
+parser.add_argument(
     "--keep_play_randomization",
     action="store_true",
     default=False,
     help="Keep configured play-time reset/force randomization for robustness eval. Default keeps normal deterministic play.",
+)
+parser.add_argument(
+    "--training_distribution",
+    action="store_true",
+    default=False,
+    help=(
+        "Run play with the task's unmodified training terrain, reset, observation-noise, event, "
+        "command and curriculum distribution. Intended for automatic multi-env visual inspection."
+    ),
+)
+parser.add_argument(
+    "--training_distribution_env_snapshot",
+    type=str,
+    default=None,
+    help="Hash-bound params/env.yaml used to prove --training_distribution matches the saved training config.",
+)
+parser.add_argument(
+    "--training_distribution_env_sha256",
+    type=str,
+    default=None,
+    help="Expected SHA256 of --training_distribution_env_snapshot.",
 )
 parser.add_argument(
     "--eval_action_delay_steps",
@@ -120,11 +417,45 @@ parser.add_argument(
     help="Override base velocity observations with a fixed [vx, vy, wz] command for headless play.",
 )
 parser.add_argument(
+    "--recorded_command_trace",
+    type=str,
+    default=None,
+    help="Hash-bound PlayJointRecorder CSV whose one episode supplies the exact command timeline.",
+)
+parser.add_argument(
+    "--recorded_command_trace_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --recorded_command_trace.",
+)
+parser.add_argument(
+    "--recorded_command_episode_id",
+    type=int,
+    default=None,
+    help="Exact source episode to replay from --recorded_command_trace.",
+)
+parser.add_argument(
+    "--recorded_command_source_manifest",
+    type=str,
+    default=None,
+    help="Source PlayJointRecorder manifest binding task, checkpoint and fixed-condition reset.",
+)
+parser.add_argument(
+    "--recorded_command_source_manifest_sha256",
+    type=str,
+    default=None,
+    help="Required SHA256 for --recorded_command_source_manifest.",
+)
+parser.add_argument(
     "--highstep_gap_camera",
     type=str,
-    choices=("none", "rear_top", "top", "side_top"),
+    choices=("none", "rear_top", "top", "side_top", "static_side_top", "static_robot_side"),
     default="none",
-    help="Debug-only camera for highstep sim-to-real gap videos. Default keeps the normal play view.",
+    help=(
+        "Debug-only camera for highstep videos. static_side_top is a one-shot terrain-fixed "
+        "view; static_robot_side is positioned from the post-reset robot pose once and then "
+        "remains world-fixed. Existing modes retain their historical robot-follow behavior."
+    ),
 )
 parser.add_argument(
     "--reset_after_play_terrain_selection",
@@ -199,6 +530,12 @@ parser.add_argument(
     default=False,
     help="Skip JIT/ONNX export during repeated automated evaluations.",
 )
+parser.add_argument(
+    "--highstep_v1123_frozen_preflight_output",
+    type=str,
+    default=None,
+    help="Write one zero-training v1.12.3 reward-latch preflight record.",
+)
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point.")
 parser.add_argument("--moe", action="store_true", default=False, help="Whether to use MoE.")
 # append RSL-RL cli arguments
@@ -224,6 +561,8 @@ import gymnasium as gym
 import time
 import torch
 import numpy as np
+
+from highstep_manual_respawn import ManualHighstepStartGate, restore_default_joint_state
 
 import isaaclab.utils.math as math_utils
 import rsl_rl_utils
@@ -416,12 +755,36 @@ def _apply_front_step_eval_reset(
 
     approach, lateral = _front_step_side_vectors(side, device, dtype)
     half_width = 0.5 * float(platform_width)
-    target_distance = half_width + float(edge_gap) if distance is None else float(distance)
-    edge_clearance = target_distance - half_width
+    approach_boundary_half_width = half_width
+    stair_height_bounds = None
+    generator_cfg = unwrapped.cfg.scene.terrain.terrain_generator
+    sub_terrains = getattr(generator_cfg, "sub_terrains", {}) if generator_cfg is not None else {}
+    terrain_cfg = sub_terrains.get(terrain_type) if terrain_type is not None else None
+    if terrain_type == "pyramid_stairs":
+        if terrain_cfg is None or generator_cfg is None:
+            raise RuntimeError("pyramid_stairs reset requires its frozen terrain configuration.")
+        terrain_size = tuple(float(value) for value in generator_cfg.size)
+        border_width = float(terrain_cfg.border_width)
+        side_axis = 0 if side.startswith("x") else 1
+        approach_boundary_half_width = 0.5 * terrain_size[side_axis] - border_width
+        step_width = float(terrain_cfg.step_width)
+        center_width = float(terrain_cfg.platform_width)
+        num_steps_x = (terrain_size[0] - 2.0 * border_width - center_width) // (2.0 * step_width) + 1
+        num_steps_y = (terrain_size[1] - 2.0 * border_width - center_width) // (2.0 * step_width) + 1
+        num_steps = int(min(num_steps_x, num_steps_y))
+        stair_height_bounds = (
+            (num_steps + 1) * float(terrain_cfg.step_height_range[0]),
+            (num_steps + 1) * float(terrain_cfg.step_height_range[1]),
+        )
+    target_distance = (
+        approach_boundary_half_width + float(edge_gap) if distance is None else float(distance)
+    )
+    edge_clearance = target_distance - approach_boundary_half_width
     if edge_clearance < 0.15:
         raise ValueError(
             "Invalid front-step reset: base would start inside or too close to the platform. "
-            f"distance={target_distance:.3f}, platform_half_width={half_width:.3f}, "
+            f"distance={target_distance:.3f}, approach_boundary_half_width="
+            f"{approach_boundary_half_width:.3f}, "
             f"edge_clearance={edge_clearance:.3f}."
         )
     target_xy = (
@@ -484,6 +847,37 @@ def _apply_front_step_eval_reset(
                 selected_patches = selected_patches.clone()
                 selected_patches[:, :2] = target_xy
                 selected_patch_distance = torch.zeros_like(selected_patch_distance)
+            elif terrain_type == "pyramid_stairs":
+                # MeshPyramidStairsTerrain has an exact flat outer border.  The
+                # randomly sampled flat patches are only witnesses of its Z;
+                # using their XY directly can make a valid deterministic start
+                # fail depending on the random patch locations.
+                low_z = torch.where(
+                    valid_mask, patch_z, torch.full_like(patch_z, float("inf"))
+                ).amin(dim=1)
+                ground_witness = valid_mask & (torch.abs(patch_z - low_z[:, None]) <= 1.0e-4)
+                if not torch.all(torch.any(ground_witness, dim=1)):
+                    raise RuntimeError("Pyramid-stairs reset has no verified outer-ground witness.")
+                local_target = target_xy - env_origins[:, :2]
+                target_outward = torch.sum(
+                    local_target * approach.unsqueeze(0), dim=1
+                )
+                on_outer_ground = target_outward >= approach_boundary_half_width + 0.15
+                terrain_size_tensor = torch.tensor(
+                    generator_cfg.size, device=device, dtype=dtype
+                )
+                inside_terrain = torch.all(
+                    torch.abs(local_target) <= 0.5 * terrain_size_tensor - 0.20,
+                    dim=1,
+                )
+                if not torch.all(on_outer_ground & inside_terrain):
+                    raise RuntimeError(
+                        "Analytic pyramid-stairs reset target is not on the verified outer ground."
+                    )
+                selected_patches = selected_patches.clone()
+                selected_patches[:, :2] = target_xy
+                selected_patches[:, 2] = low_z
+                selected_patch_distance = torch.zeros_like(selected_patch_distance)
             elif not torch.all(selected_patch_distance <= 0.35):
                 raise RuntimeError(
                     "Verified low patch is too far from the requested reset XY; "
@@ -508,16 +902,19 @@ def _apply_front_step_eval_reset(
     asset.write_root_pose_to_sim(torch.cat([positions, orientations], dim=-1), env_ids=env_ids)
     asset.write_root_velocity_to_sim(velocities, env_ids=env_ids)
     root_outward = torch.sum((positions[:, :2] - env_origins[:, :2]) * approach.unsqueeze(0), dim=1)
-    actual_clearance = root_outward - half_width
+    actual_clearance = root_outward - approach_boundary_half_width
     step_height = env_origins[:, 2] - selected_patches[:, 2]
     root_height_above_low = positions[:, 2] - selected_patches[:, 2]
+    if stair_height_bounds is None:
+        terrain_height_valid = (step_height >= 0.28) & (step_height <= 0.40)
+    else:
+        terrain_height_valid = (
+            (step_height >= stair_height_bounds[0] - 0.02)
+            & (step_height <= stair_height_bounds[1] + 0.02)
+        )
     reset_valid = bool(
         torch.all(actual_clearance >= 0.15).item()
-        # The release matrix targets the user's 30--35 cm high-step objective,
-        # while the configured box_hard challenge reaches 38 cm.  Keep about
-        # 2 cm tolerance for terrain/low-patch discretization, but reject
-        # unrelated low/high obstacles.
-        and torch.all((step_height >= 0.28) & (step_height <= 0.40)).item()
+        and torch.all(terrain_height_valid).item()
         and torch.all((root_height_above_low >= 0.25) & (root_height_above_low <= 0.75)).item()
         and torch.all(selected_patch_distance <= 0.35).item()
     )
@@ -530,10 +927,17 @@ def _apply_front_step_eval_reset(
         "low_z": selected_patches[:, 2].clone(),
         "platform_width": float(platform_width),
         "half_width": half_width,
+        "approach_boundary_half_width": approach_boundary_half_width,
         "target_distance": target_distance,
         "edge_clearance": actual_clearance.clone(),
         "low_patch_verified": True,
-        "low_patch_source": "analytic_box_ground" if terrain_type in {"box", "box_hard"} else "sampled_flat_patch",
+        "low_patch_source": (
+            "analytic_box_ground"
+            if terrain_type in {"box", "box_hard"}
+            else "analytic_pyramid_outer_ground"
+            if terrain_type == "pyramid_stairs"
+            else "sampled_flat_patch"
+        ),
         "low_patch_xy_error": selected_patch_distance.clone(),
         "step_height": step_height.clone(),
         "root_height_above_low": root_height_above_low.clone(),
@@ -554,6 +958,136 @@ def _apply_front_step_eval_reset(
         f"env0_origin={[round(v, 3) for v in first_origin]}, yaw={float(yaw[0].detach().cpu()):.3f}",
         flush=True,
     )
+
+
+def _apply_manual_highstep_respawn(
+    env,
+    side: str,
+    distance: float | None,
+    edge_gap: float,
+    platform_width: float,
+    lateral_offset: float,
+    yaw_offset_deg: float,
+    terrain_type: str | None,
+) -> None:
+    """Apply the complete deterministic state used by keyboard high-step play.
+
+    ``env.reset()`` clears the action and manager state, but deterministic play
+    disables the reset-joint randomization event.  Without this explicit write,
+    pressing R therefore retained the previous episode's q/dq.  Restore q/dq,
+    apply the deterministic root placement, then rebuild observation history
+    from that exact state.
+    """
+
+    unwrapped = env.unwrapped
+    robot = unwrapped.scene["robot"]
+    env_ids, joint_pos, joint_vel = restore_default_joint_state(robot)
+    _apply_front_step_eval_reset(
+        env,
+        side,
+        distance,
+        edge_gap,
+        platform_width,
+        lateral_offset,
+        yaw_offset_deg,
+        terrain_type,
+    )
+    unwrapped.sim.forward()
+    unwrapped.observation_manager.reset(env_ids)
+    unwrapped.observation_manager.compute(update_history=True)
+    print(
+        "[MANUAL_HIGHSTEP_RESPAWN] "
+        + json.dumps(
+            {
+                "joint_position_source": "asset_default_joint_pos",
+                "joint_velocity_source": "explicit_zero",
+                "joint_count": int(joint_pos.shape[-1]),
+                "max_abs_joint_velocity": float(torch.max(torch.abs(joint_vel)).item()),
+                "observation_history_reprimed": True,
+                "action_manager_reset_by_env_reset": True,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _phase_residual_batch_rear_on_platform(env) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-env rear-top contact and the primary rear-hold predicate.
+
+    This is the vectorized form of the existing env0 gate used only to reject
+    a bad 15-rollout Teacher dataset.  It does not change the canonical gate.
+    """
+    unwrapped = env.unwrapped
+    context = getattr(unwrapped, "_front_step_eval_context", None)
+    if not isinstance(context, dict):
+        raise RuntimeError("phase-residual batch gate requires front-step reset context")
+    asset = unwrapped.scene["robot"]
+    sensor = unwrapped.scene.sensors["contact_forces"]
+    rear_asset_ids = [
+        int(asset.find_bodies([name])[0][0]) for name in ("RL_foot", "RR_foot")
+    ]
+    rear_contact_ids = [
+        int(sensor.find_bodies([name])[0][0]) for name in ("RL_foot", "RR_foot")
+    ]
+    rear_pos = asset.data.body_pos_w[:, rear_asset_ids, :]
+    force_data = sensor.data
+    if hasattr(force_data, "net_forces_w") and force_data.net_forces_w is not None:
+        forces = force_data.net_forces_w[:, rear_contact_ids, :]
+    else:
+        forces = force_data.net_forces_w_history[:, 0, rear_contact_ids, :]
+    force_norm = torch.linalg.norm(forces, dim=-1)
+    upward = torch.clamp(forces[:, :, 2], min=0.0)
+    upward_ratio = upward / torch.clamp(force_norm, min=1.0e-6)
+
+    approach = context["approach"].reshape(1, 1, 2)
+    lateral = context["lateral"].reshape(1, 1, 2)
+    origin_xy = context["origin_xy"].reshape(unwrapped.num_envs, 1, 2)
+    top_z = context["top_z"].reshape(unwrapped.num_envs, 1)
+    half_width = float(context["half_width"])
+    rear_rel = rear_pos[:, :, :2] - origin_xy
+    rear_outward = torch.sum(rear_rel * approach, dim=-1)
+    rear_lateral = torch.sum(rear_rel * lateral, dim=-1)
+    inside_top = (
+        (torch.abs(rear_outward) <= half_width + 0.04)
+        & (torch.abs(rear_lateral) <= half_width + 0.04)
+    )
+    top_height = (
+        (rear_pos[:, :, 2] >= top_z - 0.04)
+        & (rear_pos[:, :, 2] <= top_z + 0.09)
+    )
+    rear_top = torch.all(
+        (upward > 5.0) & (upward_ratio >= 0.45) & inside_top & top_height,
+        dim=1,
+    )
+
+    base_pos = asset.data.root_pos_w
+    root_rel = base_pos[:, :2] - context["origin_xy"]
+    root_outward = torch.sum(root_rel * context["approach"].reshape(1, 2), dim=1)
+    root_edge_margin = half_width - root_outward
+    rear_edge_margin = half_width - torch.max(rear_outward, dim=1).values
+    root_h_top = base_pos[:, 2] - context["top_z"]
+    heading = math_utils.yaw_quat(asset.data.root_quat_w)
+    heading_repeated = heading[:, None, :].expand(-1, 2, -1).reshape(-1, 4)
+    rear_body = math_utils.quat_apply_inverse(
+        heading_repeated,
+        (rear_pos - base_pos[:, None, :]).reshape(-1, 3),
+    ).reshape(unwrapped.num_envs, 2, 3)
+    rear_y = rear_body[:, :, 1]
+    rear_width = torch.abs(rear_y[:, 0] - rear_y[:, 1])
+    rear_min_abs_y = torch.min(torch.abs(rear_y), dim=1).values
+    projected_gravity = asset.data.projected_gravity_b
+    rear_on_platform = (
+        rear_top
+        & (rear_edge_margin >= 0.04)
+        & (root_edge_margin >= 0.20)
+        & (root_h_top >= 0.28)
+        & (rear_width >= 0.18)
+        & (rear_min_abs_y >= 0.04)
+        & (torch.abs(projected_gravity[:, 0]) <= 0.42)
+        & (torch.abs(projected_gravity[:, 1]) <= 0.32)
+    )
+    return rear_top, rear_on_platform
 
 
 def _safe_quantile(values: list[float], quantile: float) -> float | None:
@@ -661,6 +1195,456 @@ def _sha256_file(path: str | os.PathLike[str]) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+_HIGHSTEP_0707_STUDENT_TASK = (
+    "RobotLab-Isaac-Velocity-HighstepActionScoreStudentNoPriorV18Bootstrap-"
+    "ArcdogAdjustableLeg-v0"
+)
+_HIGHSTEP_0707_STUDENT_CHECKPOINT_SHA256 = (
+    "7ab180f579f549c35688e605149a8b1f1e5c18bf0e43ca46642abf30cce97284"
+)
+_HIGHSTEP_0707_STUDENT_AGENT_SHA256 = (
+    "bb01ed1c7a8574363e9cea0d9d1dc4a0828d8453a097715ae2e4b49fa51be9ca"
+)
+
+
+def _apply_highstep_0707_legacy_student_profile(agent_cfg, task_name: str):
+    """Restore the inference-relevant agent contract saved with the 0707 Student.
+
+    The v1.8 bootstrap task is intentionally reused only for its SHA-bound 0707
+    environment.  Its recovery runner configuration belongs to a later workflow,
+    so manual replay must switch back to the historical, non-recovery Stage-2
+    contract before constructing the runner.
+    """
+    if task_name != _HIGHSTEP_0707_STUDENT_TASK:
+        raise ValueError(
+            "--highstep_0707_legacy_student_profile requires the exact hash-bound "
+            f"0707 Student task {_HIGHSTEP_0707_STUDENT_TASK!r}"
+        )
+
+    agent_cfg.experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_action_score_vae_student_no_prior_Student"
+    )
+    agent_cfg.max_iterations = 4900
+    agent_cfg.save_interval = 100
+    agent_cfg.empirical_normalization = False
+    agent_cfg.obs_groups = {
+        "policy": ["policy"],
+        "estimator": ["estimator"],
+        "critic": ["critic"],
+    }
+
+    policy = agent_cfg.policy
+    policy.distill_stage = 2
+    policy.student_recovery_stage = "none"
+    policy.student_actor_warmup_updates = 1400
+    policy.student_vae_epochs = 4
+    policy.student_low_speed_threshold = 0.10
+    policy.student_prior_fade_speed = 0.45
+    policy.student_vel_loss_coef = 10.0
+    policy.student_latent_loss_coef = 50.0
+    policy.student_teacher_action_loss_coef = 20.0
+    policy.student_prior_box_loss_coef = 5.0
+    policy.student_recon_loss_coef = 0.5
+    policy.student_kl_loss_coef = 0.1
+    policy.student_post_prior_mode = "highstep"
+    policy.student_highstep_phase_loss_scale = 2.0
+    policy.student_highstep_rear_box_loss_scale = 1.5
+    policy.student_highstep_rear_hip_loss_scale = 0.0
+    policy.student_highstep_rear_hip_min_abs = 0.0
+
+    algorithm = agent_cfg.algorithm
+    algorithm.num_learning_epochs = 5
+    algorithm.num_mini_batches = 4
+    algorithm.learning_rate = 1.0e-4
+    algorithm.schedule = "adaptive"
+    algorithm.gamma = 0.99
+    algorithm.lam = 0.95
+    algorithm.entropy_coef = 0.0015
+    algorithm.desired_kl = 0.006
+    algorithm.max_grad_norm = 1.0
+    algorithm.value_loss_coef = 1.0
+    algorithm.use_clipped_value_loss = True
+    algorithm.clip_param = 0.2
+
+    print(
+        "[0707_REPLAY] Restored historical deployed Student agent contract "
+        f"(agent_yaml_sha256={_HIGHSTEP_0707_STUDENT_AGENT_SHA256}).",
+        flush=True,
+    )
+    return agent_cfg
+
+
+def _recording_tensor_values(value, *, env_index: int = 0) -> list[float]:
+    """Convert one env row from a runtime tensor-like value to plain floats."""
+    if isinstance(value, torch.Tensor):
+        tensor = value.detach()
+        if tensor.ndim > 1:
+            tensor = tensor[env_index]
+        return [float(item) for item in tensor.flatten().cpu().tolist()]
+    array = np.asarray(value)
+    if array.ndim > 1:
+        array = array[env_index]
+    return [float(item) for item in array.reshape(-1).tolist()]
+
+
+def _joint_recording_schema(env) -> tuple[list[str], list[dict[str, object]]]:
+    """Resolve the exact action-order joint contract used by the live manager."""
+    terms = getattr(env.unwrapped.action_manager, "_terms", None)
+    if not isinstance(terms, dict) or not terms:
+        raise RuntimeError("--record_joint_data requires an initialized Isaac Lab action manager")
+    joint_names: list[str] = []
+    term_schema: list[dict[str, object]] = []
+    for term_name, term in terms.items():
+        action_dim = int(term.action_dim)
+        names = list(getattr(term, "_joint_names", []))
+        if len(names) != action_dim:
+            raise RuntimeError(
+                f"action term {term_name!r} exposes {action_dim} actions but {len(names)} joint names"
+            )
+        joint_names.extend(str(name) for name in names)
+        term_schema.append(
+            {
+                "term_name": str(term_name),
+                "term_class": type(term).__name__,
+                "action_dim": action_dim,
+                "joint_names": [str(name) for name in names],
+            }
+        )
+    if len(joint_names) != 16:
+        raise RuntimeError(
+            "--record_joint_data is fail-closed to the high-step 16-action contract; "
+            f"the active task exposes {len(joint_names)} actions"
+        )
+    if len(set(joint_names)) != len(joint_names):
+        raise RuntimeError("action-order joint names are not unique")
+    return joint_names, term_schema
+
+
+def _joint_recording_snapshot(env, policy_actions, joint_names: list[str]) -> dict[str, list[float]]:
+    """Capture env0 values after ``env.step`` using the same mapped tensor as --debug."""
+    unwrapped = env.unwrapped
+    action_manager = unwrapped.action_manager
+    mapped_target: list[float] = []
+    for term_name, term in action_manager._terms.items():
+        mapped = getattr(term, "processed_actions", None)
+        if mapped is None:
+            mapped = getattr(term, "target_joint_pos", None)
+        if mapped is None:
+            raise RuntimeError(
+                f"action term {term_name!r} exposes neither processed_actions nor target_joint_pos"
+            )
+        mapped_target.extend(_recording_tensor_values(mapped))
+
+    robot = unwrapped.scene["robot"]
+    joint_id_by_name = {name: index for index, name in enumerate(robot.joint_names)}
+    missing = [name for name in joint_names if name not in joint_id_by_name]
+    if missing:
+        raise RuntimeError(f"recorded action joints are absent from robot joint state: {missing}")
+    joint_ids = [joint_id_by_name[name] for name in joint_names]
+
+    command = unwrapped.command_manager.get_command("base_velocity")
+    return {
+        "policy_raw": _recording_tensor_values(policy_actions),
+        "action_manager_raw": _recording_tensor_values(action_manager.action),
+        "mapped_target": mapped_target,
+        "joint_pos": _recording_tensor_values(robot.data.joint_pos[:, joint_ids]),
+        "joint_vel": _recording_tensor_values(robot.data.joint_vel[:, joint_ids]),
+        "command": _recording_tensor_values(command)[:3],
+        "root_pos": _recording_tensor_values(robot.data.root_pos_w)[:3],
+        "root_quat_wxyz": _recording_tensor_values(robot.data.root_quat_w)[:4],
+        "root_lin_vel_b": _recording_tensor_values(robot.data.root_lin_vel_b)[:3],
+        "root_ang_vel_b": _recording_tensor_values(robot.data.root_ang_vel_b)[:3],
+    }
+
+
+def _recording_observation_group(observations, key: str) -> torch.Tensor:
+    if hasattr(observations, "keys") and key in observations.keys():
+        value = observations[key]
+    elif isinstance(observations, dict) and key in observations:
+        value = observations[key]
+    else:
+        raise RuntimeError(f"Student tensor recording lacks observation group {key!r}")
+    if not isinstance(value, torch.Tensor):
+        raise RuntimeError(f"Student observation group {key!r} is not a tensor")
+    return value
+
+
+def _student_tensor_recording_snapshot(observations, policy_nn) -> dict[str, torch.Tensor]:
+    """Capture env0's exact deterministic Student inference inputs before ``env.step``."""
+    estimator = getattr(policy_nn, "estimator", None)
+    if estimator is None or not hasattr(estimator, "encode"):
+        raise RuntimeError(
+            "--record_student_tensors requires a Student policy with an encoder-based estimator"
+        )
+    policy_keys = list(getattr(policy_nn, "policy_keys", ()))
+    estimator_keys = list(getattr(policy_nn, "estimator_keys", ()))
+    if len(policy_keys) != 1 or len(estimator_keys) != 1:
+        raise RuntimeError(
+            "Student tensor recording requires one policy and one estimator observation group; "
+            f"got policy={policy_keys}, estimator={estimator_keys}"
+        )
+    policy_obs = _recording_observation_group(observations, policy_keys[0])
+    estimator_obs = _recording_observation_group(observations, estimator_keys[0])
+    if policy_obs.ndim != 2 or estimator_obs.ndim != 2:
+        raise RuntimeError(
+            f"Student tensor observation rank changed: policy={tuple(policy_obs.shape)}, "
+            f"estimator={tuple(estimator_obs.shape)}"
+        )
+    if policy_obs.shape[0] < 1 or estimator_obs.shape[0] < 1:
+        raise RuntimeError("Student tensor recording has no env0 observation")
+    with torch.no_grad():
+        mu, _, velocity_pred = estimator.encode(estimator_obs)
+        clamped_mu = torch.clamp(mu, min=-1.0, max=1.0)
+        actor_input = torch.cat((policy_obs, clamped_mu), dim=-1)
+        actor_normalizer = getattr(policy_nn, "actor_obs_normalizer", None)
+        if actor_normalizer is not None:
+            actor_input = actor_normalizer(actor_input)
+    expected = {
+        "student_obs_570": (policy_obs, 570),
+        "estimator_obs_570": (estimator_obs, 570),
+        "latent_raw_mu_64": (mu, 64),
+        "latent_clamped_mu_64": (clamped_mu, 64),
+        "actor_input_634": (actor_input, 634),
+        "velocity_pred_3": (velocity_pred, 3),
+    }
+    result: dict[str, torch.Tensor] = {}
+    for name, (tensor, width) in expected.items():
+        if tensor.ndim != 2 or tensor.shape[0] < 1 or tensor.shape[1] != width:
+            raise RuntimeError(
+                f"Student tensor contract changed for {name}: got {tuple(tensor.shape)}, "
+                f"expected (num_envs, {width})"
+            )
+        result[name] = tensor[0].detach().cpu().clone()
+    return result
+
+
+def _joint_recording_output_dir(label: str, requested: str | None) -> Path:
+    if requested:
+        return Path(requested).expanduser().resolve()
+    safe_label = "".join(character if character.isalnum() or character in "-_" else "_" for character in label)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (Path.cwd() / "logs" / "play_joint_records" / f"{timestamp}_{safe_label}_pid{os.getpid()}").resolve()
+
+
+_TRAINING_DISTRIBUTION_ALLOWED_CONFIG_DIFFS = (
+    ("scene", "num_envs"),
+    ("scene", "terrain", "num_envs"),
+)
+
+
+def _drop_nested_mapping_value(mapping: dict, path: tuple[str, ...]) -> None:
+    parent = mapping
+    for name in path[:-1]:
+        value = parent.get(name)
+        if not isinstance(value, dict):
+            return
+        parent = value
+    parent.pop(path[-1], None)
+
+
+def _first_mapping_differences(left, right, *, prefix: str = "", limit: int = 12) -> list[str]:
+    if limit <= 0:
+        return []
+    if type(left) is not type(right):
+        return [prefix or "<root>"]
+    if isinstance(left, dict):
+        differences: list[str] = []
+        for key in sorted(set(left) | set(right)):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key not in left or key not in right:
+                differences.append(path)
+            else:
+                differences.extend(
+                    _first_mapping_differences(
+                        left[key], right[key], prefix=path, limit=limit - len(differences)
+                    )
+                )
+            if len(differences) >= limit:
+                break
+        return differences
+    if isinstance(left, list):
+        if len(left) != len(right):
+            return [prefix or "<root>"]
+        differences = []
+        for index, (left_item, right_item) in enumerate(zip(left, right)):
+            differences.extend(
+                _first_mapping_differences(
+                    left_item,
+                    right_item,
+                    prefix=f"{prefix}[{index}]",
+                    limit=limit - len(differences),
+                )
+            )
+            if len(differences) >= limit:
+                break
+        return differences
+    return [] if left == right else [prefix or "<root>"]
+
+
+def _prepare_optional_config_leaves_for_restore(obj, data: dict, *, prefix: str = "") -> None:
+    """Give strict configclass merging concrete types for saved optional leaves."""
+    from collections.abc import Mapping
+
+    for key, saved_value in data.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(obj, dict):
+            if key not in obj:
+                continue
+            current_value = obj[key]
+        else:
+            if not hasattr(obj, key):
+                continue
+            current_value = getattr(obj, key)
+        if isinstance(saved_value, Mapping):
+            if current_value is None:
+                raise RuntimeError(
+                    "cannot reconstruct a saved optional config object from the current task class: "
+                    + path
+                )
+            _prepare_optional_config_leaves_for_restore(current_value, saved_value, prefix=path)
+        elif current_value is None and saved_value is not None:
+            if isinstance(obj, dict):
+                obj[key] = saved_value
+            else:
+                setattr(obj, key, saved_value)
+
+
+def _verify_training_distribution_config(env_cfg, snapshot_path: str, expected_sha256: str) -> dict[str, object]:
+    """Restore and prove the saved training cfg, allowing only env count to differ."""
+    snapshot = Path(snapshot_path).expanduser().resolve()
+    if not snapshot.is_file():
+        raise RuntimeError(f"training distribution env snapshot is missing: {snapshot}")
+    actual_sha256 = _sha256_file(snapshot)
+    if actual_sha256 != str(expected_sha256):
+        raise RuntimeError(
+            "training distribution env snapshot SHA256 mismatch: "
+            f"expected={expected_sha256}, actual={actual_sha256}"
+        )
+
+    import yaml
+    from isaaclab.utils.io import dump_yaml
+
+    # The task class can legitimately drift after a run has completed.  Merely
+    # comparing today's defaults against params/env.yaml would either reject an
+    # exact historical inspection or, worse, run today's distribution.  Restore
+    # the serialized config first, then apply the one user-authorized override.
+    requested_num_envs = int(env_cfg.scene.num_envs)
+    # Isaac Lab's own dump contains Python tuple/slice tags (not accepted by
+    # FullLoader).  UnsafeLoader is restricted here to this exact SHA-bound,
+    # local training artifact; a changed file is rejected above before parsing.
+    saved_config = yaml.load(snapshot.read_text(encoding="utf-8"), Loader=yaml.UnsafeLoader)
+    if not isinstance(saved_config, dict):
+        raise RuntimeError("training distribution env snapshot did not decode to a mapping")
+    # Optional scalar fields can be ``None`` in today's task defaults but
+    # concrete in the training artifact.  Isaac Lab's strict merge rejects the
+    # type transition, so materialize only those saved leaves first.  Missing
+    # config objects remain fail-closed rather than being replaced by dicts.
+    _prepare_optional_config_leaves_for_restore(env_cfg, saved_config)
+    try:
+        env_cfg.from_dict(saved_config)
+    except Exception as exc:
+        raise RuntimeError(
+            "could not restore the hash-bound training environment snapshot into the active task"
+        ) from exc
+    env_cfg.scene.num_envs = requested_num_envs
+    env_cfg.scene.terrain.num_envs = requested_num_envs
+
+    with tempfile.NamedTemporaryFile(prefix="highstep_auto_env_", suffix=".yaml", delete=False) as handle:
+        runtime_path = Path(handle.name)
+    try:
+        dump_yaml(str(runtime_path), env_cfg)
+        saved_tree = yaml.load(snapshot.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        runtime_tree = yaml.load(runtime_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    finally:
+        runtime_path.unlink(missing_ok=True)
+    if not isinstance(saved_tree, dict) or not isinstance(runtime_tree, dict):
+        raise RuntimeError("training distribution env snapshot did not decode to a mapping")
+    for path in _TRAINING_DISTRIBUTION_ALLOWED_CONFIG_DIFFS:
+        _drop_nested_mapping_value(saved_tree, path)
+        _drop_nested_mapping_value(runtime_tree, path)
+    differences = _first_mapping_differences(saved_tree, runtime_tree)
+    if differences:
+        raise RuntimeError(
+            "runtime task config does not match the saved training distribution; "
+            f"first_differences={differences}"
+        )
+    projection = json.dumps(runtime_tree, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return {
+        "snapshot_path": str(snapshot),
+        "snapshot_sha256": actual_sha256,
+        "runtime_projection_sha256": hashlib.sha256(projection).hexdigest(),
+        "allowed_override": "scene.num_envs and scene.terrain.num_envs only",
+        "config_match": True,
+    }
+
+
+def _numeric_distribution(values: torch.Tensor) -> dict[str, float]:
+    array = values.detach().float().flatten().cpu().numpy()
+    return {
+        "min": float(np.min(array)),
+        "q05": float(np.quantile(array, 0.05)),
+        "mean": float(np.mean(array)),
+        "q95": float(np.quantile(array, 0.95)),
+        "max": float(np.max(array)),
+    }
+
+
+def _training_distribution_initial_snapshot(env, binding: dict[str, object]) -> dict[str, object]:
+    """Summarize the untouched training reset distribution before the first policy step."""
+    unwrapped = env.unwrapped
+    robot = unwrapped.scene["robot"]
+    env_origins = unwrapped.scene.env_origins
+    root_pos = robot.data.root_pos_w
+    root_rel = root_pos - env_origins
+    quat = robot.data.root_quat_w
+    yaw = torch.atan2(
+        2.0 * (quat[:, 0] * quat[:, 3] + quat[:, 1] * quat[:, 2]),
+        1.0 - 2.0 * (quat[:, 2].square() + quat[:, 3].square()),
+    )
+    command = unwrapped.command_manager.get_command("base_velocity")
+
+    terrain = unwrapped.scene.terrain
+    level_values, level_counts = torch.unique(terrain.terrain_levels.detach(), return_counts=True)
+    type_values, type_counts = torch.unique(terrain.terrain_types.detach(), return_counts=True)
+    generator_cfg = unwrapped.cfg.scene.terrain.terrain_generator
+    terrain_name_by_column: dict[int, str] = {}
+    if generator_cfg is not None and getattr(generator_cfg, "sub_terrains", None):
+        names = list(generator_cfg.sub_terrains.keys())
+        proportions = np.asarray(
+            [float(generator_cfg.sub_terrains[name].proportion) for name in names], dtype=np.float64
+        )
+        proportions /= proportions.sum()
+        cumulative = np.cumsum(proportions)
+        for column in range(int(generator_cfg.num_cols)):
+            index = int(np.min(np.where(column / int(generator_cfg.num_cols) + 0.001 < cumulative)[0]))
+            terrain_name_by_column[column] = names[index]
+    type_count_by_name: dict[str, int] = {}
+    for value, count in zip(type_values.cpu().tolist(), type_counts.cpu().tolist()):
+        label = terrain_name_by_column.get(int(value), f"column_{int(value)}")
+        type_count_by_name[label] = type_count_by_name.get(label, 0) + int(count)
+
+    return {
+        "kind": "highstep_training_distribution_initial_snapshot",
+        "num_envs": int(unwrapped.num_envs),
+        "binding": binding,
+        "terrain_level_counts": {
+            str(int(value)): int(count)
+            for value, count in zip(level_values.cpu().tolist(), level_counts.cpu().tolist())
+        },
+        "terrain_type_counts": dict(sorted(type_count_by_name.items())),
+        "env_origin_x": _numeric_distribution(env_origins[:, 0]),
+        "env_origin_y": _numeric_distribution(env_origins[:, 1]),
+        "env_origin_z": _numeric_distribution(env_origins[:, 2]),
+        "root_relative_x": _numeric_distribution(root_rel[:, 0]),
+        "root_relative_y": _numeric_distribution(root_rel[:, 1]),
+        "root_relative_z": _numeric_distribution(root_rel[:, 2]),
+        "root_yaw_rad": _numeric_distribution(yaw),
+        "command_vx": _numeric_distribution(command[:, 0]),
+        "command_vy": _numeric_distribution(command[:, 1]),
+        "command_wz": _numeric_distribution(command[:, 2]),
+    }
 
 
 def _highstep_reward_stage_definition(env_cfg) -> dict[str, dict[str, int]]:
@@ -1098,14 +2082,23 @@ class _HighstepEvalTracker:
         self.asset = unwrapped.scene["robot"]
         self.contact_sensor = unwrapped.scene.sensors["contact_forces"]
         self.context = getattr(unwrapped, "_front_step_eval_context", None)
-        self.front_asset_ids = [int(index) for index in self.asset.find_bodies(["FL_foot", "FR_foot"])[0]]
-        self.rear_asset_ids = [int(index) for index in self.asset.find_bodies(["RL_foot", "RR_foot"])[0]]
+        # Keep the order explicit: the v1.12.2 gate is FL-only and must never
+        # inherit an implementation-defined body ordering from a multi-pattern
+        # ``find_bodies`` call.
+        self.front_asset_ids = [
+            int(self.asset.find_bodies([name])[0][0]) for name in ("FL_foot", "FR_foot")
+        ]
+        self.rear_asset_ids = [
+            int(self.asset.find_bodies([name])[0][0]) for name in ("RL_foot", "RR_foot")
+        ]
         self.all_asset_ids = self.front_asset_ids + self.rear_asset_ids
         self.front_contact_ids = [
-            int(index) for index in self.contact_sensor.find_bodies(["FL_foot", "FR_foot"])[0]
+            int(self.contact_sensor.find_bodies([name])[0][0])
+            for name in ("FL_foot", "FR_foot")
         ]
         self.rear_contact_ids = [
-            int(index) for index in self.contact_sensor.find_bodies(["RL_foot", "RR_foot"])[0]
+            int(self.contact_sensor.find_bodies([name])[0][0])
+            for name in ("RL_foot", "RR_foot")
         ]
         self.all_contact_ids = self.front_contact_ids + self.rear_contact_ids
         self.dt = float(unwrapped.step_dt)
@@ -1160,6 +2153,11 @@ class _HighstepEvalTracker:
         self.rear_top_slip_after_second: list[float] = []
         self.front_impact_speed_max = 0.0
         self.front_impact_normal_speed_max = 0.0
+        self.fl_forbidden_surface_contact = False
+        self.fl_forbidden_surface_first_step: int | None = None
+        self.fl_forbidden_surface_contact_samples = 0
+        self.fl_forbidden_surface_contact_streak = 0
+        self.fl_forbidden_surface_contact_max_consecutive = 0
         self.terminated_early = False
         self.termination_step: int | None = None
         self.first_root_outward: float | None = None
@@ -1353,11 +2351,30 @@ class _HighstepEvalTracker:
         top_contact = top_load_contact & inside_top & top_height
         front_top_contact = top_contact[:2]
         rear_top_contact = top_contact[2:]
+        # A top-surface support force is allowed.  Any FL force at the near
+        # vertical face, including the narrow band immediately under the top
+        # lip, is a monotonic failure event even if the policy later recovers.
+        # The height/force test excludes an ordinary upward top load while
+        # retaining a vertical or downward underside load near the edge.
         front_wall_contact = (
             contact[:2]
             & (torch.abs(outward[:2] - half_width) <= 0.14)
             & (foot_pos[:2, 2] > low_z + 0.04)
-            & (foot_pos[:2, 2] < top_z - 0.07)
+            & (foot_pos[:2, 2] < top_z + 0.03)
+            & ((foot_pos[:2, 2] < top_z - 0.01) | (upward_ratio[:2] < 0.45))
+        )
+        fl_forbidden_contact_now = bool(front_wall_contact[0].item())
+        if fl_forbidden_contact_now:
+            self.fl_forbidden_surface_contact = True
+            self.fl_forbidden_surface_contact_samples += 1
+            self.fl_forbidden_surface_contact_streak += 1
+            if self.fl_forbidden_surface_first_step is None:
+                self.fl_forbidden_surface_first_step = int(step)
+        else:
+            self.fl_forbidden_surface_contact_streak = 0
+        self.fl_forbidden_surface_contact_max_consecutive = max(
+            self.fl_forbidden_surface_contact_max_consecutive,
+            self.fl_forbidden_surface_contact_streak,
         )
 
         if not self.initial_geometry_checked:
@@ -1382,6 +2399,10 @@ class _HighstepEvalTracker:
         rear_y = rear_pos_b[:, 1]
         rear_width = float(torch.abs(rear_y[0] - rear_y[1]).detach().cpu())
         rear_min_abs_y = float(torch.min(torch.abs(rear_y)).detach().cpu())
+        rear_fore_aft_error = float(
+            torch.abs(rear_pos_b[0, 0] - rear_pos_b[1, 0]).detach().cpu()
+        )
+        rear_lateral_center_error = float(torch.abs(rear_y[0] + rear_y[1]).detach().cpu())
 
         root_rel_xy = base_pos[:2] - origin_xy
         root_outward = float(torch.sum(root_rel_xy * approach).detach().cpu())
@@ -1555,6 +2576,8 @@ class _HighstepEvalTracker:
         sample = {
             "rear_width": rear_width,
             "rear_min_abs_y": rear_min_abs_y,
+            "rear_fore_aft_error": rear_fore_aft_error,
+            "rear_lateral_center_error": rear_lateral_center_error,
             "rear_bilateral_contact": float(torch.all(rear_contact).item()),
             "rear_slip_contact": rear_slip_contact,
             "rear_bilateral_top_contact": float(torch.all(rear_top_contact).item()),
@@ -1562,6 +2585,7 @@ class _HighstepEvalTracker:
             "front_bilateral_top_contact": float(torch.all(front_top_contact).item()),
             "front_single_step_contact": float(front_single),
             "front_wall_contact": float(torch.any(front_wall_contact).item()),
+            "fl_forbidden_surface_contact": float(fl_forbidden_contact_now),
             "front_slip_top": front_slip_top,
             "roll_metric": abs(float(projected_gravity[1].detach().cpu())),
             "pitch_metric": abs(float(projected_gravity[0].detach().cpu())),
@@ -1613,6 +2637,8 @@ class _HighstepEvalTracker:
         top_hold = self.phase_samples["top_hold"]
         critical_width = [sample["rear_width"] for sample in critical]
         critical_center = [sample["rear_min_abs_y"] for sample in critical]
+        critical_fore_aft = [sample["rear_fore_aft_error"] for sample in critical]
+        critical_lateral_center = [sample["rear_lateral_center_error"] for sample in critical]
         approach_width_median = _safe_quantile([sample["rear_width"] for sample in approach], 0.50)
         critical_width_q05 = _safe_quantile(critical_width, 0.05)
         width_drop = None
@@ -1667,7 +2693,7 @@ class _HighstepEvalTracker:
         strict_full_climb_success = bool(top_hold_success and event_sequence_valid)
         context_reset_valid = bool(self.context and self.context.get("reset_valid", False))
         summary: dict[str, object] = {
-            "schema_version": 7,
+            "schema_version": 8,
             "reset_context_valid": context_reset_valid,
             "reset_valid": bool(
                 context_reset_valid and self.initial_geometry_checked and self.initial_geometry_valid
@@ -1732,12 +2758,34 @@ class _HighstepEvalTracker:
             "kinematic_top_hold_success": top_hold_success,
             "strict_full_climb_success": strict_full_climb_success,
             "full_climb_success": rear_on_platform_hold_success,
+            "fl_vertical_riser_or_top_lip_underside_contact": (
+                self.fl_forbidden_surface_contact
+            ),
+            "fl_vertical_riser_or_top_lip_underside_first_step": (
+                self.fl_forbidden_surface_first_step
+            ),
+            "fl_vertical_riser_or_top_lip_underside_contact_samples": (
+                self.fl_forbidden_surface_contact_samples
+            ),
+            "fl_vertical_riser_or_top_lip_underside_max_consecutive": (
+                self.fl_forbidden_surface_contact_max_consecutive
+            ),
             "terminated_early": self.terminated_early,
             "termination_step": self.termination_step,
             "approach_rear_width_median": approach_width_median,
             "critical_rear_width_q05": critical_width_q05,
             "critical_rear_min_abs_y_q05": _safe_quantile(critical_center, 0.05),
             "critical_rear_width_drop": width_drop,
+            "approach_rear_fore_aft_error_q95": _safe_quantile(
+                [sample["rear_fore_aft_error"] for sample in approach], 0.95
+            ),
+            "approach_rear_lateral_center_error_q95": _safe_quantile(
+                [sample["rear_lateral_center_error"] for sample in approach], 0.95
+            ),
+            "critical_rear_fore_aft_error_q95": _safe_quantile(critical_fore_aft, 0.95),
+            "critical_rear_lateral_center_error_q95": _safe_quantile(
+                critical_lateral_center, 0.95
+            ),
             "critical_width_violation_rate": _safe_mean([float(value < 0.20) for value in critical_width]),
             "critical_center_violation_rate": _safe_mean([float(value < 0.04) for value in critical_center]),
             "critical_rear_bilateral_contact_rate": _safe_mean(
@@ -1840,6 +2888,132 @@ class _HighstepEvalTracker:
         return summary
 
 
+class _HighstepV1123FrozenPreflightTracker:
+    """Read-only proof that reward is dense before and latched after release."""
+
+    def __init__(self, env, eval_tracker: _HighstepEvalTracker):
+        self.env = env.unwrapped
+        self.eval_tracker = eval_tracker
+        self.asset = self.env.scene["robot"]
+        self.frames = []
+        self.reference = []
+        self.first_crossing_step = None
+
+    @staticmethod
+    def _scalar(value):
+        return float(value[0].detach().cpu())
+
+    def sample(self, step: int) -> None:
+        debug = getattr(self.env, "_highstep_v1123_preflight_frame", None)
+        context = self.eval_tracker.context
+        if not isinstance(debug, dict) or context is None:
+            raise RuntimeError("v1.12.3 frozen preflight reward frame was not captured")
+        fl_id = self.eval_tracker.front_asset_ids[0]
+        fl_pos = self.asset.data.body_pos_w[0, fl_id, :]
+        approach = context["approach"]
+        lateral = context["lateral"]
+        origin_xy = context["origin_xy"][0]
+        top_z = float(context["top_z"][0].detach().cpu())
+        low_z = float(context["low_z"][0].detach().cpu())
+        half_width = float(context["half_width"])
+        rel_xy = fl_pos[:2] - origin_xy
+        outward = float(torch.sum(rel_xy * approach).detach().cpu())
+        lateral_pos = float(torch.sum(rel_xy * lateral).detach().cpu())
+        fl_z = float(fl_pos[2].detach().cpu())
+
+        fl_force = self.eval_tracker._contact_force_vectors()[0]
+        force_norm = float(torch.linalg.norm(fl_force).detach().cpu())
+        upward = max(0.0, float(fl_force[2].detach().cpu()))
+        upward_ratio = upward / max(force_norm, 1.0e-6)
+        inside_top = abs(outward) <= half_width + 0.04 and abs(lateral_pos) <= half_width + 0.04
+        allowed_top_support = bool(
+            upward > 5.0
+            and upward_ratio >= 0.45
+            and inside_top
+            and top_z - 0.04 <= fl_z <= top_z + 0.09
+        )
+        first_forbidden = self.eval_tracker.fl_forbidden_surface_first_step
+        no_prior_forbidden = first_forbidden is None or first_forbidden == int(step)
+        command_x = float(
+            self.env.command_manager.get_command("base_velocity")[0, 0].detach().cpu()
+        )
+        in_reference = bool(
+            abs(outward - half_width) <= 0.30
+            and abs(lateral_pos) <= half_width + 0.04
+            and low_z + 0.02 < fl_z < top_z + 0.10
+            and top_z - low_z >= 0.06
+            and command_x >= 0.08
+            and not allowed_top_support
+            and no_prior_forbidden
+            and fl_z <= top_z + 0.04
+        )
+        crossing = self._scalar(debug["fl_clearance"]) >= 0.04
+        if crossing and self.first_crossing_step is None:
+            self.first_crossing_step = int(step)
+        row = {
+            "step": int(step),
+            "final_product": self._scalar(debug["final_product"]),
+            "active_latch": self._scalar(debug["active_latch"]),
+            "lift_score": self._scalar(debug["lift_score"]),
+            "retraction_score": self._scalar(debug["retraction_score"]),
+            "fl_clearance": self._scalar(debug["fl_clearance"]),
+            "fl_body_x": self._scalar(debug["fl_body_x"]),
+            "fl_world_z": self._scalar(debug["fl_world_z"]),
+            "crossing": crossing,
+            "in_reference_window": in_reference,
+        }
+        self.frames.append(row)
+        if in_reference:
+            self.reference.append(row)
+
+    @staticmethod
+    def _stats(rows):
+        values = np.asarray([float(row["final_product"]) for row in rows], dtype=np.float64)
+        return {
+            "count": int(values.size),
+            "mean": float(values.mean()) if values.size else None,
+            "q50": float(np.quantile(values, 0.50)) if values.size else None,
+            "q95": float(np.quantile(values, 0.95)) if values.size else None,
+            "nonzero_ratio": float(np.mean(values > 1.0e-12)) if values.size else None,
+        }
+
+    def summary(self):
+        post = [
+            row for row in self.frames
+            if self.first_crossing_step is not None and int(row["step"]) >= self.first_crossing_step
+        ]
+        return {
+            "schema_version": 1,
+            "kind": "highstep_v1123_single_seed_frozen_preflight",
+            "reference_window_definition": (
+                "Post-step FL frames from first entry into the near-riser swing corridor through "
+                "the first forbidden contact: |FL_outward-near_edge|<=0.30 m, lateral inside "
+                "platform+0.04 m, low_z+0.02<FL_z<top_z+0.10, physical platform height>=0.06 m, "
+                "cmd_x>=0.08, no allowed FL top support or prior forbidden contact, and "
+                "FL_z<=top_z+0.04 m."
+            ),
+            "loop_frames": len(self.frames),
+            "reference_window": self._stats(self.reference),
+            "reference_steps": [int(row["step"]) for row in self.reference],
+            "first_forbidden_contact_step": self.eval_tracker.fl_forbidden_surface_first_step,
+            "first_crossing_step": self.first_crossing_step,
+            "post_first_crossing_frame_count": len(post),
+            "post_first_crossing_all_strict_zero": bool(
+                post and all(float(row["final_product"]) == 0.0 for row in post)
+            ),
+            "post_first_crossing_nonzero_steps": [
+                int(row["step"]) for row in post if float(row["final_product"]) != 0.0
+            ],
+            "training_calls": {
+                "runner_learn": 0,
+                "backward": 0,
+                "optimizer_step": 0,
+                "checkpoint_write": 0,
+            },
+            "frames": self.frames,
+        }
+
+
 def _rear_width_metric_sample(env):
     """Return rear-foot width plus root progress diagnostics for high-step play videos."""
     unwrapped = env.unwrapped
@@ -1870,9 +3044,64 @@ def _update_highstep_gap_camera(env, mode: str):
     if mode == "none" or not hasattr(env.unwrapped, "viewport_camera_controller"):
         return
 
+    if mode == "static_side_top":
+        # This mode is deliberately narrow: configure once in world/terrain
+        # coordinates, then never consult the robot root again.  Existing
+        # camera modes retain their historical follow behavior below.
+        if getattr(env.unwrapped, "_highstep_static_camera_configured", False):
+            return
+        origin = env.unwrapped.scene.env_origins[0]
+        camera_device = env.unwrapped.device
+        eye = origin + torch.tensor(
+            [-2.45, -2.35, 2.35], dtype=torch.float32, device=camera_device
+        )
+        lookat = origin + torch.tensor(
+            [-0.85, 0.0, 0.30], dtype=torch.float32, device=camera_device
+        )
+        env.unwrapped.viewport_camera_controller.set_view_env_index(env_index=0)
+        env.unwrapped.viewport_camera_controller.update_view_location(
+            eye=eye.detach().cpu().numpy(), lookat=lookat.detach().cpu().numpy()
+        )
+        env.unwrapped._highstep_static_camera_configured = True
+        print(
+            "[HIGHSTEP_CAMERA] "
+            f"mode=static_side_top env=0 world_origin={origin.detach().cpu().tolist()} "
+            f"eye={eye.detach().cpu().tolist()} lookat={lookat.detach().cpu().tolist()}",
+            flush=True,
+        )
+        return
+
     robot = env.unwrapped.scene["robot"]
     root_pos = robot.data.root_pos_w[0]
     root_quat = robot.data.root_quat_w[0]
+
+    if mode == "static_robot_side":
+        if getattr(env.unwrapped, "_highstep_static_robot_camera_configured", False):
+            return
+        eye_offset = torch.tensor(
+            [-1.2, -2.1, 1.45], dtype=torch.float32, device=env.device
+        )
+        lookat_offset = torch.tensor(
+            [0.45, 0.0, 0.25], dtype=torch.float32, device=env.device
+        )
+        eye = math_utils.transform_points(
+            eye_offset.unsqueeze(0), pos=root_pos.unsqueeze(0), quat=root_quat.unsqueeze(0)
+        ).squeeze(0)
+        lookat = math_utils.transform_points(
+            lookat_offset.unsqueeze(0), pos=root_pos.unsqueeze(0), quat=root_quat.unsqueeze(0)
+        ).squeeze(0)
+        env.unwrapped.viewport_camera_controller.set_view_env_index(env_index=0)
+        env.unwrapped.viewport_camera_controller.update_view_location(
+            eye=eye.detach().cpu().numpy(), lookat=lookat.detach().cpu().numpy()
+        )
+        env.unwrapped._highstep_static_robot_camera_configured = True
+        print(
+            "[HIGHSTEP_CAMERA] "
+            f"mode=static_robot_side env=0 root={root_pos.detach().cpu().tolist()} "
+            f"eye={eye.detach().cpu().tolist()} lookat={lookat.detach().cpu().tolist()}",
+            flush=True,
+        )
+        return
 
     if mode == "top":
         eye = root_pos + torch.tensor([0.0, 0.0, 5.2], dtype=torch.float32, device=env.device)
@@ -2102,6 +3331,239 @@ def _print_root_and_target(env):
 
 def main():
     """Play with RSL-RL agent."""
+    recorded_command_fields = {
+        "--recorded_command_trace": args_cli.recorded_command_trace,
+        "--recorded_command_trace_sha256": args_cli.recorded_command_trace_sha256,
+        "--recorded_command_episode_id": args_cli.recorded_command_episode_id,
+        "--recorded_command_source_manifest": args_cli.recorded_command_source_manifest,
+        "--recorded_command_source_manifest_sha256": (
+            args_cli.recorded_command_source_manifest_sha256
+        ),
+    }
+    recorded_command_present = {
+        name: value is not None for name, value in recorded_command_fields.items()
+    }
+    if any(recorded_command_present.values()) and not all(recorded_command_present.values()):
+        missing = [name for name, present in recorded_command_present.items() if not present]
+        raise ValueError(
+            "recorded command replay requires all binding arguments; missing " + str(missing)
+        )
+    recorded_command_replay = None
+    recorded_command_source_manifest_path = None
+    recorded_command_source_manifest_sha256 = None
+    recorded_command_source_manifest = None
+    b300_hybrid_behavior = bool(args_cli.b300_hybrid_behavior_preregistration)
+    if b300_hybrid_behavior != bool(
+        args_cli.b300_hybrid_behavior_preregistration_sha256
+    ):
+        raise ValueError("B300 hybrid behavior preregistration path and SHA must be supplied together")
+    b300_hybrid_behavior_preregistration = None
+    if b300_hybrid_behavior:
+        prereg_path = Path(args_cli.b300_hybrid_behavior_preregistration).expanduser().resolve()
+        if not prereg_path.is_file():
+            raise FileNotFoundError(f"B300 hybrid behavior preregistration not found: {prereg_path}")
+        prereg_sha = _sha256_file(prereg_path)
+        if prereg_sha != args_cli.b300_hybrid_behavior_preregistration_sha256:
+            raise RuntimeError("B300 hybrid behavior preregistration SHA256 mismatch")
+        b300_hybrid_behavior_preregistration = json.loads(prereg_path.read_text(encoding="utf-8"))
+        if not (
+            b300_hybrid_behavior_preregistration.get("kind")
+            == "highstep_b300_canonical_hybrid_prior_latent_preregistration"
+            and b300_hybrid_behavior_preregistration.get("workflow_id")
+            == "highstep_b300_canonical_hybrid_prior_latent_20260718"
+            and args_cli.task
+            == "RobotLab-Isaac-Velocity-HighstepB300CanonicalHybridStudentNoPrior-ArcdogAdjustableLeg-v0"
+        ):
+            raise RuntimeError("B300 hybrid behavior authority/task mismatch")
+    b300_hybrid_narrow = bool(args_cli.b300_hybrid_narrow_route_amendment)
+    if b300_hybrid_narrow != bool(args_cli.b300_hybrid_narrow_route_amendment_sha256):
+        raise ValueError("B300 narrow route path and SHA must be supplied together")
+    if b300_hybrid_narrow:
+        if not b300_hybrid_behavior:
+            raise RuntimeError("B300 narrow route requires the B300 Student behavior authority")
+        route_path = Path(args_cli.b300_hybrid_narrow_route_amendment).expanduser().resolve()
+        if _sha256_file(route_path) != args_cli.b300_hybrid_narrow_route_amendment_sha256:
+            raise RuntimeError("B300 narrow route SHA mismatch")
+        route = json.loads(route_path.read_text(encoding="utf-8"))
+        requested_scenario = {
+            "name": next(
+                (
+                    str(row["name"])
+                    for row in route.get("scenarios", [])
+                    if abs(float(row["gap_m"]) - float(args_cli.front_step_eval_edge_gap)) <= 1.0e-9
+                    and abs(float(row["lateral_m"]) - float(args_cli.front_step_eval_lateral_offset)) <= 1.0e-9
+                    and abs(float(row["yaw_deg"]) - float(args_cli.front_step_eval_yaw_offset_deg)) <= 1.0e-9
+                    and int(row["joint_delta_sign"]) == int(args_cli.b300_hybrid_initial_joint_delta_sign)
+                ),
+                "",
+            ),
+            "gap_m": float(args_cli.front_step_eval_edge_gap),
+            "lateral_m": float(args_cli.front_step_eval_lateral_offset),
+            "yaw_deg": float(args_cli.front_step_eval_yaw_offset_deg),
+            "joint_delta_sign": int(args_cli.b300_hybrid_initial_joint_delta_sign),
+        }
+        if not (
+            route.get("kind") == "highstep_b300_hybrid_dagger_route_amendment"
+            and route.get("workflow_id") == "highstep_b300_canonical_hybrid_prior_latent_20260718"
+            and route.get("preregistration_sha256")
+            == args_cli.b300_hybrid_behavior_preregistration_sha256
+            and requested_scenario["name"]
+        ):
+            raise RuntimeError("B300 narrow scenario is outside frozen route")
+    if all(recorded_command_present.values()):
+        if args_cli.fixed_velocity_command is not None:
+            raise ValueError(
+                "fixed_velocity_command and recorded command replay are mutually exclusive"
+            )
+        incompatible = {
+            "--keyboard": args_cli.keyboard,
+            "--se2_gamepad": args_cli.se2_gamepad,
+            "--training_distribution": args_cli.training_distribution,
+            "--phase_residual_reference": args_cli.phase_residual_reference is not None,
+            "--phase_residual_dataset_output": args_cli.phase_residual_dataset_output is not None,
+            "--phase_residual_behavior_output": args_cli.phase_residual_behavior_output is not None,
+        }
+        active_incompatible = [name for name, active in incompatible.items() if active]
+        if active_incompatible:
+            raise ValueError(
+                "recorded command replay is a narrow single-preview path; remove incompatible "
+                f"options: {active_incompatible}"
+            )
+        recorded_command_replay = RecordedCommandReplay(
+            args_cli.recorded_command_trace,
+            expected_sha256=args_cli.recorded_command_trace_sha256,
+            episode_id=args_cli.recorded_command_episode_id,
+        )
+        recorded_command_source_manifest_path = Path(
+            args_cli.recorded_command_source_manifest
+        ).expanduser().resolve()
+        if not recorded_command_source_manifest_path.is_file():
+            raise FileNotFoundError(
+                "recorded command source manifest not found: "
+                f"{recorded_command_source_manifest_path}"
+            )
+        recorded_command_source_manifest_sha256 = _sha256_file(
+            recorded_command_source_manifest_path
+        )
+        if (
+            recorded_command_source_manifest_sha256
+            != args_cli.recorded_command_source_manifest_sha256
+        ):
+            raise RuntimeError(
+                "recorded command source manifest SHA256 mismatch: "
+                f"expected={args_cli.recorded_command_source_manifest_sha256} "
+                f"actual={recorded_command_source_manifest_sha256}"
+            )
+        recorded_command_source_manifest = json.loads(
+            recorded_command_source_manifest_path.read_text(encoding="utf-8")
+        )
+        source_metadata = recorded_command_source_manifest.get("metadata", {})
+        required_contract = {
+            "task": (
+                source_metadata.get("task") if b300_hybrid_behavior else args_cli.task
+            ),
+            "seed": args_cli.seed,
+            "num_envs": args_cli.num_envs,
+            "terrain_level": args_cli.play_terrain_level,
+            "terrain_type": args_cli.play_terrain_type,
+            "front_step_eval_reset": args_cli.front_step_eval_reset,
+            "front_step_eval_side": args_cli.front_step_eval_side,
+            "front_step_eval_edge_gap": (
+                source_metadata.get("front_step_eval_edge_gap")
+                if b300_hybrid_narrow else float(args_cli.front_step_eval_edge_gap)
+            ),
+            "front_step_eval_lateral_offset": (
+                source_metadata.get("front_step_eval_lateral_offset")
+                if b300_hybrid_narrow else float(args_cli.front_step_eval_lateral_offset)
+            ),
+            "front_step_eval_yaw_offset_deg": (
+                source_metadata.get("front_step_eval_yaw_offset_deg")
+                if b300_hybrid_narrow else float(args_cli.front_step_eval_yaw_offset_deg)
+            ),
+            "eval_action_delay_steps": args_cli.eval_action_delay_steps,
+        }
+        mismatches = {
+            name: {"source": source_metadata.get(name), "requested": requested}
+            for name, requested in required_contract.items()
+            if source_metadata.get(name) != requested
+        }
+        if mismatches:
+            raise RuntimeError(
+                "recorded command replay contract differs from source manifest: "
+                + json.dumps(mismatches, sort_keys=True)
+            )
+        if not args_cli.reset_after_play_terrain_selection:
+            raise ValueError(
+                "recorded command replay requires --reset_after_play_terrain_selection"
+            )
+        fixed_motion_data_only = (
+            args_cli.fixed_motion_direct_action_mode == "oracle"
+            or args_cli.fixed_motion_raw_action_mode is not None
+            or args_cli.b300_hybrid_canonical_output is not None
+            or b300_hybrid_behavior
+            or args_cli.b300_hybrid_dagger_output is not None
+        )
+        if (not args_cli.video or not args_cli.record_joint_data) and not fixed_motion_data_only:
+            raise ValueError("recorded command preview requires --video and --record_joint_data")
+        if args_cli.highstep_gap_camera != "static_side_top":
+            raise ValueError(
+                "recorded command preview requires --highstep_gap_camera static_side_top"
+            )
+        if int(args_cli.num_envs or 0) != 1:
+            raise ValueError("recorded command preview requires --num_envs 1")
+        if not fixed_motion_data_only and int(args_cli.video_length) != recorded_command_replay.frame_count:
+            raise ValueError(
+                "recorded command video_length must equal the frozen episode frame count"
+            )
+        if (
+            args_cli.play_max_steps is None
+            or int(args_cli.play_max_steps) != recorded_command_replay.frame_count
+        ):
+            raise ValueError(
+                "recorded command play_max_steps must equal the frozen episode frame count"
+            )
+        print(
+            "[RECORDED_COMMAND_REPLAY] "
+            + json.dumps(recorded_command_replay.summary(), sort_keys=True),
+            flush=True,
+        )
+
+    training_distribution_binding = None
+    if args_cli.training_distribution:
+        incompatible = {
+            "--keyboard": args_cli.keyboard,
+            "--se2_gamepad": args_cli.se2_gamepad,
+            "--debug": args_cli.debug,
+            "--real-time": args_cli.real_time,
+            "--record_joint_data": args_cli.record_joint_data,
+            "--play_terrain_level": args_cli.play_terrain_level is not None,
+            "--play_terrain_type": args_cli.play_terrain_type is not None,
+            "--reset_after_play_terrain_selection": args_cli.reset_after_play_terrain_selection,
+            "--front_step_eval_reset": args_cli.front_step_eval_reset,
+            "--fixed_velocity_command": args_cli.fixed_velocity_command is not None,
+            "--recorded_command_trace": args_cli.recorded_command_trace is not None,
+            "--eval_action_delay_steps": args_cli.eval_action_delay_steps is not None,
+            "--eval_effort_limits": args_cli.eval_effort_limits is not None,
+            "--print_rear_width_metrics": args_cli.print_rear_width_metrics,
+            "--highstep_gap_camera": args_cli.highstep_gap_camera != "none",
+            "--seed": args_cli.seed is not None,
+        }
+        active_incompatible = [name for name, active in incompatible.items() if active]
+        if active_incompatible:
+            raise ValueError(
+                "--training_distribution must preserve the saved training distribution; "
+                f"remove incompatible options: {active_incompatible}"
+            )
+        if args_cli.num_envs is None or int(args_cli.num_envs) <= 0:
+            raise ValueError("--training_distribution requires a positive explicit --num_envs")
+        if not args_cli.training_distribution_env_snapshot or not args_cli.training_distribution_env_sha256:
+            raise ValueError(
+                "--training_distribution requires a hash-bound --training_distribution_env_snapshot "
+                "and --training_distribution_env_sha256"
+            )
+    elif args_cli.training_distribution_env_snapshot or args_cli.training_distribution_env_sha256:
+        raise ValueError("training distribution snapshot arguments require --training_distribution")
+
     # parse configuration
     env_cfg = parse_env_cfg(
         args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs, use_fabric=not args_cli.disable_fabric
@@ -2122,6 +3584,8 @@ def main():
     # with open("env_cfg_debug.json", "w") as f:
     #     json.dump(env_cfg.to_dict(), f, indent=4)
     agent_cfg: RslRlBaseRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    if args_cli.highstep_0707_legacy_student_profile:
+        agent_cfg = _apply_highstep_0707_legacy_student_profile(agent_cfg, args_cli.task)
     terrain_schedule_cfg_for_manifest = getattr(getattr(env_cfg, "curriculum", None), "terrain_levels", None)
     support_schedule_cfg_for_manifest = getattr(
         getattr(env_cfg, "curriculum", None), "highstep_action_score", None
@@ -2136,6 +3600,18 @@ def main():
         agent_cfg.seed = seed
         torch.manual_seed(seed)
         np.random.seed(seed)
+
+    if args_cli.training_distribution:
+        training_distribution_binding = _verify_training_distribution_config(
+            env_cfg,
+            args_cli.training_distribution_env_snapshot,
+            args_cli.training_distribution_env_sha256,
+        )
+        print(
+            "[TRAINING_DISTRIBUTION_BINDING] "
+            + json.dumps(training_distribution_binding, sort_keys=True),
+            flush=True,
+        )
 
     if args_cli.disable_action_prior:
         from robot_lab.tasks.locomotion.velocity import mdp as velocity_mdp
@@ -2186,50 +3662,54 @@ def main():
         agent_cfg.policy.critic_hidden_dims = [512, 256, 128]
         agent_cfg.policy.activation = "elu"
         agent_cfg.policy.init_noise_std = 0.8
-    # make a smaller scene for play
+    # Manual play keeps its historical reduced/deterministic scene.  Automatic
+    # distribution inspection preserves the saved training cfg verbatim; the
+    # user-selected number of parallel envs is its only allowed config change.
     env_cfg.scene.num_envs = args_cli.num_envs
-    # spawn the robot randomly in the grid (instead of their terrain levels)
-    env_cfg.scene.terrain.max_init_terrain_level = None
-    # reduce the number of terrains to save memory
-    if env_cfg.scene.terrain.terrain_generator is not None:
-        if args_cli.play_terrain_level is not None or args_cli.play_terrain_type is not None:
-            env_cfg.scene.terrain.terrain_generator.num_rows = max(
-                int(env_cfg.scene.terrain.terrain_generator.num_rows),
-                int(args_cli.play_terrain_level or 0) + 1,
-            )
-            env_cfg.scene.terrain.terrain_generator.num_cols = max(
-                int(env_cfg.scene.terrain.terrain_generator.num_cols),
-                20,
-            )
-            env_cfg.scene.terrain.terrain_generator.curriculum = True
-        else:
-            env_cfg.scene.terrain.terrain_generator.num_rows = 5
-            env_cfg.scene.terrain.terrain_generator.num_cols = 5
-            env_cfg.scene.terrain.terrain_generator.curriculum = False
+    if not args_cli.training_distribution:
+        # spawn the robot randomly in the grid (instead of their terrain levels)
+        env_cfg.scene.terrain.max_init_terrain_level = None
+        # reduce the number of terrains to save memory
+        if env_cfg.scene.terrain.terrain_generator is not None:
+            if args_cli.play_terrain_level is not None or args_cli.play_terrain_type is not None:
+                env_cfg.scene.terrain.terrain_generator.num_rows = max(
+                    int(env_cfg.scene.terrain.terrain_generator.num_rows),
+                    int(args_cli.play_terrain_level or 0) + 1,
+                )
+                env_cfg.scene.terrain.terrain_generator.num_cols = max(
+                    int(env_cfg.scene.terrain.terrain_generator.num_cols),
+                    20,
+                )
+                env_cfg.scene.terrain.terrain_generator.curriculum = True
+            else:
+                env_cfg.scene.terrain.terrain_generator.num_rows = 5
+                env_cfg.scene.terrain.terrain_generator.num_cols = 5
+                env_cfg.scene.terrain.terrain_generator.curriculum = False
 
-    # Nominal play is deterministic; the random-force scenario keeps the full configured DR stack.
-    for group_name in ("policy", "estimator", "critic"):
-        group = getattr(env_cfg.observations, group_name, None)
-        if group is not None and hasattr(group, "enable_corruption"):
-            group.enable_corruption = False
-    if not args_cli.keep_play_randomization:
-        for event_name in (
-            "randomize_rigid_body_material",
-            "randomize_rigid_body_mass",
-            "randomize_com_positions",
-            "randomize_reset_joints",
-            "randomize_actuator_gains",
-            "randomize_joint_friction",
-            "randomize_screw_joints",
-            "randomize_reset_base",
-            "randomize_highstep_foot_under_hip_reset",
-            "randomize_apply_external_force_torque",
-            "randomize_limb_external_force_torque",
-            "randomize_highstep_joint_observation_bias",
-            "randomize_push_robot",
-        ):
-            if hasattr(env_cfg.events, event_name):
-                setattr(env_cfg.events, event_name, None)
+    if not args_cli.training_distribution:
+        # Nominal play is deterministic; the random-force scenario keeps the full configured DR stack.
+        for group_name in ("policy", "estimator", "critic"):
+            group = getattr(env_cfg.observations, group_name, None)
+            if group is not None and hasattr(group, "enable_corruption"):
+                group.enable_corruption = False
+        if not args_cli.keep_play_randomization:
+            for event_name in (
+                "randomize_rigid_body_material",
+                "randomize_rigid_body_mass",
+                "randomize_com_positions",
+                "randomize_reset_joints",
+                "randomize_actuator_gains",
+                "randomize_joint_friction",
+                "randomize_screw_joints",
+                "randomize_reset_base",
+                "randomize_highstep_foot_under_hip_reset",
+                "randomize_apply_external_force_torque",
+                "randomize_limb_external_force_torque",
+                "randomize_highstep_joint_observation_bias",
+                "randomize_push_robot",
+            ):
+                if hasattr(env_cfg.events, event_name):
+                    setattr(env_cfg.events, event_name, None)
     if args_cli.eval_action_delay_steps is not None:
         delay_steps = max(0, int(args_cli.eval_action_delay_steps))
         action_cfg = getattr(getattr(env_cfg, "actions", None), "joint_pos", None)
@@ -2240,10 +3720,12 @@ def main():
             raise ValueError(
                 f"Requested eval action delay={delay_steps}, but this task has no delayed action term."
             )
-    env_cfg.curriculum.terrain_levels = None
-    env_cfg.curriculum.command_levels = None
+    if not args_cli.training_distribution:
+        env_cfg.curriculum.terrain_levels = None
+        env_cfg.curriculum.command_levels = None
 
     fixed_velocity_command = tuple(float(v) for v in args_cli.fixed_velocity_command) if args_cli.fixed_velocity_command else None
+    one_shot_obs_command_step = {"value": 0}
     if fixed_velocity_command is not None:
         env_cfg.commands.base_velocity.debug_vis = True
         env_cfg.commands.base_velocity.resampling_time_range = (1000000.0, 1000000.0)
@@ -2261,6 +3743,78 @@ def main():
                         history_length=old_history_len,
                         flatten_history_dim=old_flatten,
                     ))
+
+    if recorded_command_replay is not None:
+        env_cfg.scene.num_envs = 1
+        env_cfg.terminations.time_out = None
+        env_cfg.commands.base_velocity.debug_vis = True
+        env_cfg.commands.base_velocity.resampling_time_range = (1000000.0, 1000000.0)
+        for group_name in ("policy", "estimator", "critic"):
+            obs_group = getattr(env_cfg.observations, group_name, None)
+            if obs_group is None:
+                continue
+            velocity_term = getattr(obs_group, "velocity_commands", None)
+            if velocity_term is None:
+                continue
+            old_history_len = getattr(velocity_term, "history_length", 0)
+            old_flatten = getattr(velocity_term, "flatten_history_dim", False)
+            setattr(
+                obs_group,
+                "velocity_commands",
+                ObsTerm(
+                    func=lambda env, replay=recorded_command_replay: torch.tensor(
+                        replay.command(), device=env.device, dtype=torch.float32
+                    ).unsqueeze(0).repeat(env.num_envs, 1),
+                    history_length=old_history_len,
+                    flatten_history_dim=old_flatten,
+                ),
+            )
+
+    if args_cli.fixed_motion_one_shot_preregistration is not None:
+        # Bind command history before the environment is constructed.  This
+        # makes reset-time 10-frame command history deterministic (all zeros)
+        # and then exposes the current internal-clock command on every policy
+        # inference step.  It does not read or replay an external trajectory.
+        env_cfg.scene.num_envs = 1
+        env_cfg.terminations.time_out = None
+        env_cfg.commands.base_velocity.debug_vis = True
+        env_cfg.commands.base_velocity.resampling_time_range = (1000000.0, 1000000.0)
+        for group_name in ("policy", "estimator", "critic"):
+            obs_group = getattr(env_cfg.observations, group_name, None)
+            if obs_group is None:
+                continue
+            velocity_term = getattr(obs_group, "velocity_commands", None)
+            if velocity_term is None:
+                continue
+            old_history_len = getattr(velocity_term, "history_length", 0)
+            old_flatten = getattr(velocity_term, "flatten_history_dim", False)
+            setattr(
+                obs_group,
+                "velocity_commands",
+                ObsTerm(
+                    func=lambda env, clock=one_shot_obs_command_step: torch.tensor(
+                        [
+                            0.7200000286 if 21 <= int(clock["value"]) < 80 else 0.0,
+                            0.0,
+                            0.0,
+                        ],
+                        device=env.device,
+                        dtype=torch.float32,
+                    ).unsqueeze(0).repeat(env.num_envs, 1),
+                    history_length=old_history_len,
+                    flatten_history_dim=old_flatten,
+                ),
+            )
+
+    manual_highstep_respawn_contract = bool(
+        args_cli.keyboard
+        and args_cli.front_step_eval_reset
+        and not args_cli.keep_play_randomization
+        and recorded_command_replay is None
+    )
+    manual_highstep_start_gate = (
+        ManualHighstepStartGate() if manual_highstep_respawn_contract else None
+    )
 
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
@@ -2282,6 +3836,12 @@ def main():
         )
         controller = Se2Keyboard(kb_cfg)  # ← 用配置类构造
 
+        def _manual_keyboard_command() -> torch.Tensor:
+            command = controller.advance()
+            if manual_highstep_start_gate is not None:
+                command = manual_highstep_start_gate.filter_command(command)
+            return command
+
         # # 返回形状 [1, 3] 的 (vx, vy, wz)
         # env_cfg.observations.policy.velocity_commands = ObsTerm(
         #     func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
@@ -2300,7 +3860,9 @@ def main():
                     old_flatten = getattr(obs_group.velocity_commands, "flatten_history_dim", False)
 
                     setattr(obs_group, "velocity_commands", ObsTerm(
-                        func=lambda env: controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32),
+                        func=lambda env: _manual_keyboard_command().unsqueeze(0).to(
+                            env.device, dtype=torch.float32
+                        ),
                         history_length=old_history_len,       # 把历史长度加回来！
                         flatten_history_dim=old_flatten       # 保持原有的展平设置
                     ))
@@ -2376,10 +3938,68 @@ def main():
         # 否则（比如只传了 model_7900.pt），统统交给 get_checkpoint_path 去 logs 目录里智能搜索
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
+    if args_cli.highstep_0707_legacy_student_profile:
+        actual_checkpoint_sha256 = _sha256_file(resume_path)
+        if actual_checkpoint_sha256 != _HIGHSTEP_0707_STUDENT_CHECKPOINT_SHA256:
+            raise RuntimeError(
+                "0707 deployed Student checkpoint SHA256 mismatch: "
+                f"{actual_checkpoint_sha256} != {_HIGHSTEP_0707_STUDENT_CHECKPOINT_SHA256}"
+            )
+        print(
+            "[0707_REPLAY] Verified deployed Student checkpoint SHA256: "
+            f"{actual_checkpoint_sha256}",
+            flush=True,
+        )
+
+    if recorded_command_replay is not None:
+        actual_checkpoint_sha256 = _sha256_file(resume_path)
+        expected_checkpoint_sha256 = recorded_command_source_manifest["metadata"].get(
+            "checkpoint_sha256"
+        )
+        if b300_hybrid_behavior:
+            if (
+                b300_hybrid_behavior_preregistration.get("teacher_sha256")
+                != expected_checkpoint_sha256
+            ):
+                raise RuntimeError("B300 frozen command source is not the preregistered Teacher")
+            checkpoint_payload = torch.load(resume_path, map_location="cpu", weights_only=False)
+            recovery = (
+                checkpoint_payload.get("infos", {})
+                .get("robot_lab_algorithm_checkpoint_state", {})
+                .get("student_recovery", {})
+            )
+            if not (
+                recovery.get("stage") == "B300_CANONICAL_HYBRID"
+                and recovery.get("preregistration_sha256")
+                == args_cli.b300_hybrid_behavior_preregistration_sha256
+                and int(recovery.get("effective_update_count", -1)) >= 1
+            ):
+                raise RuntimeError("B300 Student checkpoint recovery binding is invalid")
+            print(
+                "[B300_HYBRID_BEHAVIOR_BINDING] "
+                + json.dumps(
+                    {
+                        "checkpoint": os.path.realpath(resume_path),
+                        "checkpoint_sha256": actual_checkpoint_sha256,
+                        "effective_updates": int(recovery["effective_update_count"]),
+                        "preregistration_sha256": args_cli.b300_hybrid_behavior_preregistration_sha256,
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+        elif actual_checkpoint_sha256 != expected_checkpoint_sha256:
+            raise RuntimeError(
+                "recorded command checkpoint SHA256 mismatch: "
+                f"expected={expected_checkpoint_sha256} actual={actual_checkpoint_sha256}"
+            )
+
     log_dir = os.path.dirname(resume_path)
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    if args_cli.highstep_v1123_frozen_preflight_output:
+        env.unwrapped._highstep_v1123_preflight_capture = True
 
     _apply_play_terrain_selection(env, args_cli.play_terrain_level, args_cli.play_terrain_type)
 
@@ -2434,10 +4054,25 @@ def main():
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
 
+    # RecordVideo captures an initial frame as soon as it is wrapped.  Install
+    # the world-fixed view before that capture so frame zero cannot be an empty
+    # or default-camera image.  The one-shot guard prevents every later call
+    # from changing eye/lookat.
+    if args_cli.video and args_cli.highstep_gap_camera == "static_side_top":
+        _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
+
     # wrap for video recording
     if args_cli.video:
+        if args_cli.video_output_dir:
+            video_folder = Path(args_cli.video_output_dir).expanduser().resolve()
+            if video_folder.exists() and any(video_folder.iterdir()):
+                raise FileExistsError(
+                    f"refusing to overwrite non-empty video output: {video_folder}"
+                )
+        else:
+            video_folder = Path(log_dir) / "videos" / "play"
         video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "play"),
+            "video_folder": str(video_folder),
             "step_trigger": lambda step: step == 0,
             "video_length": args_cli.video_length,
             "disable_logger": True,
@@ -2526,7 +4161,9 @@ def main():
             action_cfg=action_cfg,
             terrain_term_cfg=terrain_schedule_cfg_for_manifest,
             support_term_cfg=support_schedule_cfg_for_manifest,
-            terrain_curriculum_enabled=False,
+            terrain_curriculum_enabled=bool(
+                args_cli.training_distribution and terrain_schedule_cfg_for_manifest is not None
+            ),
             support_metric_enabled=support_schedule_cfg_for_manifest is not None,
             checkpoint_path=resume_path,
             checkpoint_iteration=checkpoint_iteration,
@@ -2595,6 +4232,63 @@ def main():
 
     # Any evaluation reset must happen after the checkpoint schedule is
     # installed, otherwise reset-time high-step metrics see update zero.
+    if recorded_command_replay is not None:
+        source_joint_names = list(
+            recorded_command_source_manifest.get("joint_names_in_action_order", [])
+        )
+        if len(source_joint_names) != 16:
+            raise RuntimeError("recorded reset state requires the frozen 16-joint action order")
+        reset_joint_pos, reset_joint_vel = recorded_command_replay.pre_reset_joint_state(
+            source_joint_names
+        )
+        reset_robot = env.unwrapped.scene["robot"]
+        reset_joint_id_by_name = {
+            name: index for index, name in enumerate(reset_robot.joint_names)
+        }
+        missing_reset_joints = [
+            name for name in source_joint_names if name not in reset_joint_id_by_name
+        ]
+        if missing_reset_joints:
+            raise RuntimeError(
+                f"recorded reset joints are absent from the live robot: {missing_reset_joints}"
+            )
+        reset_joint_ids = [reset_joint_id_by_name[name] for name in source_joint_names]
+        reset_device = reset_robot.data.joint_pos.device
+        reset_dtype = reset_robot.data.joint_pos.dtype
+        reset_robot.write_joint_state_to_sim(
+            torch.tensor(reset_joint_pos, device=reset_device, dtype=reset_dtype).reshape(1, 16)
+            + (
+                torch.tensor(
+                    [0.010, -0.010, 0.010, -0.010, -0.008, 0.008, -0.008, 0.008,
+                     0.006, -0.006, 0.006, -0.006, 0.001, -0.001, 0.001, -0.001],
+                    device=reset_device,
+                    dtype=reset_dtype,
+                ).reshape(1, 16)
+                * int(args_cli.b300_hybrid_initial_joint_delta_sign)
+            ),
+            torch.tensor(
+                reset_joint_vel, device=reset_device, dtype=reset_dtype
+            ).reshape(1, 16),
+            joint_ids=reset_joint_ids,
+        )
+        env.unwrapped.sim.forward()
+        print(
+            "[RECORDED_RESET_STATE] "
+            + json.dumps(
+                {
+                    "restored": True,
+                    "joint_count": len(source_joint_names),
+                    "source_control_step": recorded_command_replay.summary()[
+                        "pre_reset_source_control_step"
+                    ],
+                    "source_episode_id": recorded_command_replay.summary()[
+                        "pre_reset_source_episode_id"
+                    ],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     if args_cli.reset_after_play_terrain_selection and (
         args_cli.play_terrain_level is not None or args_cli.play_terrain_type is not None
     ):
@@ -2606,17 +4300,36 @@ def main():
             args_cli.play_terrain_type,
             args_cli.front_step_eval_platform_width,
         )
-        _apply_front_step_eval_reset(
-            env,
-            args_cli.front_step_eval_side,
-            args_cli.front_step_eval_distance,
-            args_cli.front_step_eval_edge_gap,
-            platform_width,
-            args_cli.front_step_eval_lateral_offset,
-            args_cli.front_step_eval_yaw_offset_deg,
-            args_cli.play_terrain_type,
-        )
-
+        if manual_highstep_respawn_contract:
+            _apply_manual_highstep_respawn(
+                env,
+                args_cli.front_step_eval_side,
+                args_cli.front_step_eval_distance,
+                args_cli.front_step_eval_edge_gap,
+                platform_width,
+                args_cli.front_step_eval_lateral_offset,
+                args_cli.front_step_eval_yaw_offset_deg,
+                args_cli.play_terrain_type,
+            )
+            print(
+                "RESET RECOVERING / 请勿操作 | "
+                f"minimum={manual_highstep_start_gate.min_hold_steps} control steps "
+                f"({manual_highstep_start_gate.min_hold_steps * float(env.unwrapped.step_dt):.2f} s) "
+                f"and {manual_highstep_start_gate.stable_steps_required} consecutive stable steps; "
+                "keyboard motion input is ignored.",
+                flush=True,
+            )
+        else:
+            _apply_front_step_eval_reset(
+                env,
+                args_cli.front_step_eval_side,
+                args_cli.front_step_eval_distance,
+                args_cli.front_step_eval_edge_gap,
+                platform_width,
+                args_cli.front_step_eval_lateral_offset,
+                args_cli.front_step_eval_yaw_offset_deg,
+                args_cli.play_terrain_type,
+            )
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
@@ -2734,12 +4447,722 @@ def main():
 
     # reset environment
     obs = env.get_observations()
+    phase_residual_reference = None
+    phase_residual_reference_controller = None
+    phase_residual_dataset_collector = None
+    phase_residual_dataset_joint_ids = None
+    phase_residual_dataset_rear_top_streak = None
+    phase_residual_dataset_rear_confirmed = None
+    phase_residual_dataset_hold_streak = None
+    phase_residual_dataset_hold_success = None
+    phase_residual_hybrid_controller = None
+    phase_residual_behavior_output_dir = None
+    phase_residual_behavior_rear_top_streak = None
+    phase_residual_behavior_rear_confirmed = None
+    phase_residual_behavior_hold_streak = None
+    phase_residual_behavior_hold_success = None
+    phase_residual_behavior_terminated = None
+    phase_residual_behavior_joint_ids = None
+    phase_residual_dagger_collector = None
+    phase_residual_dataset_settle_steps = 0
+    phase_residual_timing_amendment_path = None
+    phase_residual_timing_amendment_sha256 = None
+    phase_controller_inference_path = None
+    fixed_motion_oracle_collector = None
+    fixed_motion_target_adapter = None
+    fixed_motion_student_controller = None
+    fixed_motion_action_term = None
+    fixed_motion_pending_teacher_target = None
+    fixed_motion_current_vx = torch.zeros(env.num_envs, device=env.device)
+    fixed_motion_rear_top_streak = None
+    fixed_motion_rear_confirmed = None
+    fixed_motion_hold_streak = None
+    fixed_motion_hold_success = None
+    fixed_motion_terminated = None
+    fixed_motion_failure = None
+    raw_motion_collector = None
+    raw_motion_student_controller = None
+    raw_motion_dagger_collector = None
+    raw_motion_action_term = None
+    raw_motion_current_vx = torch.zeros(env.num_envs, device=env.device)
+    raw_motion_rear_top_streak = None
+    raw_motion_rear_confirmed = None
+    raw_motion_hold_streak = None
+    raw_motion_hold_success = None
+    raw_motion_terminated = None
+    raw_motion_failure = None
+    b300_hybrid_collector = None
+    b300_hybrid_dagger_collector = None
+    b300_hybrid_current_command = torch.zeros((env.num_envs, 3), device=env.device)
+    if args_cli.b300_hybrid_canonical_output is not None:
+        if not (
+            args_cli.b300_hybrid_collection_preregistration
+            and args_cli.b300_hybrid_collection_preregistration_sha256
+            and recorded_command_replay is not None
+            and args_cli.front_step_eval_reset
+            and int(env.num_envs) == 1
+            and int(args_cli.play_max_steps or -1) == 138
+            and int(args_cli.eval_action_delay_steps or 0) == 0
+        ):
+            raise ValueError(
+                "B300 canonical collection requires hash-bound preregistration, recorded "
+                "command replay, frozen reset, num_envs=1, 138 steps and delay=0"
+            )
+        b300_hybrid_collector = CanonicalTensorCollector(
+            args_cli.b300_hybrid_canonical_output,
+            args_cli.b300_hybrid_collection_preregistration,
+            args_cli.b300_hybrid_collection_preregistration_sha256,
+            policy_module=policy_nn,
+            env=env,
+        )
+    if args_cli.b300_hybrid_dagger_output is not None:
+        if not (
+            args_cli.b300_hybrid_dagger_stage_manifest
+            and args_cli.b300_hybrid_dagger_stage_manifest_sha256
+            and b300_hybrid_behavior
+            and recorded_command_replay is not None
+            and int(env.num_envs) == 1
+            and int(args_cli.play_max_steps or -1) == 138
+            and int(args_cli.eval_action_delay_steps or 0) == 0
+        ):
+            raise ValueError("B300 DAgger requires exact behavior authority, stage manifest, one env, 138 steps and delay=0")
+        b300_hybrid_dagger_collector = DaggerTensorCollector(
+            args_cli.b300_hybrid_dagger_output,
+            args_cli.b300_hybrid_dagger_stage_manifest,
+            args_cli.b300_hybrid_dagger_stage_manifest_sha256,
+            policy_module=policy_nn,
+            env=env,
+        )
+    fixed_motion_args = (
+        args_cli.fixed_motion_preregistration,
+        args_cli.fixed_motion_preregistration_sha256,
+        args_cli.fixed_motion_output,
+    )
+    if args_cli.fixed_motion_direct_action_mode is not None:
+        if not all(value is not None for value in fixed_motion_args):
+            raise ValueError("fixed-motion mode requires preregistration/SHA and output")
+        if not args_cli.front_step_eval_reset:
+            raise ValueError("fixed-motion mode requires the frozen front-step reset")
+        action_terms = getattr(env.unwrapped.action_manager, "_terms", {})
+        fixed_motion_action_term = action_terms.get("joint_pos") if isinstance(action_terms, dict) else None
+        if fixed_motion_action_term is None:
+            raise RuntimeError("fixed-motion mode requires the production joint_pos action term")
+        if args_cli.fixed_motion_direct_action_mode == "oracle":
+            if int(env.num_envs) != 1:
+                raise ValueError("fixed-motion safe oracle requires exactly one environment")
+            fixed_motion_oracle_collector = OracleDatasetCollector(
+                args_cli.fixed_motion_output,
+                args_cli.fixed_motion_preregistration,
+                args_cli.fixed_motion_preregistration_sha256,
+                action_term=fixed_motion_action_term,
+                device=env.device,
+                dtype=env.unwrapped.scene["robot"].data.joint_pos.dtype,
+            )
+            fixed_motion_target_adapter = SafeMappedTargetAdapter(fixed_motion_action_term, 1)
+        else:
+            student_args = (
+                args_cli.fixed_motion_training_manifest,
+                args_cli.fixed_motion_training_manifest_sha256,
+                args_cli.fixed_motion_wandb_verification,
+                args_cli.fixed_motion_wandb_verification_sha256,
+            )
+            if not all(value is not None for value in student_args):
+                raise ValueError("fixed-motion Student/DAgger mode requires training and W&B manifests with SHAs")
+            if int(env.num_envs) != 15:
+                raise ValueError("fixed-motion Student/DAgger gate requires exactly 15 environments")
+            fixed_motion_student_controller = FixedMotionStudentController(
+                training_manifest_path=args_cli.fixed_motion_training_manifest,
+                training_manifest_sha256=args_cli.fixed_motion_training_manifest_sha256,
+                wandb_verification_path=args_cli.fixed_motion_wandb_verification,
+                wandb_verification_sha256=args_cli.fixed_motion_wandb_verification_sha256,
+                preregistration_path=args_cli.fixed_motion_preregistration,
+                preregistration_sha256=args_cli.fixed_motion_preregistration_sha256,
+                environment_checkpoint_path=resume_path,
+                action_term=fixed_motion_action_term,
+                num_envs=15,
+                device=env.device,
+                dtype=env.unwrapped.scene["robot"].data.joint_pos.dtype,
+            )
+        fixed_motion_rear_top_streak = torch.zeros(env.num_envs, device=env.device, dtype=torch.int64)
+        fixed_motion_rear_confirmed = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+        fixed_motion_hold_streak = torch.zeros(env.num_envs, device=env.device, dtype=torch.int64)
+        fixed_motion_hold_success = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+        fixed_motion_terminated = torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    if args_cli.fixed_motion_raw_action_mode is not None:
+        required = (
+            args_cli.fixed_motion_raw_preregistration,
+            args_cli.fixed_motion_raw_preregistration_sha256,
+            args_cli.fixed_motion_raw_output,
+        )
+        if not all(value is not None for value in required):
+            raise ValueError("raw-action mode requires preregistration/SHA and output")
+        if not args_cli.front_step_eval_reset or int(env.num_envs) != 1:
+            raise ValueError("raw-action fixed-motion runs require frozen reset and num_envs=1")
+        terms = getattr(env.unwrapped.action_manager, "_terms", {})
+        raw_motion_action_term = terms.get("joint_pos") if isinstance(terms, dict) else None
+        if raw_motion_action_term is None:
+            raise RuntimeError("raw-action mode requires the production joint_pos action term")
+        robot_dtype = env.unwrapped.scene["robot"].data.joint_pos.dtype
+        phase_only_action_term = None
+        one_shot_enabled = False
+        if args_cli.fixed_motion_phase_only_deployment_preregistration is not None:
+            if args_cli.fixed_motion_phase_only_deployment_preregistration_sha256 is None:
+                raise ValueError("phase-only deployment preregistration requires its SHA256")
+            _, phase_only_authority = load_phase_only_deployment_authority(
+                args_cli.fixed_motion_phase_only_deployment_preregistration,
+                args_cli.fixed_motion_phase_only_deployment_preregistration_sha256,
+            )
+            if phase_only_authority["checkpoint_sha256"] != _sha256_file(
+                phase_only_authority["checkpoint"]
+            ):
+                raise RuntimeError("phase-only deployment checkpoint binding changed")
+            phase_only_action_term = raw_motion_action_term
+        if args_cli.fixed_motion_one_shot_preregistration is not None:
+            if args_cli.fixed_motion_one_shot_preregistration_sha256 is None:
+                raise ValueError("one-shot deployment preregistration requires its SHA256")
+            _, one_shot_authority = load_one_shot_deployment_authority(
+                args_cli.fixed_motion_one_shot_preregistration,
+                args_cli.fixed_motion_one_shot_preregistration_sha256,
+            )
+            if int(args_cli.play_max_steps or -1) != 138:
+                raise ValueError("one-shot deployment requires exactly 138 play steps")
+            one_shot_enabled = True
+        if args_cli.fixed_motion_raw_action_mode == "smoke":
+            raw_motion_collector = RawPassthroughCollector(
+                args_cli.fixed_motion_raw_output,
+                args_cli.fixed_motion_raw_preregistration,
+                args_cli.fixed_motion_raw_preregistration_sha256,
+                device=env.device,
+                dtype=robot_dtype,
+            )
+        else:
+            student_required = (
+                args_cli.fixed_motion_raw_training_manifest,
+                args_cli.fixed_motion_raw_training_manifest_sha256,
+                args_cli.fixed_motion_raw_wandb_verification,
+                args_cli.fixed_motion_raw_wandb_verification_sha256,
+            )
+            if not all(value is not None for value in student_required):
+                raise ValueError("raw Student/DAgger mode requires training and W&B manifests with SHAs")
+            raw_motion_student_controller = RawActionStudentController(
+                training_manifest_path=args_cli.fixed_motion_raw_training_manifest,
+                training_manifest_sha256=args_cli.fixed_motion_raw_training_manifest_sha256,
+                wandb_verification_path=args_cli.fixed_motion_raw_wandb_verification,
+                wandb_verification_sha256=args_cli.fixed_motion_raw_wandb_verification_sha256,
+                preregistration_path=args_cli.fixed_motion_raw_preregistration,
+                preregistration_sha256=args_cli.fixed_motion_raw_preregistration_sha256,
+                environment_checkpoint_path=resume_path,
+                num_envs=1,
+                device=env.device,
+                dtype=robot_dtype,
+                phase_only_action_term=phase_only_action_term,
+                one_shot=one_shot_enabled,
+            )
+            if args_cli.fixed_motion_raw_action_mode == "dagger":
+                if args_cli.fixed_motion_raw_dagger_round is None:
+                    raise ValueError("raw DAgger mode requires --fixed_motion_raw_dagger_round")
+                raw_motion_dagger_collector = RawActionDaggerCollector(
+                    args_cli.fixed_motion_raw_output,
+                    args_cli.fixed_motion_raw_preregistration,
+                    args_cli.fixed_motion_raw_preregistration_sha256,
+                    args_cli.fixed_motion_raw_dagger_round,
+                )
+        raw_motion_rear_top_streak = torch.zeros(1, device=env.device, dtype=torch.int64)
+        raw_motion_rear_confirmed = torch.zeros(1, device=env.device, dtype=torch.bool)
+        raw_motion_hold_streak = torch.zeros(1, device=env.device, dtype=torch.int64)
+        raw_motion_hold_success = torch.zeros(1, device=env.device, dtype=torch.bool)
+        raw_motion_terminated = torch.zeros(1, device=env.device, dtype=torch.bool)
+    if args_cli.phase_residual_reference_sha256 and not args_cli.phase_residual_reference:
+        raise ValueError(
+            "--phase_residual_reference_sha256 requires --phase_residual_reference"
+        )
+    if args_cli.phase_residual_reference:
+        if not args_cli.phase_residual_reference_sha256:
+            raise ValueError(
+                "--phase_residual_reference requires --phase_residual_reference_sha256"
+            )
+        if not args_cli.front_step_eval_reset or int(env.num_envs) != 1:
+            raise ValueError(
+                "--phase_residual_reference requires --front_step_eval_reset and --num_envs 1"
+            )
+        record_joint_names, _ = _joint_recording_schema(env)
+        action_terms = getattr(env.unwrapped.action_manager, "_terms", {})
+        action_term = action_terms.get("joint_pos") if isinstance(action_terms, dict) else None
+        if action_term is None:
+            raise RuntimeError("phase-residual replay requires the joint_pos action term")
+        robot = env.unwrapped.scene["robot"]
+        joint_id_by_name = {name: index for index, name in enumerate(robot.joint_names)}
+        joint_ids = [joint_id_by_name[name] for name in record_joint_names]
+        phase_residual_reference = PhaseResidualReference(
+            args_cli.phase_residual_reference,
+            expected_sha256=args_cli.phase_residual_reference_sha256,
+        )
+        restore_source_state = bool(args_cli.phase_residual_reference_restore_source_state)
+        if restore_source_state:
+            if int(args_cli.phase_residual_reference_blend_steps) != 0:
+                raise ValueError(
+                    "--phase_residual_reference_restore_source_state requires "
+                    "--phase_residual_reference_blend_steps 0"
+                )
+            if not phase_residual_reference.has_initial_full_state:
+                raise RuntimeError(
+                    "source-state replay requested but the reference has no complete root/joint state"
+                )
+            assert phase_residual_reference.initial_root_pose_cpu is not None
+            assert phase_residual_reference.initial_root_velocity_world_cpu is not None
+            assert phase_residual_reference.initial_measured_joint_vel_cpu is not None
+            state_device = robot.data.joint_pos.device
+            state_dtype = robot.data.joint_pos.dtype
+            root_pose = phase_residual_reference.initial_root_pose_cpu.to(
+                device=state_device, dtype=state_dtype
+            ).reshape(1, 7)
+            root_velocity = phase_residual_reference.initial_root_velocity_world_cpu.to(
+                device=state_device, dtype=state_dtype
+            ).reshape(1, 6)
+            joint_position = phase_residual_reference.initial_measured_joint_pos_cpu.to(
+                device=state_device, dtype=state_dtype
+            ).reshape(1, 16)
+            joint_velocity = phase_residual_reference.initial_measured_joint_vel_cpu.to(
+                device=state_device, dtype=state_dtype
+            ).reshape(1, 16)
+            robot.write_root_pose_to_sim(root_pose)
+            robot.write_root_velocity_to_sim(root_velocity)
+            robot.write_joint_state_to_sim(joint_position, joint_velocity, joint_ids=joint_ids)
+            env.unwrapped.sim.forward()
+            obs = env.get_observations()
+            print(
+                "[PHASE_RESIDUAL_SOURCE_STATE] "
+                + json.dumps(
+                    {
+                        "restored": True,
+                        "start_reference_index": 1,
+                        "initial_joint_projection_count": (
+                            phase_residual_reference.initial_measured_projection_count
+                        ),
+                        "initial_joint_projection_max_abs": (
+                            phase_residual_reference.initial_measured_projection_max_abs
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+        phase_residual_reference_controller = PhaseResidualReferenceController(
+            phase_residual_reference,
+            action_term=action_term,
+            initial_joint_pos=robot.data.joint_pos[:, joint_ids],
+            joint_names=record_joint_names,
+            blend_steps=args_cli.phase_residual_reference_blend_steps,
+            start_at_next_frame=restore_source_state,
+        )
+        print(
+            "[PHASE_RESIDUAL_REFERENCE] "
+            + json.dumps(
+                {
+                    "path": str(phase_residual_reference.path),
+                    "sha256": phase_residual_reference.sha256,
+                    "frames": phase_residual_reference.frame_count,
+                    "blend_steps": int(args_cli.phase_residual_reference_blend_steps),
+                    "restore_source_state": restore_source_state,
+                    "start_reference_index": 1 if restore_source_state else 0,
+                    "initial_joint_projection_count": (
+                        phase_residual_reference.initial_measured_projection_count
+                    ),
+                    "initial_joint_projection_max_abs": (
+                        phase_residual_reference.initial_measured_projection_max_abs
+                    ),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    dataset_args = (
+        args_cli.phase_residual_dataset_output,
+        args_cli.phase_residual_selected_reference_manifest,
+        args_cli.phase_residual_selected_reference_manifest_sha256,
+    )
+    if any(value is not None for value in dataset_args) and not all(
+        value is not None for value in dataset_args
+    ):
+        raise ValueError(
+            "phase-residual dataset collection requires output, selected-reference manifest, "
+            "and selected-reference manifest SHA together"
+        )
+    behavior_args = (
+        args_cli.phase_residual_training_manifest,
+        args_cli.phase_residual_training_manifest_sha256,
+        args_cli.phase_residual_wandb_verification,
+        args_cli.phase_residual_wandb_verification_sha256,
+        args_cli.phase_residual_behavior_output,
+        args_cli.phase_residual_preroll_manifest,
+        args_cli.phase_residual_preroll_manifest_sha256,
+    )
+    if any(value is not None for value in behavior_args) and not all(
+        value is not None for value in behavior_args
+    ):
+        raise ValueError(
+            "phase-residual behavior gate requires training manifest/SHA, W&B verification/SHA, "
+            "pre-roll manifest/SHA, and a new output directory together"
+        )
+    timing_args = (
+        args_cli.phase_residual_source_timing_amendment,
+        args_cli.phase_residual_source_timing_amendment_sha256,
+    )
+    if any(value is not None for value in timing_args) and not all(
+        value is not None for value in timing_args
+    ):
+        raise ValueError("phase-residual source timing amendment and SHA must be supplied together")
+    if (args_cli.phase_residual_dataset_output or args_cli.phase_residual_behavior_output) and not all(
+        value is not None for value in timing_args
+    ):
+        raise ValueError("phase-residual dataset/behavior execution requires the frozen timing amendment")
+    if all(value is not None for value in timing_args) and not (
+        args_cli.phase_residual_dataset_output or args_cli.phase_residual_behavior_output
+    ):
+        raise ValueError("phase-residual timing amendment was provided without a dataset/behavior run")
+    if args_cli.phase_residual_disable_residual and not args_cli.phase_residual_behavior_output:
+        raise ValueError("--phase_residual_disable_residual requires a behavior gate")
+    if args_cli.phase_direct_action and not args_cli.phase_residual_behavior_output:
+        raise ValueError("--phase_direct_action requires the canonical fixed-condition behavior gate")
+    if args_cli.phase_direct_action and args_cli.phase_residual_disable_residual:
+        raise ValueError("direct-action and residual-disabled reference-only modes are mutually exclusive")
+    dagger_args = (
+        args_cli.phase_residual_dagger_output,
+        args_cli.phase_residual_dagger_preregistration,
+        args_cli.phase_residual_dagger_preregistration_sha256,
+    )
+    if any(value is not None for value in dagger_args) and not all(
+        value is not None for value in dagger_args
+    ):
+        raise ValueError("phase-residual DAgger requires output, preregistration, and SHA together")
+    if args_cli.phase_residual_dagger_output and not args_cli.phase_residual_behavior_output:
+        raise ValueError("phase-residual DAgger requires the canonical behavior gate")
+    if args_cli.phase_residual_dataset_output:
+        if phase_residual_reference_controller is not None:
+            raise ValueError("Teacher dataset collection cannot run reference replay")
+        if int(env.num_envs) != 15:
+            raise ValueError("phase-residual Teacher dataset collection requires --num_envs 15")
+        phase_residual_dataset_settle_steps = 296
+        if int(args_cli.play_max_steps or -1) != 416:
+            raise ValueError("phase-residual Teacher dataset collection requires --play_max_steps 416")
+        if not args_cli.front_step_eval_reset or args_cli.keep_play_randomization:
+            raise ValueError(
+                "phase-residual Teacher dataset requires deterministic front-step reset and no random events"
+            )
+        if args_cli.eval_action_delay_steps != 0:
+            raise ValueError("phase-residual Teacher dataset requires action delay 0")
+        if fixed_velocity_command != (0.72, 0.0, 0.0):
+            raise ValueError("phase-residual Teacher dataset requires fixed command [0.72, 0, 0]")
+        if args_cli.play_terrain_type != "box_hard" or int(args_cli.play_terrain_level or -1) != 9:
+            raise ValueError("phase-residual Teacher dataset requires box_hard terrain level 9")
+        selected_path = Path(args_cli.phase_residual_selected_reference_manifest).expanduser().resolve()
+        selected_actual_sha = _sha256_file(selected_path)
+        if selected_actual_sha != args_cli.phase_residual_selected_reference_manifest_sha256:
+            raise RuntimeError(
+                "selected-reference manifest SHA mismatch before dataset collection: "
+                f"expected={args_cli.phase_residual_selected_reference_manifest_sha256} "
+                f"actual={selected_actual_sha}"
+            )
+        selected_payload = json.loads(selected_path.read_text(encoding="utf-8"))
+        selected_fixed = selected_payload.get("fixed_condition", {})
+        if (
+            selected_fixed.get("terrain_type") != "box_hard"
+            or int(selected_fixed.get("terrain_level", -1)) != 9
+            or selected_fixed.get("command") != [0.72, 0.0, 0.0]
+        ):
+            raise RuntimeError("selected-reference fixed-condition contract changed")
+        prereg_binding = selected_payload.get("preregistration", {})
+        prereg_path = Path(prereg_binding.get("path", "")).expanduser().resolve()
+        if _sha256_file(prereg_path) != prereg_binding.get("sha256"):
+            raise RuntimeError("selected-reference preregistration binding changed")
+        prereg_payload = json.loads(prereg_path.read_text(encoding="utf-8"))
+        teacher_binding = prereg_payload.get("unchanged_contract", {})
+        if _sha256_file(resume_path) != teacher_binding.get("teacher_sha256"):
+            raise RuntimeError("dataset checkpoint is not the frozen Teacher")
+        if args_cli.task != "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123-ArcdogAdjustableLeg-v0":
+            raise RuntimeError("dataset task is not the frozen production-prior Teacher task")
+
+        phase_residual_timing_amendment_path = Path(
+            args_cli.phase_residual_source_timing_amendment
+        ).expanduser().resolve()
+        phase_residual_timing_amendment_sha256 = _sha256_file(
+            phase_residual_timing_amendment_path
+        )
+        if (
+            phase_residual_timing_amendment_sha256
+            != args_cli.phase_residual_source_timing_amendment_sha256
+        ):
+            raise RuntimeError("source-timing amendment SHA mismatch")
+        timing_payload = json.loads(
+            phase_residual_timing_amendment_path.read_text(encoding="utf-8")
+        )
+        timing_contract = timing_payload.get("corrected_timing_contract", {})
+        if (
+            timing_payload.get("status") != "frozen_before_dataset_retry"
+            or timing_payload.get("selected_reference_manifest", {}).get("sha256")
+            != selected_actual_sha
+            or int(timing_contract.get("settle_steps_before_dataset", -1)) != 296
+            or int(timing_contract.get("dataset_pre_active_steps", -1)) != 10
+            or int(timing_contract.get("dataset_steps", -1)) != 120
+            or int(timing_contract.get("total_play_steps", -1)) != 416
+        ):
+            raise RuntimeError("source-timing amendment contract changed")
+
+        selected_reference_binding = selected_payload.get("selected_reference", {})
+        dataset_reference = PhaseResidualReference(
+            selected_reference_binding["path"],
+            expected_sha256=selected_reference_binding["sha256"],
+        )
+        dataset_joint_names, _ = _joint_recording_schema(env)
+        dataset_action_terms = getattr(env.unwrapped.action_manager, "_terms", {})
+        dataset_action_term = (
+            dataset_action_terms.get("joint_pos") if isinstance(dataset_action_terms, dict) else None
+        )
+        if dataset_action_term is None:
+            raise RuntimeError("phase-residual Teacher dataset requires the joint_pos action term")
+        dataset_robot = env.unwrapped.scene["robot"]
+        dataset_joint_id_by_name = {
+            name: index for index, name in enumerate(dataset_robot.joint_names)
+        }
+        phase_residual_dataset_joint_ids = [
+            dataset_joint_id_by_name[name] for name in dataset_joint_names
+        ]
+        phase_residual_dataset_collector = PhaseResidualDatasetCollector(
+            output_dir=args_cli.phase_residual_dataset_output,
+            selected_manifest_path=selected_path,
+            selected_manifest_sha256=selected_actual_sha,
+            reference=dataset_reference,
+            action_term=dataset_action_term,
+            joint_names=dataset_joint_names,
+            num_envs=int(env.num_envs),
+        )
+        phase_residual_dataset_rear_top_streak = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.int64
+        )
+        phase_residual_dataset_rear_confirmed = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+        phase_residual_dataset_hold_streak = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.int64
+        )
+        phase_residual_dataset_hold_success = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+        print(
+            "[PHASE_RESIDUAL_DATASET] "
+            + json.dumps(
+                {
+                    "output": str(phase_residual_dataset_collector.output_dir),
+                    "rollouts": int(env.num_envs),
+                    "settle_steps": phase_residual_dataset_settle_steps,
+                    "dataset_steps": int(args_cli.play_max_steps) - phase_residual_dataset_settle_steps,
+                    "selected_reference_manifest_sha256": selected_actual_sha,
+                    "source_timing_amendment_sha256": phase_residual_timing_amendment_sha256,
+                    "reference_sha256": dataset_reference.sha256,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    if args_cli.phase_residual_behavior_output:
+        if phase_residual_reference_controller is not None or phase_residual_dataset_collector is not None:
+            raise ValueError("phase-residual behavior gate is mutually exclusive with replay/dataset modes")
+        if int(env.num_envs) != 15 or int(args_cli.play_max_steps or -1) != 416:
+            raise ValueError("phase-residual behavior gate requires --num_envs 15 --play_max_steps 416")
+        if args_cli.print_rear_width_metrics:
+            raise ValueError(
+                "phase-residual 15-rollout behavior gate forbids the env0-only early-break metric path"
+            )
+        if not args_cli.front_step_eval_reset or args_cli.keep_play_randomization:
+            raise ValueError(
+                "phase-residual behavior gate requires deterministic front-step reset and no random events"
+            )
+        if (
+            args_cli.eval_action_delay_steps != 0
+            or fixed_velocity_command != (0.72, 0.0, 0.0)
+            or args_cli.play_terrain_type != "box_hard"
+            or int(args_cli.play_terrain_level or -1) != 9
+            or args_cli.front_step_eval_side != "x-"
+            or abs(float(args_cli.front_step_eval_edge_gap) - 0.55) > 1.0e-9
+            or abs(float(args_cli.front_step_eval_lateral_offset)) > 1.0e-9
+            or abs(float(args_cli.front_step_eval_yaw_offset_deg)) > 1.0e-9
+        ):
+            raise ValueError("phase-residual behavior gate fixed-condition contract changed")
+        if args_cli.task != "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123-ArcdogAdjustableLeg-v0":
+            raise RuntimeError("phase-residual behavior gate is not using the frozen Teacher environment")
+
+        phase_residual_timing_amendment_path = Path(
+            args_cli.phase_residual_source_timing_amendment
+        ).expanduser().resolve()
+        phase_residual_timing_amendment_sha256 = _sha256_file(
+            phase_residual_timing_amendment_path
+        )
+        if phase_residual_timing_amendment_sha256 != args_cli.phase_residual_source_timing_amendment_sha256:
+            raise RuntimeError("phase-residual behavior timing amendment SHA mismatch")
+        timing_payload = json.loads(
+            phase_residual_timing_amendment_path.read_text(encoding="utf-8")
+        )
+        timing_contract = timing_payload.get("corrected_timing_contract", {})
+        if (
+            timing_payload.get("status") != "frozen_before_dataset_retry"
+            or int(timing_contract.get("settle_steps_before_dataset", -1)) != 296
+            or int(timing_contract.get("dataset_pre_active_steps", -1)) != 10
+            or int(timing_contract.get("dataset_steps", -1)) != 120
+            or int(timing_contract.get("total_play_steps", -1)) != 416
+        ):
+            raise RuntimeError("phase-residual behavior timing contract changed")
+
+        training_path = Path(args_cli.phase_residual_training_manifest).expanduser().resolve()
+        if _sha256_file(training_path) != args_cli.phase_residual_training_manifest_sha256:
+            raise RuntimeError("phase-residual behavior training manifest SHA mismatch")
+        training_payload = json.loads(training_path.read_text(encoding="utf-8"))
+        selected_path = Path(
+            training_payload["selected_reference_manifest_path"]
+        ).expanduser().resolve()
+        if _sha256_file(selected_path) != training_payload["selected_reference_manifest_sha256"]:
+            raise RuntimeError("phase-residual behavior selected manifest SHA mismatch")
+        selected_payload = json.loads(selected_path.read_text(encoding="utf-8"))
+        selected_reference = selected_payload["selected_reference"]
+        behavior_reference = PhaseResidualReference(
+            selected_reference["path"], expected_sha256=selected_reference["sha256"]
+        )
+        behavior_preroll = PhaseResidualPreroll(
+            args_cli.phase_residual_preroll_manifest,
+            args_cli.phase_residual_preroll_manifest_sha256,
+            expected_reference_sha256=behavior_reference.sha256,
+            expected_timing_sha256=phase_residual_timing_amendment_sha256,
+        )
+        behavior_joint_names, _ = _joint_recording_schema(env)
+        behavior_terms = getattr(env.unwrapped.action_manager, "_terms", {})
+        behavior_term = behavior_terms.get("joint_pos") if isinstance(behavior_terms, dict) else None
+        if behavior_term is None:
+            raise RuntimeError("phase-residual behavior gate requires the joint_pos action term")
+        behavior_robot = env.unwrapped.scene["robot"]
+        behavior_joint_id_by_name = {
+            name: index for index, name in enumerate(behavior_robot.joint_names)
+        }
+        behavior_joint_ids = [behavior_joint_id_by_name[name] for name in behavior_joint_names]
+        phase_residual_behavior_joint_ids = behavior_joint_ids
+        controller_kwargs = {
+            "training_manifest_path": training_path,
+            "training_manifest_sha256": args_cli.phase_residual_training_manifest_sha256,
+            "wandb_verification_path": args_cli.phase_residual_wandb_verification,
+            "wandb_verification_sha256": args_cli.phase_residual_wandb_verification_sha256,
+            "reference": behavior_reference,
+            "preroll": behavior_preroll,
+            "environment_checkpoint_path": resume_path,
+            "action_term": behavior_term,
+            "initial_joint_pos": behavior_robot.data.joint_pos[:, behavior_joint_ids],
+            "joint_names": behavior_joint_names,
+            "settle_steps": 296,
+            "pre_active_steps": 10,
+        }
+        if args_cli.phase_direct_action:
+            phase_residual_hybrid_controller = PhaseDirectActionController(
+                **controller_kwargs
+            )
+            phase_controller_inference_path = Path(__file__).resolve().with_name(
+                "highstep_phase_direct_action_inference.py"
+            )
+        else:
+            phase_residual_hybrid_controller = PhaseResidualHybridController(
+                **controller_kwargs,
+                residual_enabled=not args_cli.phase_residual_disable_residual,
+            )
+            phase_controller_inference_path = Path(__file__).resolve().with_name(
+                "highstep_phase_residual_inference.py"
+            )
+        phase_residual_behavior_output_dir = Path(
+            args_cli.phase_residual_behavior_output
+        ).expanduser().resolve()
+        if phase_residual_behavior_output_dir.exists():
+            raise FileExistsError(
+                f"refusing to overwrite behavior output: {phase_residual_behavior_output_dir}"
+            )
+        phase_residual_behavior_output_dir.mkdir(parents=True, exist_ok=False)
+        if args_cli.phase_residual_dagger_output:
+            if args_cli.phase_direct_action:
+                driver_mode = "phase_direct_action"
+            else:
+                driver_mode = (
+                    "reference_only"
+                    if args_cli.phase_residual_disable_residual
+                    else "residual_enabled"
+                )
+            phase_residual_dagger_collector = PhaseResidualDaggerCollector(
+                output_dir=args_cli.phase_residual_dagger_output,
+                preregistration_path=args_cli.phase_residual_dagger_preregistration,
+                preregistration_sha256=(
+                    args_cli.phase_residual_dagger_preregistration_sha256
+                ),
+                training_manifest_path=training_path,
+                training_manifest_sha256=(
+                    args_cli.phase_residual_training_manifest_sha256
+                ),
+                joint_names=behavior_joint_names,
+                num_envs=int(env.num_envs),
+                driver_mode=driver_mode,
+                authority_profile=(
+                    "direct_action" if args_cli.phase_direct_action else "residual"
+                ),
+            )
+        start_manifest = {
+            "schema_version": 1,
+            "kind": "highstep_phase_residual_behavior_start",
+            "status": "running",
+            "mode": getattr(
+                phase_residual_hybrid_controller,
+                "controller_mode",
+                "residual_enabled" if not args_cli.phase_residual_disable_residual else "reference_only",
+            ),
+            "controller": phase_residual_hybrid_controller.summary(),
+            "source_timing_amendment_path": str(phase_residual_timing_amendment_path),
+            "source_timing_amendment_sha256": phase_residual_timing_amendment_sha256,
+            "play_code_sha256": _sha256_file(Path(__file__).resolve()),
+            "inference_code_sha256": _sha256_file(phase_controller_inference_path),
+        }
+        (phase_residual_behavior_output_dir / "start_manifest.json").write_text(
+            json.dumps(start_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        phase_residual_behavior_rear_top_streak = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.int64
+        )
+        phase_residual_behavior_rear_confirmed = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+        phase_residual_behavior_hold_streak = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.int64
+        )
+        phase_residual_behavior_hold_success = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+        phase_residual_behavior_terminated = torch.zeros(
+            env.num_envs, device=env.device, dtype=torch.bool
+        )
+        print(
+            "[PHASE_RESIDUAL_BEHAVIOR_START] "
+            + json.dumps(start_manifest, sort_keys=True),
+            flush=True,
+        )
+    if args_cli.training_distribution:
+        initial_distribution = _training_distribution_initial_snapshot(
+            env, training_distribution_binding
+        )
+        print(
+            "[TRAINING_DISTRIBUTION_INITIAL_JSON] "
+            + json.dumps(initial_distribution, sort_keys=True),
+            flush=True,
+        )
     manual_reset_requested = False
     if args_cli.keyboard:
         def request_manual_reset():
             nonlocal manual_reset_requested
             manual_reset_requested = True
-            print("[INFO] 'R' key pressed: high-step respawn queued.", flush=True)
+            print(
+                "RESET RECOVERING / 请勿操作 | R pressed; full recovery wait restarted and "
+                "keyboard motion input is ignored.",
+                flush=True,
+            )
 
         controller.add_callback("R", request_manual_reset)
         print(
@@ -2747,7 +5170,11 @@ def main():
             "R respawns at the selected high-step start.",
             flush=True,
         )
-    _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
+    if args_cli.video or args_cli.highstep_gap_camera in {
+        "static_side_top",
+        "static_robot_side",
+    }:
+        _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
     # # --- 构建观测切片索引：名字 -> slice(start, end) ---
     # def build_group_index_map(obs_mgr, group_name="policy"):
     #     names = obs_mgr._group_obs_term_names[group_name]
@@ -2784,6 +5211,71 @@ def main():
     #     pass
 
     timestep = 0
+    joint_recorder = None
+    if args_cli.record_student_tensors and not args_cli.record_joint_data:
+        raise ValueError("--record_student_tensors requires --record_joint_data")
+    if args_cli.joint_record_output and not args_cli.record_joint_data:
+        raise ValueError("--joint_record_output requires --record_joint_data")
+    if args_cli.record_joint_data:
+        record_joint_names, action_term_schema = _joint_recording_schema(env)
+        inferred_role = "student" if "student" in str(args_cli.task or "").lower() else "teacher"
+        record_label = args_cli.joint_record_label or inferred_role
+        record_output = _joint_recording_output_dir(record_label, args_cli.joint_record_output)
+        schedule_path_text = str(schedule_manifest_path) if schedule_manifest_path is not None else None
+        joint_recorder = PlayJointRecorder(
+            record_output,
+            joint_names=record_joint_names,
+            step_dt=dt,
+            record_student_tensors=bool(args_cli.record_student_tensors),
+            metadata={
+                "label": record_label,
+                "task": args_cli.task,
+                "checkpoint_path": str(Path(resume_path).resolve()),
+                "checkpoint_sha256": _sha256_file(resume_path),
+                "seed": args_cli.seed,
+                "num_envs": int(env.num_envs),
+                "recorded_env_index": 0,
+                "debug_enabled": bool(args_cli.debug),
+                "student_tensor_recording_enabled": bool(args_cli.record_student_tensors),
+                "terrain_type": args_cli.play_terrain_type,
+                "terrain_level": args_cli.play_terrain_level,
+                "front_step_eval_reset": bool(args_cli.front_step_eval_reset),
+                "front_step_eval_side": args_cli.front_step_eval_side,
+                "front_step_eval_edge_gap": float(args_cli.front_step_eval_edge_gap),
+                "front_step_eval_lateral_offset": float(args_cli.front_step_eval_lateral_offset),
+                "front_step_eval_yaw_offset_deg": float(args_cli.front_step_eval_yaw_offset_deg),
+                "eval_action_delay_steps": args_cli.eval_action_delay_steps,
+                "schedule_manifest_path": schedule_path_text,
+                "schedule_manifest_sha256": (
+                    _sha256_file(schedule_manifest_path) if schedule_manifest_path is not None else None
+                ),
+                "play_code_sha256": _sha256_file(Path(__file__).resolve()),
+                "recorder_code_sha256": _sha256_file(
+                    Path(__file__).resolve().with_name("play_joint_recorder.py")
+                ),
+                "action_terms": action_term_schema,
+                "recorded_command_replay": (
+                    recorded_command_replay.summary()
+                    if recorded_command_replay is not None
+                    else None
+                ),
+                "recorded_command_source_manifest_path": (
+                    str(recorded_command_source_manifest_path)
+                    if recorded_command_source_manifest_path is not None
+                    else None
+                ),
+                "recorded_command_source_manifest_sha256": (
+                    recorded_command_source_manifest_sha256
+                ),
+            },
+        )
+        if args_cli.record_student_tensors:
+            _student_tensor_recording_snapshot(obs, policy_nn)
+        print(
+            f"[JOINT_RECORD] recording env0 to {joint_recorder.csv_path}\n"
+            f"[JOINT_RECORD] manifest: {joint_recorder.manifest_path}",
+            flush=True,
+        )
     rear_width_stats = {
         "count": 0,
         "width_sum": 0.0,
@@ -2798,6 +5290,15 @@ def main():
     highstep_eval_tracker = None
     if args_cli.print_rear_width_metrics and args_cli.front_step_eval_reset:
         highstep_eval_tracker = _HighstepEvalTracker(env)
+    v1123_preflight_tracker = None
+    if args_cli.highstep_v1123_frozen_preflight_output:
+        if highstep_eval_tracker is None:
+            raise ValueError(
+                "--highstep_v1123_frozen_preflight_output requires the fixed front-step metric path"
+            )
+        v1123_preflight_tracker = _HighstepV1123FrozenPreflightTracker(
+            env, highstep_eval_tracker
+        )
     effort_feasibility_tracker = None
     if eval_effort_limit_request is not None:
         effort_feasibility_tracker = _EvalEffortFeasibilityTracker(
@@ -2924,6 +5425,10 @@ def main():
             # error and previously made the R shortcut close the application.
             with torch.inference_mode():
                 controller.reset()
+                if manual_highstep_start_gate is not None:
+                    manual_highstep_start_gate.reset()
+                if raw_motion_student_controller is not None:
+                    raw_motion_student_controller.reset()
                 _apply_play_terrain_selection(env, args_cli.play_terrain_level, args_cli.play_terrain_type)
                 obs, _ = env.reset()
                 if args_cli.front_step_eval_reset:
@@ -2932,19 +5437,61 @@ def main():
                         args_cli.play_terrain_type,
                         args_cli.front_step_eval_platform_width,
                     )
-                    _apply_front_step_eval_reset(
-                        env,
-                        args_cli.front_step_eval_side,
-                        args_cli.front_step_eval_distance,
-                        args_cli.front_step_eval_edge_gap,
-                        platform_width,
-                        args_cli.front_step_eval_lateral_offset,
-                        args_cli.front_step_eval_yaw_offset_deg,
-                        args_cli.play_terrain_type,
-                    )
+                    if manual_highstep_respawn_contract:
+                        _apply_manual_highstep_respawn(
+                            env,
+                            args_cli.front_step_eval_side,
+                            args_cli.front_step_eval_distance,
+                            args_cli.front_step_eval_edge_gap,
+                            platform_width,
+                            args_cli.front_step_eval_lateral_offset,
+                            args_cli.front_step_eval_yaw_offset_deg,
+                            args_cli.play_terrain_type,
+                        )
+                    else:
+                        _apply_front_step_eval_reset(
+                            env,
+                            args_cli.front_step_eval_side,
+                            args_cli.front_step_eval_distance,
+                            args_cli.front_step_eval_edge_gap,
+                            platform_width,
+                            args_cli.front_step_eval_lateral_offset,
+                            args_cli.front_step_eval_yaw_offset_deg,
+                            args_cli.play_terrain_type,
+                        )
                 obs = env.get_observations()
+            if joint_recorder is not None:
+                joint_recorder.mark_reset()
             manual_reset_requested = False
-            print("[INFO] High-step respawn complete; command reset to zero.", flush=True)
+            print(
+                "RESET RECOVERING / 请勿操作 | deterministic q/dq and high-step pose restored; "
+                f"wait at least {manual_highstep_start_gate.min_hold_steps} control steps "
+                f"({manual_highstep_start_gate.min_hold_steps * float(env.unwrapped.step_dt):.2f} s) "
+                "and the original stability gate.",
+                flush=True,
+            )
+
+        if manual_highstep_start_gate is not None and manual_highstep_start_gate.blocked:
+            robot_state = env.unwrapped.scene["robot"].data
+            gate_opened = manual_highstep_start_gate.observe(
+                robot_state.joint_pos[0],
+                robot_state.joint_vel[0],
+                robot_state.root_lin_vel_b[0],
+                robot_state.root_ang_vel_b[0],
+            )
+            if gate_opened:
+                print(
+                    "RESET READY / 现在可以推动方向键 | "
+                    "[MANUAL_HIGHSTEP_READY] Stable start reached; keyboard commands are now enabled. "
+                    + json.dumps(manual_highstep_start_gate.last_metrics, sort_keys=True),
+                    flush=True,
+                )
+            elif manual_highstep_start_gate.steps_since_reset % 25 == 0:
+                print(
+                    "[MANUAL_HIGHSTEP_SETTLING] Keyboard commands remain zero. "
+                    + json.dumps(manual_highstep_start_gate.last_metrics, sort_keys=True),
+                    flush=True,
+                )
 
         # # =========================================================================
         # # 🌟 修改点：加入时间节流 (Throttling) 判断
@@ -3145,19 +5692,56 @@ def main():
         # =========================================================================
         # 🌟 新增：将键盘/手柄的指令同步给 CommandManager，让绿色箭头动起来！
         # =========================================================================
-        if args_cli.keyboard or args_cli.se2_gamepad or fixed_velocity_command is not None:
+        if recorded_command_replay is not None:
+            recorded_command_replay.set_step(timestep)
+        one_shot_command_active = (
+            raw_motion_student_controller is not None
+            and raw_motion_student_controller.one_shot_phase is not None
+        )
+        if (
+            args_cli.keyboard
+            or args_cli.se2_gamepad
+            or fixed_velocity_command is not None
+            or recorded_command_replay is not None
+            or one_shot_command_active
+        ):
             try:
                 # 获取环境中的 base_velocity 指令项
                 cmd_term = env.unwrapped.command_manager._terms.get("base_velocity")
                 if cmd_term is not None:
                     # 获取当前控制器的最新指令
-                    if args_cli.keyboard:
-                        cur_cmd = controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
+                    if one_shot_command_active:
+                        one_shot_obs_command_step["value"] = timestep
+                        cur_cmd = torch.tensor(
+                            [raw_motion_student_controller.one_shot_command(timestep), 0.0, 0.0],
+                            device=env.device,
+                            dtype=torch.float32,
+                        ).unsqueeze(0).repeat(env.num_envs, 1)
+                    elif args_cli.keyboard:
+                        cur_cmd = _manual_keyboard_command().unsqueeze(0).to(
+                            env.device, dtype=torch.float32
+                        )
                     elif args_cli.se2_gamepad:
                         cur_cmd = se2_controller.advance().unsqueeze(0).to(env.device, dtype=torch.float32)
-                    else:
+                    elif recorded_command_replay is not None:
                         cur_cmd = torch.tensor(
-                            fixed_velocity_command, device=env.device, dtype=torch.float32
+                            recorded_command_replay.command(),
+                            device=env.device,
+                            dtype=torch.float32,
+                        ).unsqueeze(0).repeat(env.num_envs, 1)
+                    else:
+                        command_value = fixed_velocity_command
+                        if phase_residual_dataset_collector is not None:
+                            dataset_step = timestep - phase_residual_dataset_settle_steps
+                            if dataset_step < 10:
+                                command_value = (0.0, 0.0, 0.0)
+                        if (
+                            phase_residual_hybrid_controller is not None
+                            and not phase_residual_hybrid_controller.command_is_active(timestep)
+                        ):
+                            command_value = (0.0, 0.0, 0.0)
+                        cur_cmd = torch.tensor(
+                            command_value, device=env.device, dtype=torch.float32
                         ).unsqueeze(0).repeat(env.num_envs, 1)
 
                     # 同步给底层的命令管理器 (仅用于可视化箭头等，不影响网络实际吃到的指令)
@@ -3165,16 +5749,114 @@ def main():
                         cmd_term.command[:] = cur_cmd
                     if hasattr(cmd_term, "vel_command_b"):
                         cmd_term.vel_command_b[:] = cur_cmd
-            except Exception as e:
-                pass
+                    if args_cli.fixed_motion_direct_action_mode is not None:
+                        fixed_motion_current_vx = cur_cmd[:, 0].detach().clone()
+                    if args_cli.fixed_motion_raw_action_mode is not None:
+                        raw_motion_current_vx = cur_cmd[:, 0].detach().clone()
+                    if b300_hybrid_collector is not None or b300_hybrid_dagger_collector is not None:
+                        b300_hybrid_current_command = cur_cmd.detach().clone()
+                    if one_shot_command_active:
+                        # The deployed controller assembles the 570-D observation
+                        # from the command for this inference step.  Refresh here
+                        # after advancing the internal clock so Isaac uses the
+                        # same current-step contract instead of a one-step-old
+                        # command at the 21/80 transition boundaries.
+                        obs = env.get_observations()
+                    if (
+                        phase_residual_dataset_collector is not None
+                        or phase_residual_hybrid_controller is not None
+                    ):
+                        # Ensure the current policy observation contains the
+                        # source-equivalent command transition on this step.
+                        obs = env.get_observations()
+            except Exception:
+                if (
+                    phase_residual_dataset_collector is not None
+                    or phase_residual_hybrid_controller is not None
+                    or recorded_command_replay is not None
+                ):
+                    raise
         # =========================================================================
 
         start_time = time.time()
+        pending_student_tensors = None
         # run everything in inference mode
         with torch.inference_mode():
-            _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
+            if args_cli.highstep_gap_camera not in {
+                "static_side_top",
+                "static_robot_side",
+            }:
+                _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
+            if joint_recorder is not None and args_cli.record_student_tensors:
+                pending_student_tensors = _student_tensor_recording_snapshot(obs, policy_nn)
             # agent stepping
-            actions = policy(obs)
+            if b300_hybrid_dagger_collector is not None:
+                actions = policy(obs)
+                b300_hybrid_dagger_collector.prepare(obs, actions, b300_hybrid_current_command)
+            elif b300_hybrid_collector is not None:
+                actions = policy(obs)
+                b300_hybrid_collector.prepare(obs, actions, b300_hybrid_current_command)
+            elif raw_motion_collector is not None:
+                teacher_raw_action = policy(obs)
+                actions = raw_motion_collector.prepare(obs, raw_motion_current_vx, teacher_raw_action)
+            elif raw_motion_student_controller is not None:
+                actions = raw_motion_student_controller.action(obs, raw_motion_current_vx)
+                if raw_motion_dagger_collector is not None:
+                    assert raw_motion_student_controller.last_sample is not None
+                    raw_motion_dagger_collector.prepare(
+                        raw_motion_student_controller.last_sample,
+                        policy(obs),
+                    )
+            elif fixed_motion_oracle_collector is not None:
+                assert fixed_motion_action_term is not None
+                assert fixed_motion_target_adapter is not None
+                fixed_motion_oracle_collector.prepare(obs, fixed_motion_current_vx)
+                teacher_raw_action = policy(obs)
+                fixed_motion_action_term.process_actions(teacher_raw_action)
+                fixed_motion_pending_teacher_target = fixed_motion_action_term.processed_actions.detach().clone()
+                actions = fixed_motion_target_adapter.raw_for_target(fixed_motion_pending_teacher_target)
+            elif fixed_motion_student_controller is not None:
+                actions = fixed_motion_student_controller.action(obs, fixed_motion_current_vx)
+            elif phase_residual_hybrid_controller is not None:
+                dagger_teacher_target = None
+                if (
+                    phase_residual_dagger_collector is not None
+                    and timestep >= phase_residual_hybrid_controller.settle_steps
+                ):
+                    # Teacher is queried at the candidate's exact pre-step
+                    # physical state.  This probe never drives physics: the
+                    # candidate call immediately below overwrites the live
+                    # action term before env.step().
+                    teacher_probe_action = policy(obs)
+                    dagger_action_term = env.unwrapped.action_manager._terms["joint_pos"]
+                    dagger_action_term.process_actions(teacher_probe_action)
+                    dagger_teacher_target = getattr(
+                        dagger_action_term, "processed_actions", None
+                    )
+                    if not isinstance(dagger_teacher_target, torch.Tensor):
+                        raise RuntimeError("DAgger Teacher probe exposes no processed target")
+                    dagger_teacher_target = dagger_teacher_target.detach().clone()
+                actions = phase_residual_hybrid_controller.action_for_step(obs, timestep)
+                if phase_residual_dagger_collector is not None and dagger_teacher_target is not None:
+                    assert phase_residual_behavior_joint_ids is not None
+                    dagger_robot = env.unwrapped.scene["robot"]
+                    phase_residual_dagger_collector.prepare_before_step(
+                        sample=phase_residual_hybrid_controller.dagger_sample(),
+                        teacher_mapped_target=dagger_teacher_target,
+                        joint_pos=dagger_robot.data.joint_pos[
+                            :, phase_residual_behavior_joint_ids
+                        ],
+                        joint_vel=dagger_robot.data.joint_vel[
+                            :, phase_residual_behavior_joint_ids
+                        ],
+                    )
+            elif phase_residual_reference_controller is None:
+                dataset_step = timestep - phase_residual_dataset_settle_steps
+                if phase_residual_dataset_collector is not None and dataset_step >= 0:
+                    phase_residual_dataset_collector.prepare_observation(obs, dataset_step)
+                actions = policy(obs)
+            else:
+                actions = phase_residual_reference_controller.action_for_step(timestep)
             if highstep_eval_tracker is not None:
                 actions_for_audit = actions
                 if getattr(env, "clip_actions", None) is not None:
@@ -3183,16 +5865,157 @@ def main():
             # actions = torch.zeros_like(actions)
             # env stepping
             obs, _, dones, _ = env.step(actions)
+            if b300_hybrid_collector is not None:
+                b300_hybrid_collector.record_after_step()
+            if b300_hybrid_dagger_collector is not None:
+                b300_hybrid_dagger_collector.record_after_step()
+            if raw_motion_collector is not None:
+                assert raw_motion_action_term is not None
+                raw_motion_collector.record_after_step(raw_motion_action_term)
+            if raw_motion_dagger_collector is not None:
+                raw_motion_dagger_collector.record_after_step()
+            if args_cli.fixed_motion_raw_action_mode is not None:
+                assert raw_motion_terminated is not None
+                assert raw_motion_rear_top_streak is not None
+                assert raw_motion_rear_confirmed is not None
+                assert raw_motion_hold_streak is not None
+                assert raw_motion_hold_success is not None
+                raw_motion_terminated |= dones.detach().reshape(-1).bool()
+                rear_top, rear_on_platform = _phase_residual_batch_rear_on_platform(env)
+                raw_motion_rear_top_streak = torch.where(rear_top, raw_motion_rear_top_streak + 1, torch.zeros_like(raw_motion_rear_top_streak))
+                raw_motion_rear_confirmed |= raw_motion_rear_top_streak >= 2
+                hold_now = raw_motion_rear_confirmed & rear_on_platform
+                raw_motion_hold_streak = torch.where(hold_now, raw_motion_hold_streak + 1, torch.zeros_like(raw_motion_hold_streak))
+                raw_motion_hold_success |= raw_motion_hold_streak >= 25
+            if fixed_motion_oracle_collector is not None:
+                assert fixed_motion_target_adapter is not None
+                assert fixed_motion_pending_teacher_target is not None
+                fixed_motion_audit = fixed_motion_target_adapter.audit()
+                if fixed_motion_audit["exact"] is not True:
+                    raise RuntimeError("safe oracle target changed in production action channel: " + json.dumps(fixed_motion_audit, sort_keys=True))
+                fixed_motion_oracle_collector.record(fixed_motion_pending_teacher_target)
+            elif fixed_motion_student_controller is not None:
+                fixed_motion_audit = fixed_motion_student_controller.audit()
+                if fixed_motion_audit["exact"] is not True:
+                    raise RuntimeError("Student safe target changed in production action channel: " + json.dumps(fixed_motion_audit, sort_keys=True))
+            if args_cli.fixed_motion_direct_action_mode is not None:
+                assert fixed_motion_terminated is not None
+                assert fixed_motion_rear_top_streak is not None
+                assert fixed_motion_rear_confirmed is not None
+                assert fixed_motion_hold_streak is not None
+                assert fixed_motion_hold_success is not None
+                fixed_motion_terminated |= dones.detach().reshape(-1).bool()
+                rear_top, rear_on_platform = _phase_residual_batch_rear_on_platform(env)
+                fixed_motion_rear_top_streak = torch.where(rear_top, fixed_motion_rear_top_streak + 1, torch.zeros_like(fixed_motion_rear_top_streak))
+                fixed_motion_rear_confirmed |= fixed_motion_rear_top_streak >= 2
+                hold_now = fixed_motion_rear_confirmed & rear_on_platform
+                fixed_motion_hold_streak = torch.where(hold_now, fixed_motion_hold_streak + 1, torch.zeros_like(fixed_motion_hold_streak))
+                fixed_motion_hold_success |= fixed_motion_hold_streak >= 25
+            if (
+                phase_residual_dagger_collector is not None
+                and timestep >= phase_residual_hybrid_controller.settle_steps
+            ):
+                phase_residual_dagger_collector.record_after_step(dones)
+            if phase_residual_reference_controller is not None:
+                reference_audit = phase_residual_reference_controller.audit_processed_target()
+                if reference_audit["processed_target_exact"] is not True:
+                    raise RuntimeError(
+                        "phase-residual reference target changed inside the live action term: "
+                        + json.dumps(reference_audit, sort_keys=True)
+                    )
+            if phase_residual_hybrid_controller is not None:
+                hybrid_audit = phase_residual_hybrid_controller.audit_processed_target()
+                if hybrid_audit["processed_target_exact"] is not True:
+                    raise RuntimeError(
+                        "phase-residual hybrid target changed inside the live action term: "
+                        + json.dumps(hybrid_audit, sort_keys=True)
+                    )
+            terminated_this_step = bool(torch.any(dones).item())
+            if phase_residual_hybrid_controller is not None:
+                assert phase_residual_behavior_terminated is not None
+                phase_residual_behavior_terminated |= dones.detach().reshape(-1).bool()
+                if timestep >= phase_residual_hybrid_controller.settle_steps:
+                    assert phase_residual_behavior_rear_top_streak is not None
+                    assert phase_residual_behavior_rear_confirmed is not None
+                    assert phase_residual_behavior_hold_streak is not None
+                    assert phase_residual_behavior_hold_success is not None
+                    rear_top, rear_on_platform = _phase_residual_batch_rear_on_platform(env)
+                    phase_residual_behavior_rear_top_streak = torch.where(
+                        rear_top,
+                        phase_residual_behavior_rear_top_streak + 1,
+                        torch.zeros_like(phase_residual_behavior_rear_top_streak),
+                    )
+                    phase_residual_behavior_rear_confirmed |= (
+                        phase_residual_behavior_rear_top_streak >= 2
+                    )
+                    hold_now = phase_residual_behavior_rear_confirmed & rear_on_platform
+                    phase_residual_behavior_hold_streak = torch.where(
+                        hold_now,
+                        phase_residual_behavior_hold_streak + 1,
+                        torch.zeros_like(phase_residual_behavior_hold_streak),
+                    )
+                    phase_residual_behavior_hold_success |= (
+                        phase_residual_behavior_hold_streak >= 25
+                    )
+            if phase_residual_dataset_collector is not None:
+                assert phase_residual_dataset_joint_ids is not None
+                dataset_term = env.unwrapped.action_manager._terms["joint_pos"]
+                dataset_target = getattr(dataset_term, "processed_actions", None)
+                if not isinstance(dataset_target, torch.Tensor):
+                    raise RuntimeError("dataset action term exposes no processed mapped target")
+                dataset_robot = env.unwrapped.scene["robot"]
+                dataset_step = timestep - phase_residual_dataset_settle_steps
+                if dataset_step < 0:
+                    phase_residual_dataset_collector.prime_action_history(dataset_target)
+                else:
+                    phase_residual_dataset_collector.record_after_step(
+                        teacher_mapped_target=dataset_target,
+                        joint_pos=dataset_robot.data.joint_pos[:, phase_residual_dataset_joint_ids],
+                        joint_vel=dataset_robot.data.joint_vel[:, phase_residual_dataset_joint_ids],
+                        dones=dones,
+                    )
+                    rear_top, rear_on_platform = _phase_residual_batch_rear_on_platform(env)
+                    phase_residual_dataset_rear_top_streak = torch.where(
+                        rear_top,
+                        phase_residual_dataset_rear_top_streak + 1,
+                        torch.zeros_like(phase_residual_dataset_rear_top_streak),
+                    )
+                    phase_residual_dataset_rear_confirmed |= (
+                        phase_residual_dataset_rear_top_streak >= 2
+                    )
+                    hold_now = phase_residual_dataset_rear_confirmed & rear_on_platform
+                    phase_residual_dataset_hold_streak = torch.where(
+                        hold_now,
+                        phase_residual_dataset_hold_streak + 1,
+                        torch.zeros_like(phase_residual_dataset_hold_streak),
+                    )
+                    phase_residual_dataset_hold_success |= (
+                        phase_residual_dataset_hold_streak >= 25
+                    )
+            if joint_recorder is not None:
+                joint_recorder.record(
+                    control_step=timestep,
+                    terminated_after_step=terminated_this_step,
+                    student_tensors=pending_student_tensors,
+                    **_joint_recording_snapshot(env, actions, record_joint_names),
+                )
+                if terminated_this_step:
+                    joint_recorder.mark_reset()
             if effort_feasibility_tracker is not None:
                 effort_feasibility_tracker.sample_applied_torque()
-            _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
-            terminated_this_step = bool(torch.any(dones).item())
+            if args_cli.highstep_gap_camera not in {
+                "static_side_top",
+                "static_robot_side",
+            }:
+                _update_highstep_gap_camera(env, args_cli.highstep_gap_camera)
             if args_cli.print_rear_width_metrics:
                 if highstep_eval_tracker is not None:
                     if terminated_this_step:
                         highstep_eval_tracker.mark_terminated(timestep)
                     else:
                         highstep_eval_tracker.update(timestep)
+                    if v1123_preflight_tracker is not None:
+                        v1123_preflight_tracker.sample(timestep)
                 rear_width, rear_min_abs_y, root_distance, root_height = _rear_width_metric_sample(env)
                 width_val = float(rear_width.mean().detach().cpu())
                 min_abs_y_val = float(rear_min_abs_y.mean().detach().cpu())
@@ -3232,6 +6055,16 @@ def main():
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
 
+    if b300_hybrid_collector is not None:
+        canonical_result = b300_hybrid_collector.finalize()
+        print(
+            "[B300_HYBRID_CANONICAL_JSON] " + json.dumps(canonical_result, sort_keys=True),
+            flush=True,
+        )
+    if b300_hybrid_dagger_collector is not None:
+        dagger_result = b300_hybrid_dagger_collector.finalize()
+        print("[B300_HYBRID_DAGGER_RESULT] " + json.dumps(dagger_result, sort_keys=True), flush=True)
+
     if args_cli.print_rear_width_metrics and rear_width_stats["count"] > 0:
         count = rear_width_stats["count"]
         print(
@@ -3247,6 +6080,7 @@ def main():
             f"root_h_rel_origin_max={rear_width_stats['root_height_max']:.4f}",
             flush=True,
         )
+    highstep_eval_summary = None
     if highstep_eval_tracker is not None:
         highstep_eval_summary = highstep_eval_tracker.summary()
         if effort_feasibility_tracker is not None:
@@ -3351,9 +6185,253 @@ def main():
             "[HIGHSTEP_EVAL_JSON] " + json.dumps(highstep_eval_summary, sort_keys=True),
             flush=True,
         )
+    phase_residual_dataset_failure = None
+    phase_residual_behavior_failure = None
+    if phase_residual_dataset_collector is not None:
+        assert phase_residual_dataset_hold_success is not None
+        dataset_result = phase_residual_dataset_collector.finalize(
+            metadata={
+                "task": args_cli.task,
+                "checkpoint_path": str(Path(resume_path).resolve()),
+                "checkpoint_sha256": _sha256_file(resume_path),
+                "seed": args_cli.seed,
+                "fixed_velocity_command": list(fixed_velocity_command),
+                "terrain_type": args_cli.play_terrain_type,
+                "terrain_level": args_cli.play_terrain_level,
+                "front_edge_gap": float(args_cli.front_step_eval_edge_gap),
+                "action_delay_steps": args_cli.eval_action_delay_steps,
+                "settle_steps_before_dataset": phase_residual_dataset_settle_steps,
+                "dataset_pre_active_steps": 10,
+                "source_timing_amendment_path": str(
+                    phase_residual_timing_amendment_path
+                ),
+                "source_timing_amendment_sha256": (
+                    phase_residual_timing_amendment_sha256
+                ),
+                "schedule_manifest_path": (
+                    str(schedule_manifest_path) if schedule_manifest_path is not None else None
+                ),
+                "schedule_manifest_sha256": (
+                    _sha256_file(schedule_manifest_path) if schedule_manifest_path is not None else None
+                ),
+                "play_code_sha256": _sha256_file(Path(__file__).resolve()),
+                "dataset_code_sha256": _sha256_file(
+                    Path(__file__).resolve().with_name("highstep_phase_residual_dataset.py")
+                ),
+                "env0_canonical_summary": highstep_eval_summary,
+            },
+            env_hold_success=phase_residual_dataset_hold_success.detach().cpu().tolist(),
+            env_full_climb_success=phase_residual_dataset_hold_success.detach().cpu().tolist(),
+        )
+        print(
+            "[PHASE_RESIDUAL_DATASET_JSON] " + json.dumps(dataset_result, sort_keys=True),
+            flush=True,
+        )
+        if dataset_result["valid"] is not True:
+            phase_residual_dataset_failure = (
+                "phase-residual Teacher dataset failed closed: "
+                f"terminated={dataset_result['terminated_env_ids']} "
+                f"hold={sum(dataset_result['env_hold_success'])}/15"
+            )
+    if phase_residual_dagger_collector is not None:
+        dagger_result = phase_residual_dagger_collector.finalize(
+            metadata={
+                "task": args_cli.task,
+                "checkpoint_path": str(Path(resume_path).resolve()),
+                "checkpoint_sha256": _sha256_file(resume_path),
+                "seed": args_cli.seed,
+                "fixed_velocity_command": list(fixed_velocity_command),
+                "terrain_type": args_cli.play_terrain_type,
+                "terrain_level": args_cli.play_terrain_level,
+                "front_edge_gap": float(args_cli.front_step_eval_edge_gap),
+                "lateral_offset": float(args_cli.front_step_eval_lateral_offset),
+                "yaw_offset_deg": float(args_cli.front_step_eval_yaw_offset_deg),
+                "action_delay_steps": args_cli.eval_action_delay_steps,
+                "settle_steps": phase_residual_hybrid_controller.settle_steps,
+                "pre_active_steps": phase_residual_hybrid_controller.pre_active_steps,
+                "source_timing_amendment_path": str(
+                    phase_residual_timing_amendment_path
+                ),
+                "source_timing_amendment_sha256": (
+                    phase_residual_timing_amendment_sha256
+                ),
+                "play_code_sha256": _sha256_file(Path(__file__).resolve()),
+                "dagger_code_sha256": _sha256_file(
+                    Path(__file__).resolve().with_name(
+                        "highstep_phase_residual_dagger.py"
+                    )
+                ),
+            }
+        )
+        print(
+            "[PHASE_RESIDUAL_DAGGER_JSON] " + json.dumps(dagger_result, sort_keys=True),
+            flush=True,
+        )
+    if phase_residual_hybrid_controller is not None:
+        assert phase_residual_behavior_output_dir is not None
+        assert phase_residual_behavior_hold_success is not None
+        assert phase_residual_behavior_terminated is not None
+        hold = phase_residual_behavior_hold_success.detach().cpu().bool()
+        terminated = phase_residual_behavior_terminated.detach().cpu().bool()
+        valid = ~terminated
+        reset_context = getattr(env.unwrapped, "_front_step_eval_context", {})
+        reset_valid = bool(reset_context.get("reset_valid", False))
+        valid_count = int(torch.sum(valid).item()) if reset_valid else 0
+        hold_count = int(torch.sum(hold & valid).item()) if reset_valid else 0
+        passed = valid_count == 15 and hold_count == 15
+        behavior_result = {
+            "schema_version": 1,
+            "kind": "highstep_fixed_condition_phase_residual_behavior_gate",
+            "status": "passed" if passed else "failed_behavior_gate",
+            "mode": getattr(
+                phase_residual_hybrid_controller,
+                "controller_mode",
+                "residual_enabled"
+                if phase_residual_hybrid_controller.residual_enabled
+                else "reference_only",
+            ),
+            "passed": passed,
+            "valid_count": valid_count,
+            "full_climb_count": hold_count,
+            "rear_hold_count": hold_count,
+            "required": {"valid": 15, "full_climb": 15, "rear_hold": 15},
+            "terminated_env_ids": [
+                int(index) for index, value in enumerate(terminated.tolist()) if value
+            ],
+            "rear_hold_by_env": [bool(value) for value in hold.tolist()],
+            "reset_valid": reset_valid,
+            "fixed_condition": {
+                "terrain_type": args_cli.play_terrain_type,
+                "terrain_level": args_cli.play_terrain_level,
+                "front_edge_gap": float(args_cli.front_step_eval_edge_gap),
+                "lateral_offset": float(args_cli.front_step_eval_lateral_offset),
+                "yaw_offset_deg": float(args_cli.front_step_eval_yaw_offset_deg),
+                "command": list(fixed_velocity_command),
+                "action_delay_steps": args_cli.eval_action_delay_steps,
+                "settle_steps": phase_residual_hybrid_controller.settle_steps,
+                "pre_active_steps": phase_residual_hybrid_controller.pre_active_steps,
+            },
+            "controller": phase_residual_hybrid_controller.summary(),
+            "source_timing_amendment_path": str(phase_residual_timing_amendment_path),
+            "source_timing_amendment_sha256": phase_residual_timing_amendment_sha256,
+            "play_code_sha256": _sha256_file(Path(__file__).resolve()),
+            "inference_code_sha256": _sha256_file(phase_controller_inference_path),
+            "env0_canonical_summary": highstep_eval_summary,
+        }
+        result_path = phase_residual_behavior_output_dir / "behavior_result.json"
+        temporary_result = result_path.with_suffix(".json.tmp")
+        temporary_result.write_text(
+            json.dumps(behavior_result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary_result, result_path)
+        behavior_result["result_path"] = str(result_path)
+        behavior_result["result_sha256"] = _sha256_file(result_path)
+        print(
+            "[PHASE_RESIDUAL_BEHAVIOR_JSON] " + json.dumps(behavior_result, sort_keys=True),
+            flush=True,
+        )
+        if not passed:
+            phase_residual_behavior_failure = (
+                "phase-residual behavior gate failed closed: "
+                f"valid={valid_count}/15 full={hold_count}/15 rear_hold={hold_count}/15"
+            )
+    if v1123_preflight_tracker is not None:
+        preflight_output = Path(args_cli.highstep_v1123_frozen_preflight_output).resolve()
+        preflight_output.parent.mkdir(parents=True, exist_ok=True)
+        preflight_output.write_text(
+            json.dumps(v1123_preflight_tracker.summary(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[HIGHSTEP_V1123_PREFLIGHT] {preflight_output}", flush=True)
+
+    if args_cli.fixed_motion_direct_action_mode is not None:
+        assert fixed_motion_hold_success is not None and fixed_motion_terminated is not None
+        hold_values = fixed_motion_hold_success.detach().cpu().bool()
+        terminated_values = fixed_motion_terminated.detach().cpu().bool()
+        behavior = {
+            "valid_count": int(torch.sum(~terminated_values).item()),
+            "full_climb_count": int(torch.sum(hold_values).item()),
+            "rear_hold_count": int(torch.sum(hold_values).item()),
+            "full_climb": bool(hold_values[0].item()) if len(hold_values) == 1 else None,
+            "rear_hold": bool(hold_values[0].item()) if len(hold_values) == 1 else None,
+            "terminated_count": int(torch.sum(terminated_values).item()),
+        }
+        if fixed_motion_oracle_collector is not None:
+            oracle_result = fixed_motion_oracle_collector.finalize(behavior)
+            print("[FIXED_MOTION_ORACLE_JSON] " + json.dumps(oracle_result, sort_keys=True), flush=True)
+            if oracle_result["passed"] is not True:
+                fixed_motion_failure = "fixed-motion safe oracle failed; training is forbidden"
+        else:
+            assert fixed_motion_student_controller is not None
+            passed = bool(
+                behavior["valid_count"] == 15
+                and behavior["full_climb_count"] >= 12
+                and behavior["rear_hold_count"] >= 12
+                and fixed_motion_student_controller.limit_violations == 0
+            )
+            behavior.update({
+                "schema_version": 1,
+                "kind": "highstep_fixed_motion_student_behavior_gate",
+                "status": "passed_pending_user_visual_review" if passed else "failed_behavior_gate",
+                "passed": passed,
+                "target_limit_violations": fixed_motion_student_controller.limit_violations,
+                "required": {"valid": 15, "full_climb": 12, "rear_hold": 12, "safe": 15},
+            })
+            result_path = Path(args_cli.fixed_motion_output).expanduser().resolve() / "behavior_result.json"
+            result_path.parent.mkdir(parents=True, exist_ok=False)
+            result_path.write_text(json.dumps(behavior, indent=2, sort_keys=True) + "\n")
+            print("[FIXED_MOTION_BEHAVIOR_JSON] " + json.dumps(behavior, sort_keys=True), flush=True)
+
+    if args_cli.fixed_motion_raw_action_mode is not None:
+        assert raw_motion_hold_success is not None and raw_motion_terminated is not None
+        hold = bool(raw_motion_hold_success[0].detach().cpu().item())
+        terminated = bool(raw_motion_terminated[0].detach().cpu().item())
+        raw_behavior = {
+            "valid": not terminated,
+            "full_climb": hold,
+            "rear_hold": hold,
+            "terminated": terminated,
+        }
+        if raw_motion_collector is not None:
+            raw_smoke_result = raw_motion_collector.finalize(raw_behavior)
+            print("[FIXED_MOTION_RAW_SMOKE_JSON] " + json.dumps(raw_smoke_result, sort_keys=True), flush=True)
+            if raw_smoke_result["passed"] is not True:
+                raw_motion_failure = "raw-action passthrough smoke failed; training is forbidden"
+        else:
+            assert raw_motion_student_controller is not None
+            raw_behavior.update({
+                "schema_version": 1,
+                "kind": "highstep_fixed_motion_raw_student_behavior",
+                "status": "completed",
+                "illegal_outputs": raw_motion_student_controller.illegal_outputs,
+            })
+            output = Path(args_cli.fixed_motion_raw_output).expanduser().resolve()
+            output.mkdir(parents=True, exist_ok=raw_motion_dagger_collector is not None)
+            (output / "behavior_result.json").write_text(json.dumps(raw_behavior, indent=2, sort_keys=True) + "\n")
+            if raw_motion_dagger_collector is not None:
+                dagger_result = raw_motion_dagger_collector.finalize(raw_behavior)
+                print("[FIXED_MOTION_RAW_DAGGER_JSON] " + json.dumps(dagger_result, sort_keys=True), flush=True)
+            print("[FIXED_MOTION_RAW_BEHAVIOR_JSON] " + json.dumps(raw_behavior, sort_keys=True), flush=True)
+
+    if joint_recorder is not None:
+        joint_recorder.close("normal")
+        print(
+            f"[JOINT_RECORD] completed: {joint_recorder.csv_path}\n"
+            f"[JOINT_RECORD] final manifest: {joint_recorder.manifest_path}",
+            flush=True,
+        )
 
     # close the simulator
     env.close()
+    if phase_residual_dataset_failure is not None:
+        raise RuntimeError(phase_residual_dataset_failure)
+    if phase_residual_behavior_failure is not None:
+        raise RuntimeError(phase_residual_behavior_failure)
+    if fixed_motion_failure is not None:
+        raise RuntimeError(fixed_motion_failure)
+    if raw_motion_failure is not None:
+        raise RuntimeError(raw_motion_failure)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,25 @@ _ROBUST_TEACHER_TASK = (
 _STANDARD_TEACHER_TASK = (
     "RobotLab-Isaac-Velocity-HighstepActionScore-ArcdogAdjustableLeg-v0"
 )
+_BE300_TEACHER_TASK = (
+    "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123-ArcdogAdjustableLeg-v0"
+)
+_BE300_V113_SPEC_SHA256 = "0307b9e5c5c9c81999499ce2c3f05c0beabaa98caedde24aac5ac7843d73d768"
+_BE300_V114_SPEC_SHA256 = "d3e69743993008a27bf1d30e5f78f634b8710a9dde1239b102cad4370ff84108"
+_BE300_V113_PARENT_SHA256 = "82dd4934388e5433718394f25d1dcc72c09ae18cddc2a3355a3a75556f4a8f93"
+_BE300_V113_PREREG_SHA256 = "2660ad2ba78719018c0d1ba1d926ee6fc6e997aebd8bfabdefcd1e18196b1cc6"
+_B300_0707_SINGLE_RUN_7400_SPEC_SHA256 = (
+    "b73470a6b15a9fb5595b7153c7cb155878c2a2c4c63590b178b7b3f640af5fd3"
+)
+_B300_DIAGONAL_IMITATION_FRESH_7400_SPEC_SHA256 = (
+    "7c8ddc84a5653274981da6d4fc118a8d3c02156e6ec5adcc4d43c996085811e7"
+)
+_B300_CRITICAL_TRANSITION_BALANCED_DIAGONAL_FRESH_7400_SPEC_SHA256 = (
+    "4d23ca975cfe5f91d6536b911af369d0807cee027a8e5f54bfacee83fda68575"
+)
+_B300_RL_PREEDGE_CONTINUATION_E7700_SPEC_SHA256 = (
+    "b1a854ebc0c8ccf674bc25d869b6e088532cf8911e64a1404f0b365fdda59f08"
+)
 _ROBUST_STUDENT_TASKS = frozenset(
     {
         "RobotLab-Isaac-Velocity-HighstepActionScoreRobustStudentNoPrior-ArcdogAdjustableLeg-v0",
@@ -111,6 +130,177 @@ def _load_parent_teacher_lineage(
     try:
         parent_bytes = parent_path.read_bytes()
         parent = json.loads(parent_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ScheduleManifestInvalidError(
+            f"Cannot read parent Teacher lineage from {parent_path}: {error}"
+        ) from error
+
+    if isinstance(parent, Mapping) and parent.get("kind") in {
+        "highstep_be300_teacher_parent_lineage",
+        "highstep_be300_teacher_parent_lineage_v114",
+    }:
+        try:
+            authority = parent["authority"]
+            freeze_binding = parent["source_freeze_manifest"]
+            freeze_path = _resolved_regular_file(
+                str(freeze_binding["path"]), label="B-E300 Teacher freeze manifest"
+            )
+            freeze_bytes = freeze_path.read_bytes()
+            freeze = json.loads(freeze_bytes.decode("utf-8"))
+            selected_path = _resolved_regular_file(
+                str(parent["selected_checkpoint"]), label="Selected B-E300 Teacher checkpoint"
+            )
+            spec_path = _resolved_regular_file(
+                str(authority["spec_path"]), label="B-E300 highstep spec"
+            )
+            resolved_cfg = freeze["resolved_training_configuration"]
+            env_cfg = _resolved_regular_file(
+                str(resolved_cfg["environment"]["path"]), label="B-E300 saved env config"
+            )
+            agent_cfg = _resolved_regular_file(
+                str(resolved_cfg["agent"]["path"]), label="B-E300 saved agent config"
+            )
+        except (KeyError, OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ScheduleManifestInvalidError(
+                f"Cannot resolve B-E300 parent Teacher lineage from {parent_path}: {error}"
+            ) from error
+
+        selected_sha = sha256_file(selected_path)
+        freeze_sha = hashlib.sha256(freeze_bytes).hexdigest()
+        parent_sha = hashlib.sha256(parent_bytes).hexdigest()
+        common_valid = bool(
+            parent.get("schema_version") == 1
+            and parent.get("status") == "teacher_parent_lineage_frozen"
+            and parent.get("task") == _BE300_TEACHER_TASK
+            and parent.get("user_authorized_student_distillation") is True
+            and parent.get("selected_checkpoint_sha256") == selected_sha
+            and freeze_binding.get("sha256") == freeze_sha
+            and freeze.get("schema_version") == 1
+            and freeze.get("kind") == "user_selected_teacher_freeze_manifest"
+            and freeze.get("workflow_id") == "highstep_teacher_front_geometry_v1123_20260716"
+            and freeze.get("authority_version") == "v1.12.3"
+            and freeze.get("status") == "teacher_frozen_user_selected_for_student_distillation_design"
+            and freeze.get("teacher", {}).get("label") == "B-E300"
+            and freeze.get("teacher", {}).get("user_selected") is True
+            and Path(str(freeze.get("teacher", {}).get("checkpoint_path"))).expanduser().resolve()
+            == selected_path
+            and freeze.get("teacher", {}).get("checkpoint_sha256") == selected_sha
+            and resolved_cfg["environment"].get("sha256") == sha256_file(env_cfg)
+            and resolved_cfg["agent"].get("sha256") == sha256_file(agent_cfg)
+        )
+        exact_v113_live = bool(
+            common_valid
+            and parent.get("kind") == "highstep_be300_teacher_parent_lineage"
+            and parent.get("workflow_id") == "highstep_be300_0707_distill_20260716"
+            and authority.get("version") == "v1.13.1"
+            and authority.get("spec_sha256") == _BE300_V113_SPEC_SHA256
+            and sha256_file(spec_path) == _BE300_V113_SPEC_SHA256
+        )
+        historical_capture = os.environ.get(
+            "HIGHSTEP_BE300_V114_HISTORICAL_BASELINE_CAPTURE", ""
+        ) == "1"
+        historical_prereg_path = os.path.realpath(
+            os.environ.get("HIGHSTEP_BE300_0707_PREREGISTRATION_PATH", "")
+        )
+        historical_prereg_sha = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_SHA256", ""
+        )
+        exact_v113_historical_read = bool(
+            common_valid
+            and historical_capture
+            and parent.get("kind") == "highstep_be300_teacher_parent_lineage"
+            and parent_sha == _BE300_V113_PARENT_SHA256
+            and authority.get("version") == "v1.13.1"
+            and authority.get("spec_sha256") == _BE300_V113_SPEC_SHA256
+            and sha256_file(spec_path) == _BE300_V114_SPEC_SHA256
+            and historical_prereg_sha == _BE300_V113_PREREG_SHA256
+            and historical_prereg_path
+            and sha256_file(historical_prereg_path) == _BE300_V113_PREREG_SHA256
+        )
+        historical_parent = parent.get("historical_parent_manifest", {})
+        exact_v114_valid = bool(
+            common_valid
+            and parent.get("kind") == "highstep_be300_teacher_parent_lineage_v114"
+            and parent.get("workflow_id") == "highstep_be300_clamp_gradient_repair_v114_20260718"
+            and authority.get("version") == "v1.14"
+            and authority.get("spec_sha256") == _BE300_V114_SPEC_SHA256
+            and sha256_file(spec_path) == _BE300_V114_SPEC_SHA256
+            and os.path.realpath(str(historical_parent.get("path", "")))
+            == "/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/teacher_parent_lineage_v1131.json"
+            and historical_parent.get("sha256") == _BE300_V113_PARENT_SHA256
+            and sha256_file(str(historical_parent.get("path", "")))
+            == _BE300_V113_PARENT_SHA256
+        )
+        single_run_prereg_path = os.path.realpath(
+            os.environ.get("HIGHSTEP_BE300_0707_PREREGISTRATION_PATH", "")
+        )
+        single_run_prereg_sha = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_SHA256", ""
+        )
+        try:
+            with open(single_run_prereg_path, encoding="utf-8") as stream:
+                single_run_prereg = json.load(stream)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            single_run_prereg = {}
+        prereg_kind = single_run_prereg.get("kind")
+        prereg_spec_sha = single_run_prereg.get("authority", {}).get("spec_sha256")
+        prereg_identity_valid = (
+            prereg_kind == "highstep_b300_0707_derived_single_run_7400_preregistration"
+            and prereg_spec_sha == _B300_0707_SINGLE_RUN_7400_SPEC_SHA256
+        ) or (
+            prereg_kind == "highstep_b300_diagonal_imitation_fresh_7400_preregistration"
+            and prereg_spec_sha == _B300_DIAGONAL_IMITATION_FRESH_7400_SPEC_SHA256
+        ) or (
+            prereg_kind
+            == "highstep_b300_critical_transition_balanced_diagonal_fresh_7400_preregistration"
+            and prereg_spec_sha
+            == _B300_CRITICAL_TRANSITION_BALANCED_DIAGONAL_FRESH_7400_SPEC_SHA256
+        ) or (
+            prereg_kind == "highstep_b300_rl_preedge_continuation_e7700_preregistration"
+            and prereg_spec_sha == _B300_RL_PREEDGE_CONTINUATION_E7700_SPEC_SHA256
+        )
+        budget = single_run_prereg.get("training_budget", {})
+        continuation_budget_valid = bool(
+            prereg_kind == "highstep_b300_rl_preedge_continuation_e7700_preregistration"
+            and budget.get("start_effective_update") == 5700
+            and budget.get("additional_effective_updates") == 2000
+            and budget.get("target_effective_update") == 7700
+            and budget.get("warmup_reentry") is False
+        )
+        single_run_7400_valid = bool(
+            common_valid
+            and parent_sha == _BE300_V113_PARENT_SHA256
+            and parent.get("kind") == "highstep_be300_teacher_parent_lineage"
+            and prereg_identity_valid
+            and single_run_prereg.get("authority", {}).get("version") == "v1.0"
+            and (
+                continuation_budget_valid
+                or (
+                    budget.get("continuous_single_process") is True
+                    and budget.get("effective_updates") == 7400
+                )
+            )
+            and single_run_prereg_sha
+            and sha256_file(single_run_prereg_path) == single_run_prereg_sha
+        )
+        if require_robust or not (
+            exact_v113_live
+            or exact_v113_historical_read
+            or exact_v114_valid
+            or single_run_7400_valid
+        ):
+            raise ScheduleManifestInvalidError(
+                "B-E300 Student requires an exact hash-bound v1.13.1/v1.14 parent lineage: "
+                + str(parent_path)
+            )
+        return {
+            "parent_teacher_manifest_path": str(parent_path),
+            "parent_teacher_manifest_sha256": parent_sha,
+            "selected_teacher_checkpoint_path": str(selected_path),
+            "selected_teacher_checkpoint_sha256": selected_sha,
+        }
+
+    try:
         selected_path = _resolved_regular_file(
             str(parent["selected_checkpoint"]), label="Selected Teacher checkpoint"
         )
@@ -547,13 +737,47 @@ def schedule_definition_from_configs(
 def assert_schedule_definition_compatible(
     source_manifest: Mapping[str, Any],
     current_definition: Mapping[str, Any],
+    *,
+    allow_be300_teacher_prior_removal: bool = False,
 ) -> None:
     """Fail closed when preserve would silently change schedule endpoints."""
     source_definition = source_manifest.get("schedule_definition")
     if not isinstance(source_definition, Mapping):
         raise ScheduleManifestInvalidError("Source manifest has no schedule_definition mapping")
-    source_json = json.dumps(dict(source_definition), sort_keys=True, separators=(",", ":"))
-    current_json = json.dumps(dict(current_definition), sort_keys=True, separators=(",", ":"))
+    source_comparable = dict(source_definition)
+    current_comparable = dict(current_definition)
+    if allow_be300_teacher_prior_removal:
+        source_prior = source_comparable.get("action_prior")
+        current_prior = current_comparable.get("action_prior")
+        expected_source_prior = {
+            "enabled": True,
+            "num_steps_per_update": 24,
+            "start_update": 80,
+            "full_update": 520,
+        }
+        expected_student_prior = {
+            "enabled": False,
+            "num_steps_per_update": 24,
+            "start_update": None,
+            "full_update": None,
+        }
+        if source_prior == expected_student_prior and current_prior == expected_student_prior:
+            # The Teacher-to-Student migration was already completed before
+            # this checkpoint.  A full Student-to-same-Student recovery must
+            # preserve that disabled prior verbatim, not attempt the migration
+            # a second time.
+            pass
+        elif source_prior == expected_source_prior and current_prior == expected_student_prior:
+            # First Teacher-to-Student transition: normalize only the approved
+            # enabled-to-disabled prior migration for the exact comparison.
+            source_comparable["action_prior"] = dict(expected_student_prior)
+        else:
+            raise ScheduleContinuityError(
+                "v1.13.1 B-E300 Teacher-to-Student prior migration is not the exact frozen "
+                f"enabled-to-disabled transition: source={source_prior}; current={current_prior}"
+            )
+    source_json = json.dumps(source_comparable, sort_keys=True, separators=(",", ":"))
+    current_json = json.dumps(current_comparable, sort_keys=True, separators=(",", ":"))
     if source_json != current_json:
         raise ScheduleContinuityError(
             "High-step schedule definition changed across a preserve resume. "

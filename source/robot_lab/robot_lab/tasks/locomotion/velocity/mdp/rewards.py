@@ -1504,6 +1504,237 @@ def front_legs_highstep_reach_bonus(
     return task_gate * cmd_gate * safe_pitch * reach_score * stage_gate
 
 
+def left_front_highstep_precontact_retraction_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    left_front_foot_name: str,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    retraction_start_x: float = 0.36,
+    retraction_target_x: float = 0.30,
+    relative_lift_min: float = -0.30,
+    relative_lift_target: float = -0.12,
+    clearance_release: float = 0.04,
+    clearance_window: float = 0.12,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Retract the left-front foot only during the pre-contact high-step swing.
+
+    The v1.12 rear-support Teacher has the desired rear-leg motion, but the
+    frozen 00155 review showed one repeated residual failure: the left-front
+    toe catches the vertical riser (8 of 14 completed attempts).  This term asks
+    the lifted FL foot to stay 6 cm closer to the body until it clears the
+    detected platform top.  It then fades out, leaving the unchanged symmetric
+    reach/support objectives to place and load the foot on the platform.
+
+    The narrow terrain, command, clearance, and pre-commit gates deliberately
+    prevent this term from changing flat walking, the right-front leg, or any
+    rear-leg phase.
+    """
+    asset = env.scene[asset_cfg.name]
+    terrain_gate, _, front_terrain_z = _forward_highstep_terrain_gate(
+        env,
+        sensor_cfg,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, min=0.0, max=1.0)
+    commit_gate = torch.clamp(
+        _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names),
+        min=0.0,
+        max=1.0,
+    )
+    precommit_gate = torch.square(1.0 - commit_gate)
+
+    fl_id = asset.find_bodies([left_front_foot_name])[0][0]
+    fl_pos_w = asset.data.body_pos_w[:, fl_id, :]
+    fl_rel_w = fl_pos_w - asset.data.root_pos_w
+    fl_rel_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), fl_rel_w)
+    retraction_score = torch.clamp(
+        (retraction_start_x - fl_rel_b[:, 0])
+        / max(retraction_start_x - retraction_target_x, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    fl_rel_z = fl_pos_w[:, 2] - asset.data.root_pos_w[:, 2]
+    lift_score = torch.clamp(
+        (fl_rel_z - relative_lift_min)
+        / max(relative_lift_target - relative_lift_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    fl_clearance = fl_pos_w[:, 2] - front_terrain_z
+    below_release_gate = torch.clamp(
+        (clearance_release - fl_clearance) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    stage_gate = _highstep_training_progress_gate(
+        env, stage_start_update, stage_ramp_updates, num_steps_per_update
+    )
+    product = (
+        terrain_gate
+        * cmd_gate
+        * precommit_gate
+        * below_release_gate
+        * lift_score
+        * retraction_score
+        * stage_gate
+    )
+    return product
+
+
+def _highstep_monotonic_reward_release_latch(
+    env: ManagerBasedRLEnv,
+    crossing: torch.Tensor,
+) -> torch.Tensor:
+    """Return the per-env active mask for a reward-only monotonic release latch.
+
+    This state is deliberately attached only to the training environment and is
+    neither observed by the policy nor serialized by the checkpoint/runtime
+    sidecar.  An episode-length decrease identifies an individual environment
+    reset even when the first reward evaluation occurs after the counter has
+    already advanced from zero.
+    """
+    current_length = env.episode_length_buf.detach()
+    released = getattr(env, "_highstep_fl_precontact_reward_released", None)
+    previous_length = getattr(env, "_highstep_fl_precontact_reward_previous_episode_length", None)
+    if (
+        not isinstance(released, torch.Tensor)
+        or released.shape != crossing.shape
+        or released.device != crossing.device
+    ):
+        released = torch.zeros_like(crossing, dtype=torch.bool)
+        previous_length = current_length.clone()
+    elif not isinstance(previous_length, torch.Tensor) or previous_length.shape != current_length.shape:
+        raise RuntimeError("FL pre-contact reward latch lost its per-env episode-length state")
+    else:
+        reset_mask = current_length < previous_length.to(device=current_length.device)
+        released = released.to(device=crossing.device)
+        released = torch.where(reset_mask.to(device=crossing.device), False, released)
+
+    released = released | crossing.detach().to(dtype=torch.bool)
+    env._highstep_fl_precontact_reward_released = released
+    env._highstep_fl_precontact_reward_previous_episode_length = current_length.clone()
+    return (~released).to(dtype=torch.float32)
+
+
+def left_front_highstep_precontact_reward_geometry_contract_bonus(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    left_front_foot_name: str,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    low_lift_min: float = 0.02,
+    low_lift_target: float = 0.18,
+    retraction_target_x: float = 0.30,
+    retraction_sigma: float = 0.06,
+    clearance_release: float = 0.04,
+    clearance_window: float = 0.12,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """v1.12.3 FL-only pre-contact geometry contract with reward-only release state."""
+    asset = env.scene[asset_cfg.name]
+    terrain_gate, detected_step_height, front_terrain_z = _forward_highstep_terrain_gate(
+        env,
+        sensor_cfg,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, min=0.0, max=1.0)
+    commit_gate = torch.clamp(
+        _front_feet_highstep_commit_gate(asset, front_foot_names, rear_foot_names),
+        min=0.0,
+        max=1.0,
+    )
+    precommit_gate = torch.square(1.0 - commit_gate)
+
+    fl_id = asset.find_bodies([left_front_foot_name])[0][0]
+    fl_pos_w = asset.data.body_pos_w[:, fl_id, :]
+    fl_rel_w = fl_pos_w - asset.data.root_pos_w
+    fl_rel_b = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), fl_rel_w)
+
+    low_plane_z = front_terrain_z - detected_step_height
+    low_plane_clearance = fl_pos_w[:, 2] - low_plane_z
+    lift_score = torch.clamp(
+        (low_plane_clearance - low_lift_min) / max(low_lift_target - low_lift_min, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    retraction_score = torch.exp(
+        -0.5 - torch.square((fl_rel_b[:, 0] - retraction_target_x) / max(retraction_sigma, 1.0e-6))
+    )
+
+    fl_clearance = fl_pos_w[:, 2] - front_terrain_z
+    below_release_gate = torch.clamp(
+        (clearance_release - fl_clearance) / max(clearance_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    active_latch = _highstep_monotonic_reward_release_latch(
+        env, fl_clearance >= clearance_release
+    )
+    stage_gate = _highstep_training_progress_gate(
+        env, stage_start_update, stage_ramp_updates, num_steps_per_update
+    )
+    product = (
+        terrain_gate
+        * cmd_gate
+        * precommit_gate
+        * below_release_gate
+        * lift_score
+        * retraction_score
+        * stage_gate
+        * active_latch
+    )
+    if getattr(env, "_highstep_v1123_preflight_capture", False):
+        env._highstep_v1123_preflight_frame = {
+            "terrain_gate": terrain_gate.detach(),
+            "cmd_gate": cmd_gate.detach(),
+            "precommit_gate": precommit_gate.detach(),
+            "below_release_gate": below_release_gate.detach(),
+            "lift_score": lift_score.detach(),
+            "retraction_score": retraction_score.detach(),
+            "active_latch": active_latch.detach(),
+            "final_product": product.detach(),
+            "fl_world_z": fl_pos_w[:, 2].detach(),
+            "fl_body_x": fl_rel_b[:, 0].detach(),
+            "front_terrain_z": front_terrain_z.detach(),
+            "low_plane_z": low_plane_z.detach(),
+            "fl_clearance": fl_clearance.detach(),
+        }
+    return product
+
+
 def _highstep_masked_ray_mean(values: torch.Tensor, mask: torch.Tensor, fallback: torch.Tensor) -> torch.Tensor:
     if mask is None or not bool(torch.any(mask).item()):
         return fallback
@@ -4877,6 +5108,314 @@ def rear_legs_power_drive_bonus(
     stage_gate = _highstep_training_progress_gate(env, stage_start_update, stage_ramp_updates, num_steps_per_update)
     bonus = power_score * gate * cmd_gate * pitch_gate * drive_lift_gate * stage_gate
     return bonus
+
+
+def highstep_rear_support_motion_contract(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg,
+    sensor_cfg: SceneEntityCfg,
+    contact_sensor_cfg: SceneEntityCfg,
+    front_foot_names: list[str],
+    rear_foot_names: list[str],
+    rear_mirror_joint_pairs: list[list[str]],
+    rear_mirror_joint_signs: list[float],
+    min_cmd_x: float = 0.08,
+    front_x_min: float = 0.25,
+    rear_x_max: float = -0.20,
+    max_abs_y: float = 0.30,
+    height_threshold: float = 0.06,
+    height_gate_width: float = 0.14,
+    nominal_base_height: float = 0.44,
+    min_rear_width: float = 0.34,
+    rear_width_window: float = 0.10,
+    min_rear_abs_y: float = 0.15,
+    rear_center_window: float = 0.08,
+    fore_aft_symmetry_scale: float = 0.10,
+    lateral_center_scale: float = 0.08,
+    rear_slip_scale: float = 0.18,
+    action_symmetry_scale: float = 0.35,
+    joint_symmetry_scale: float = 0.35,
+    contact_threshold: float = 5.0,
+    contact_force_window: float = 40.0,
+    roll_scale: float = 0.20,
+    roll_rate_scale: float = 0.90,
+    yaw_rate_scale: float = 0.55,
+    body_lift_target: float = 0.10,
+    body_lift_velocity_target: float = 0.18,
+    first_rear_clear_start: float = 0.20,
+    first_rear_clear_full: float = 0.52,
+    second_rear_clear_start: float = 0.52,
+    second_rear_clear_full: float = 0.82,
+    front_commit_ready_start: float = 0.28,
+    front_commit_ready_full: float = 0.58,
+    inward_penalty_scale: float = 1.0,
+    premature_rear_penalty_scale: float = 0.8,
+    stage_start_update: int = 0,
+    stage_ramp_updates: int = 1,
+    num_steps_per_update: int = 24,
+) -> torch.Tensor:
+    """Rear-only motion contract for a stable high-step entry and recovery.
+
+    Before either rear foot leaves the lower surface, both rear feet are the
+    anchor: they should remain in bilateral contact, move little in the world
+    frame, stay symmetric about the body centerline, and drive a stable body
+    lift with mirrored rear revolute-joint actions.  Once the first rear foot
+    starts to clear the platform edge, same-trajectory action symmetry is no
+    longer appropriate; the contract then protects the stance rear foot,
+    centerline margin, and body attitude while the two rear feet climb in
+    sequence.  Front-foot geometry is used only as a phase-transition signal.
+
+    The term intentionally excludes box-response tuning, front-leg shaping,
+    domain-randomization changes, and any deployment-time guard.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    terrain_gate, height_delta, front_terrain_z = _forward_highstep_terrain_gate(
+        env,
+        sensor_cfg,
+        front_x_min,
+        rear_x_max,
+        max_abs_y,
+        height_threshold,
+        height_gate_width,
+    )
+    commit_gate = _front_feet_highstep_commit_gate(
+        asset, front_foot_names, rear_foot_names
+    )
+    task_gate = torch.maximum(terrain_gate, 0.85 * commit_gate)
+    cmd_x = env.command_manager.get_command(command_name)[:, 0]
+    cmd_gate = torch.clamp((cmd_x - min_cmd_x) / 0.25, min=0.0, max=1.0)
+    stage_gate = _highstep_training_progress_gate(
+        env, stage_start_update, stage_ramp_updates, num_steps_per_update
+    )
+    active_gate = task_gate * cmd_gate * stage_gate
+
+    rear_foot_ids = asset.find_bodies(rear_foot_names)[0]
+    rear_pos_w = asset.data.body_pos_w[:, rear_foot_ids, :]
+    rear_rel_w = rear_pos_w - asset.data.root_pos_w[:, None, :]
+    heading = yaw_quat(asset.data.root_quat_w)[:, None, :].expand(-1, len(rear_foot_ids), -1)
+    rear_pos_b = quat_apply_inverse(
+        heading.reshape(-1, 4), rear_rel_w.reshape(-1, 3)
+    ).reshape(rear_rel_w.shape)
+
+    rear_x = rear_pos_b[..., 0]
+    rear_y = rear_pos_b[..., 1]
+    rear_width = torch.abs(rear_y[:, 0] - rear_y[:, 1])
+    rear_min_abs_y = torch.min(torch.abs(rear_y), dim=1).values
+    width_deficit = torch.clamp(
+        (min_rear_width - rear_width) / max(rear_width_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    center_deficit = torch.clamp(
+        (min_rear_abs_y - rear_min_abs_y) / max(rear_center_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    width_score = 1.0 - width_deficit
+    fore_aft_score = torch.exp(
+        -torch.square(torch.abs(rear_x[:, 0] - rear_x[:, 1]) / max(fore_aft_symmetry_scale, 1.0e-6))
+    )
+    lateral_center_score = torch.exp(
+        -torch.square(torch.abs(rear_y[:, 0] + rear_y[:, 1]) / max(lateral_center_scale, 1.0e-6))
+    )
+
+    contact_sensor: ContactSensor = env.scene.sensors[contact_sensor_cfg.name]
+    rear_contact_ids = contact_sensor.find_bodies(rear_foot_names)[0]
+    rear_force_z = torch.abs(
+        contact_sensor.data.net_forces_w[:, rear_contact_ids, 2]
+    )
+    rear_contact_score = torch.clamp(
+        (rear_force_z - contact_threshold) / max(contact_force_window, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    bilateral_contact = torch.min(rear_contact_score, dim=1).values
+    stance_contact = torch.max(rear_contact_score, dim=1).values
+    force_balance = 1.0 - torch.clamp(
+        torch.abs(rear_force_z[:, 0] - rear_force_z[:, 1])
+        / torch.clamp(rear_force_z[:, 0] + rear_force_z[:, 1], min=contact_threshold),
+        min=0.0,
+        max=1.0,
+    )
+
+    rear_foot_speed_xy = torch.linalg.norm(
+        asset.data.body_lin_vel_w[:, rear_foot_ids, :2], dim=-1
+    )
+    contact_weighted_slip = torch.max(
+        rear_foot_speed_xy * rear_contact_score.detach(), dim=1
+    ).values
+    anchor_score = torch.exp(
+        -torch.square(contact_weighted_slip / max(rear_slip_scale, 1.0e-6))
+    )
+
+    if len(rear_mirror_joint_pairs) != len(rear_mirror_joint_signs):
+        raise ValueError(
+            "rear_mirror_joint_pairs and rear_mirror_joint_signs must have equal length"
+        )
+    if not hasattr(env, "_highstep_rear_support_contract_joint_pairs"):
+        env._highstep_rear_support_contract_joint_pairs = [
+            (
+                int(asset.find_joints(pair[0])[0][0]),
+                int(asset.find_joints(pair[1])[0][0]),
+            )
+            for pair in rear_mirror_joint_pairs
+        ]
+    pair_ids = env._highstep_rear_support_contract_joint_pairs
+    action_diffs = torch.stack(
+        [
+            torch.abs(
+                env.action_manager.action[:, left_id]
+                - float(mirror_sign) * env.action_manager.action[:, right_id]
+            )
+            for (left_id, right_id), mirror_sign in zip(
+                pair_ids, rear_mirror_joint_signs, strict=True
+            )
+        ],
+        dim=1,
+    )
+    joint_diffs = torch.stack(
+        [
+            torch.abs(
+                asset.data.joint_pos[:, left_id]
+                - float(mirror_sign) * asset.data.joint_pos[:, right_id]
+            )
+            for (left_id, right_id), mirror_sign in zip(
+                pair_ids, rear_mirror_joint_signs, strict=True
+            )
+        ],
+        dim=1,
+    )
+    action_symmetry_score = torch.exp(
+        -torch.square(
+            torch.mean(action_diffs, dim=1) / max(action_symmetry_scale, 1.0e-6)
+        )
+    )
+    joint_symmetry_score = torch.exp(
+        -torch.square(
+            torch.mean(joint_diffs, dim=1) / max(joint_symmetry_scale, 1.0e-6)
+        )
+    )
+
+    roll_metric = torch.abs(asset.data.projected_gravity_b[:, 1])
+    roll_rate = torch.abs(asset.data.root_ang_vel_b[:, 0])
+    yaw_rate_error = torch.abs(
+        asset.data.root_ang_vel_b[:, 2]
+        - env.command_manager.get_command(command_name)[:, 2]
+    )
+    posture_score = torch.exp(
+        -torch.square(roll_metric / max(roll_scale, 1.0e-6))
+        -torch.square(roll_rate / max(roll_rate_scale, 1.0e-6))
+        -torch.square(yaw_rate_error / max(yaw_rate_scale, 1.0e-6))
+    )
+
+    rear_clearance = rear_pos_w[..., 2] - front_terrain_z[:, None]
+    rear_clearance_score = torch.clamp(
+        (rear_clearance + 0.18) / 0.18, min=0.0, max=1.0
+    )
+    first_rear_score = torch.max(rear_clearance_score, dim=1).values
+    second_rear_score = torch.min(rear_clearance_score, dim=1).values
+    first_rear_gate = torch.clamp(
+        (first_rear_score - first_rear_clear_start)
+        / max(first_rear_clear_full - first_rear_clear_start, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    second_rear_gate = torch.clamp(
+        (second_rear_score - second_rear_clear_start)
+        / max(second_rear_clear_full - second_rear_clear_start, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    front_commit_ready = torch.clamp(
+        (commit_gate - front_commit_ready_start)
+        / max(front_commit_ready_full - front_commit_ready_start, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+
+    rear_ground_z = front_terrain_z - height_delta
+    body_lift = asset.data.root_pos_w[:, 2] - (
+        rear_ground_z + nominal_base_height
+    )
+    body_lift_score = torch.clamp(
+        body_lift / max(body_lift_target, 1.0e-6), min=0.0, max=1.0
+    )
+    body_lift_velocity_score = torch.clamp(
+        asset.data.root_lin_vel_w[:, 2]
+        / max(body_lift_velocity_target, 1.0e-6),
+        min=0.0,
+        max=1.0,
+    )
+    lift_progress = 0.70 * body_lift_score + 0.30 * body_lift_velocity_score
+
+    double_support_phase = 1.0 - first_rear_gate
+    sequential_phase = first_rear_gate * (1.0 - second_rear_gate)
+    hold_phase = second_rear_gate
+    symmetry_score = (
+        fore_aft_score
+        * lateral_center_score
+        * width_score
+        * action_symmetry_score
+        * joint_symmetry_score
+    )
+    double_support_contract = (
+        bilateral_contact
+        * anchor_score
+        * force_balance
+        * posture_score
+        * symmetry_score
+    )
+    double_support_reward = (
+        double_support_phase
+        * double_support_contract
+        * (0.35 + 0.65 * lift_progress)
+    )
+
+    lateral_safety = width_score * (1.0 - center_deficit)
+    sequential_reward = (
+        sequential_phase
+        * stance_contact
+        * lateral_safety
+        * posture_score
+        * (0.45 + 0.55 * first_rear_gate)
+    )
+    hold_reward = hold_phase * lateral_safety * posture_score
+
+    inward_penalty = torch.clamp(
+        0.55 * width_deficit + 0.45 * center_deficit, min=0.0, max=1.0
+    )
+    premature_rear_penalty = first_rear_gate * (1.0 - front_commit_ready)
+    signal = active_gate * (
+        double_support_reward
+        + 0.70 * sequential_reward
+        + 0.55 * hold_reward
+        - inward_penalty_scale * inward_penalty
+        - premature_rear_penalty_scale * premature_rear_penalty
+    )
+
+    # Expose detached diagnostics without introducing any extra observation or
+    # deployment-time state.  The supervisor/evaluator reads these only after
+    # rollout; training gradients flow exclusively through ``signal``.
+    env._highstep_rear_support_contract_metrics = {
+        "active_gate": active_gate.detach(),
+        "double_support_phase": double_support_phase.detach(),
+        "sequential_phase": sequential_phase.detach(),
+        "hold_phase": hold_phase.detach(),
+        "rear_width": rear_width.detach(),
+        "rear_min_abs_y": rear_min_abs_y.detach(),
+        "fore_aft_error": torch.abs(rear_x[:, 0] - rear_x[:, 1]).detach(),
+        "lateral_center_error": torch.abs(rear_y[:, 0] + rear_y[:, 1]).detach(),
+        "rear_slip": contact_weighted_slip.detach(),
+        "force_balance": force_balance.detach(),
+        "action_symmetry_score": action_symmetry_score.detach(),
+        "joint_symmetry_score": joint_symmetry_score.detach(),
+        "posture_score": posture_score.detach(),
+        "front_commit_ready": front_commit_ready.detach(),
+        "first_rear_gate": first_rear_gate.detach(),
+        "second_rear_gate": second_rear_gate.detach(),
+    }
+    return signal
 
 
 def highstep_rear_push_posture_bonus(

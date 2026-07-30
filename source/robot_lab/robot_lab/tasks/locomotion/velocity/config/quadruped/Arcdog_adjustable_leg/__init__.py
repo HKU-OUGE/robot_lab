@@ -105,6 +105,127 @@ gym.register(
 )
 
 gym.register(
+    id="RobotLab-Isaac-Velocity-HighstepRearSupportV112-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepRearSupportV112EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepRearSupportV112PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-HighstepRearSupportFrontPlacementV1121-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123EnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123Control-ArcdogAdjustableLeg-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123ControlEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123ControlPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepFrontGeometryV114STEStudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV114StudentNoPriorPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepB300CanonicalHybridStudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300CanonicalHybridStudentNoPriorPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
     id="RobotLab-Isaac-Velocity-HighstepActionScoreRobustStudentNoPrior-ArcdogAdjustableLeg-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
@@ -193,6 +314,82 @@ gym.register(
         "rsl_rl_cfg_entry_point": (
             f"{agents.__name__}.rsl_rl_ppo_cfg:"
             "ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorHistorical0707ExactPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepB3000707DerivedSingleRun7400StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18BootstrapEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB3000707DerivedSingleRun7400PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepB300DiagonalImitationFresh7400StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18BootstrapEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300DiagonalImitationFresh7400PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepB300CriticalTransitionBalancedDiagonalFresh7400StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedDiagonalFresh7400PPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id=(
+        "RobotLab-Isaac-Velocity-HighstepB300RLPreEdgeContinuationE7700StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ),
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.highstep_env_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300RLPreEdgeContinuationEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:"
+            "ArclabArcdogAdjustableLegHighstepB300RLPreEdgeContinuationE7700PPORunnerCfg"
         ),
     },
 )

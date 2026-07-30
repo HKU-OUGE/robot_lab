@@ -1,0 +1,23 @@
+[Unit]
+Description=Highstep v1.12.2 FL-only finite Teacher stage supervisor
+After=default.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=HIGHSTEP_V1122_SPEC_SHA256=2d9557d56f3735e589d39613c435d9077d97b83c11b155235ffcc17aeefcdcd6
+Environment=HIGHSTEP_V1122_PREREGISTRATION=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_placement_v1122_20260716/preregistration_v1122_finite_flr_e100_wandb_rebinding4.json
+Environment=HIGHSTEP_V1122_PREREGISTRATION_SHA256=4ebc786dceeb48cd6d1562a717326b587277eb9a19fd59d662b3ea96dc289339
+Environment=HIGHSTEP_V1122_RUNTIME_BINDING=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_placement_v1122_20260716/runtime_rebinding_v1122_finite_flr_e100_4.json
+Environment=HIGHSTEP_V1122_RUNTIME_BINDING_SHA256=b33ba8f921313376713d63a5f110bbfde60511178844a9e7ceb8cdc5677939fd
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_teacher_front_placement_v1122_supervisor.py
+Restart=on-failure
+RestartSec=20
+TimeoutStopSec=300
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

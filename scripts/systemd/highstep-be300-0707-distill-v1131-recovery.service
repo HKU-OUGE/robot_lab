@@ -1,0 +1,29 @@
+[Unit]
+Description=Persistent v1.13.1 B-E300 0707 Student model_1000 recovery supervisor
+After=network-online.target highstep-wandb-http-proxy-bridge.service
+Wants=network-online.target highstep-wandb-http-proxy-bridge.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/lxq/Softwares/robot_lab
+Environment=ALL_PROXY=socks5h://127.0.0.1:10808
+Environment=HTTP_PROXY=http://127.0.0.1:10809
+Environment=HTTPS_PROXY=http://127.0.0.1:10809
+Environment=NO_PROXY=127.0.0.1,localhost
+Environment=HIGHSTEP_V1131_RECOVERY_AMENDMENT=/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/infrastructure_recovery_amendment_model1000_v1131_r3.json
+Environment=HIGHSTEP_V1131_RECOVERY_AMENDMENT_SHA256=28536795528ded0706cef5f0f4a2c044b8149ee14ade25600dc7da7951044594
+Environment=HIGHSTEP_V1131_RECOVERY_BINDING=/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/infrastructure_recovery_runtime_binding_model1000_v1131_r3.json
+Environment=HIGHSTEP_V1131_RECOVERY_BINDING_SHA256=5a67339b6a4c1a480fc481046f3124eec626b570c3633fc8b1f2c1bef12c97fe
+Environment=HIGHSTEP_V1131_CONTINUITY_PATCH=/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/infrastructure_schedule_continuity_patch_v1131.json
+Environment=HIGHSTEP_V1131_CONTINUITY_PATCH_SHA256=6dc869e6f741a50055122375eb95faf11b79b8202e699319987300a35d527b60
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_be300_0707_v1131_recovery_supervisor.py
+Restart=no
+KillMode=control-group
+TimeoutStopSec=180
+StandardOutput=append:/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/logs/v1131_recovery_supervisor_systemd.log
+StandardError=append:/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/logs/v1131_recovery_supervisor_systemd.log
+
+[Install]
+WantedBy=default.target

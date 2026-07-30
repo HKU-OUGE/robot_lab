@@ -1,5 +1,24 @@
 # 当前状态
 
+## 2026-07-30 Highstep 阶段归档（覆盖下文旧状态）
+
+```text
+workflow=highstep_b300_rl_preedge_continuation_e7700_20260719
+phase=archived_after_successful_real_robot_test
+status=archived_after_successful_real_robot_test
+effective_updates=7700
+active train/eval/play=none
+automatic training/evaluation/restart/deployment=false
+```
+
+E7700 Student 已在 2026-07-23 有人保护的真机实验中完成整机上高台，并在用户切换
+`Fixed Down` 前保持站立。切换后的下压动作使一条后腿被台边挤出，不属于上台失败。
+
+当前唯一完整说明：
+[Highstep E7700 真机成功上台阶段归档](highstep_stage_archive_20260730.md)。
+
+下文 2026-06-24 状态仅作历史记录。
+
 更新时间：2026-06-24。
 
 ## 2026-06-23 后腿登台分支不对称更新

@@ -1,5 +1,11 @@
 # Highstep Live Context Handoff
 
+> **2026-07-30 final stage override:** E7700 Student 已在有人保护的真机实验中完成
+> 整机上高台，并在用户切换 `Fixed Down` 前保持站立。当前阶段已归档，无活动
+> train/eval/play，也没有自动恢复或部署授权。唯一当前入口是
+> [`highstep_stage_archive_20260730.md`](highstep_stage_archive_20260730.md)。
+> 本文件其余旧 PID、checkpoint、“当前最高优先级”和恢复命令全部是历史证据。
+
 > **2026-07-15 authority override:** this large file preserves the historical
 > dialogue/experiment chain through 2026-07-12.  Its old “current”, PID, resume,
 > and checkpoint wording is no longer executable authority.  For a new clone or

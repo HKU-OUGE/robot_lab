@@ -1413,6 +1413,146 @@ class ArcdogAdjustableLegHighstepActionScoreRewardsCfg(ArcdogAdjustableLegHighst
 
 
 @configclass
+class ArcdogAdjustableLegHighstepRearSupportV112RewardsCfg(
+    ArcdogAdjustableLegHighstepActionScoreRewardsCfg
+):
+    """Single-variable v1.12 replacement for the old rear-drive objectives."""
+
+    rear_support_motion_contract = RewTerm(
+        func=mdp.highstep_rear_support_motion_contract,
+        # Keep this non-zero before the parent __post_init__: IsaacLab removes
+        # zero-weight terms by replacing them with None.  The child task still
+        # performs the exact 1.10+1.20 -> 2.30 replacement below.
+        weight=2.30,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "contact_sensor_cfg": SceneEntityCfg("contact_forces"),
+            "front_foot_names": ["FL_foot", "FR_foot"],
+            "rear_foot_names": ["RL_foot", "RR_foot"],
+            # Box response remains frozen and is deliberately not a separate
+            # optimization target in this rear revolute-joint symmetry term.
+            "rear_mirror_joint_pairs": [
+                ["RL_hip_joint", "RR_hip_joint"],
+                ["RL_thigh_joint", "RR_thigh_joint"],
+                ["RL_calf_joint", "RR_calf_joint"],
+            ],
+            # Hip axes share +X in the URDF, so a laterally mirrored pose uses
+            # opposite hip coordinates; sagittal thigh/calf coordinates match.
+            "rear_mirror_joint_signs": [-1.0, 1.0, 1.0],
+            "min_cmd_x": 0.08,
+            "front_x_min": 0.25,
+            "rear_x_max": -0.20,
+            "max_abs_y": 0.30,
+            "height_threshold": 0.06,
+            "height_gate_width": 0.14,
+            "nominal_base_height": 0.44,
+            "min_rear_width": 0.34,
+            "rear_width_window": 0.10,
+            "min_rear_abs_y": 0.15,
+            "rear_center_window": 0.08,
+            "fore_aft_symmetry_scale": 0.10,
+            "lateral_center_scale": 0.08,
+            "rear_slip_scale": 0.18,
+            "action_symmetry_scale": 0.35,
+            "joint_symmetry_scale": 0.35,
+            "contact_threshold": 5.0,
+            "contact_force_window": 40.0,
+            "roll_scale": 0.20,
+            "roll_rate_scale": 0.90,
+            "yaw_rate_scale": 0.55,
+            "body_lift_target": 0.10,
+            "body_lift_velocity_target": 0.18,
+            "first_rear_clear_start": 0.20,
+            "first_rear_clear_full": 0.52,
+            "second_rear_clear_start": 0.52,
+            "second_rear_clear_full": 0.82,
+            "front_commit_ready_start": 0.28,
+            "front_commit_ready_full": 0.58,
+            "inward_penalty_scale": 1.0,
+            "premature_rear_penalty_scale": 0.8,
+            "stage_start_update": 0,
+            "stage_ramp_updates": 1,
+            "num_steps_per_update": 24,
+        },
+    )
+
+
+@configclass
+class ArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121RewardsCfg(
+    ArcdogAdjustableLegHighstepRearSupportV112RewardsCfg
+):
+    """v1.12.2: preserve every baseline term and add only FL pre-contact swing shaping."""
+
+    left_front_precontact_retraction = RewTerm(
+        func=mdp.left_front_highstep_precontact_retraction_bonus,
+        weight=0.10,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "left_front_foot_name": "FL_foot",
+            "front_foot_names": ["FL_foot", "FR_foot"],
+            "rear_foot_names": ["RL_foot", "RR_foot"],
+            "min_cmd_x": 0.08,
+            "front_x_min": 0.25,
+            "rear_x_max": -0.20,
+            "max_abs_y": 0.30,
+            "height_threshold": 0.06,
+            "height_gate_width": 0.14,
+            # A moderate 6 cm body-frame retraction target.  The term releases
+            # after the foot clears the platform top, so it cannot hold the FL
+            # foot back during final support or the rear-leg climb.
+            "retraction_start_x": 0.36,
+            "retraction_target_x": 0.30,
+            "relative_lift_min": -0.30,
+            "relative_lift_target": -0.12,
+            "clearance_release": 0.04,
+            "clearance_window": 0.12,
+            "stage_start_update": 0,
+            "stage_ramp_updates": 1,
+            "num_steps_per_update": 24,
+        },
+    )
+
+
+@configclass
+class ArcdogAdjustableLegHighstepFrontGeometryV1123RewardsCfg(
+    ArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121RewardsCfg
+):
+    """v1.12.3: replace only the FL reward's internal geometry contract."""
+
+    left_front_precontact_retraction = RewTerm(
+        func=mdp.left_front_highstep_precontact_reward_geometry_contract_bonus,
+        weight=0.10,
+        params={
+            "command_name": "base_velocity",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "left_front_foot_name": "FL_foot",
+            "front_foot_names": ["FL_foot", "FR_foot"],
+            "rear_foot_names": ["RL_foot", "RR_foot"],
+            "min_cmd_x": 0.08,
+            "front_x_min": 0.25,
+            "rear_x_max": -0.20,
+            "max_abs_y": 0.30,
+            "height_threshold": 0.06,
+            "height_gate_width": 0.14,
+            "low_lift_min": 0.02,
+            "low_lift_target": 0.18,
+            "retraction_target_x": 0.30,
+            "retraction_sigma": 0.06,
+            "clearance_release": 0.04,
+            "clearance_window": 0.12,
+            "stage_start_update": 0,
+            "stage_ramp_updates": 1,
+            "num_steps_per_update": 24,
+        },
+    )
+
+
+@configclass
 class ArclabArcdogAdjustableLegHighstepEnvCfg(LocomotionVelocityRoughEnvCfg):
     rewards: ArcdogAdjustableLegHighstepRewardsCfg = ArcdogAdjustableLegHighstepRewardsCfg()
 
@@ -2562,6 +2702,36 @@ class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV15EnvCfg(
 
 
 @configclass
+class ArcdogAdjustableLegHighstepCriticalTransitionContextCfg(ObsGroup):
+    """Rollout-only four-stage labels; never part of Student deployment input."""
+
+    stage_contact_context = ObsTerm(
+        func=mdp.HighstepCriticalTransitionContext,
+        params={
+            "sensor_cfg": SceneEntityCfg("height_scanner"),
+            "contact_sensor_cfg": SceneEntityCfg("contact_forces"),
+            "foot_asset_cfg": SceneEntityCfg(
+                "robot",
+                body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"],
+                preserve_order=True,
+            ),
+            "command_name": "base_velocity",
+            "include_rl_preedge": False,
+            "rl_preedge_vx_min": 0.65,
+            "rl_preedge_platform_half_width": 1.5,
+            "rl_preedge_outer_margin": 0.12,
+        },
+        history_length=0,
+    )
+
+    def __post_init__(self):
+        self.enable_corruption = False
+        self.concatenate_terms = True
+        self.history_length = 0
+        self.flatten_history_dim = True
+
+
+@configclass
 class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18BootstrapEnvCfg(
     ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorEnvCfg
 ):
@@ -2572,6 +2742,42 @@ class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18BootstrapEnvC
         _apply_v18_saved_environment_profile(
             self, _V18_0707_STUDENT_ENV, _V18_0707_STUDENT_ENV_SHA256
         )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedEnvCfg(
+    ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorV18BootstrapEnvCfg
+):
+    """Frozen 0707 Student environment plus isolated rollout sampling labels."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        # The hash-restored 0707 profile deliberately removes all unknown
+        # groups.  Add this approved training-only label group afterwards so
+        # policy/estimator/critic remain byte-for-byte the restored contract.
+        self.observations.critical_transition = (
+            ArcdogAdjustableLegHighstepCriticalTransitionContextCfg()
+        )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300RLPreEdgeContinuationEnvCfg(
+    ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedEnvCfg
+):
+    """Frozen environment plus one rollout-only RL pre-edge label."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.critical_transition.stage_contact_context.params[
+            "include_rl_preedge"
+        ] = True
+        # The frozen E5700 runtime stores its full forward command as
+        # 0.6480000019 (90% of 0.72).  User-approved numerical realization of
+        # the preregistered 0.65 threshold uses the two-decimal rounding
+        # boundary 0.645; the environment itself is unchanged.
+        self.observations.critical_transition.stage_contact_context.params[
+            "rl_preedge_vx_min"
+        ] = 0.645
 
 
 @configclass
@@ -2650,6 +2856,97 @@ class ArclabArcdogAdjustableLegHighstepActionScoreRobustEnvCfg(
                 "ramp_steps": 32.0,
             },
         )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepRearSupportV112EnvCfg(
+    ArclabArcdogAdjustableLegHighstepActionScoreRobustEnvCfg
+):
+    """v1.12 robust Teacher task with one rear-support contract replacement."""
+
+    rewards: ArcdogAdjustableLegHighstepRearSupportV112RewardsCfg = (
+        ArcdogAdjustableLegHighstepRearSupportV112RewardsCfg()
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Preserve the old aggregate reward scale (1.10 + 1.20 = 2.30) while
+        # replacing the two objectives that allow unilateral compensation.
+        self.rewards.rear_legs_drive_bonus.weight = 0.0
+        self.rewards.highstep_rear_push_posture.weight = 0.0
+        self.rewards.rear_support_motion_contract.weight = 2.30
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121EnvCfg(
+    ArclabArcdogAdjustableLegHighstepRearSupportV112EnvCfg
+):
+    """v1.12.2 Teacher task with one FL pre-contact placement variable."""
+
+    rewards: ArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121RewardsCfg = (
+        ArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121RewardsCfg()
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Preserve the v1.12 symmetric front-reach objective exactly.  Reducing
+        # it would indirectly alter FR, which is outside the 00155 FL-only
+        # failure scope.  The one new semantic variable is the narrow 6 cm FL
+        # pre-contact retraction term; it releases after top clearance.
+        self.rewards.front_legs_reach.weight = 0.45
+        self.rewards.left_front_precontact_retraction.weight = 0.10
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123EnvCfg(
+    ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121EnvCfg
+):
+    """v1.12.3 treatment: one FL reward-internal geometry contract."""
+
+    rewards: ArcdogAdjustableLegHighstepFrontGeometryV1123RewardsCfg = (
+        ArcdogAdjustableLegHighstepFrontGeometryV1123RewardsCfg()
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.front_legs_reach.weight = 0.45
+        self.rewards.left_front_precontact_retraction.weight = 0.10
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorEnvCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV1123EnvCfg
+):
+    """B-E300 environment distribution with only the Teacher action prior removed."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.actions.joint_pos = mdp.DelayedJointPositionActionCfg(
+            asset_name="robot",
+            joint_names=self.joint_names,
+            scale={
+                ".*_box_joint": 0.02,
+                ".*_(hip_joint|thigh_joint|calf_joint)$": 0.1,
+            },
+            use_default_offset=True,
+            clip={".*": (-60.0, 60.0)},
+            preserve_order=True,
+            min_action_delay_steps=0,
+            max_action_delay_steps=1,
+        )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123ControlEnvCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV1123EnvCfg
+):
+    """Paired control using the identical v1.12.3 path with only FL weight zero."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.left_front_precontact_retraction.weight = 0.0
 
 
 @configclass

@@ -1,0 +1,17 @@
+[Unit]
+Description=Highstep B300 canonical hybrid-prior latent distillation supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_b300_canonical_hybrid_supervisor.py
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=75
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

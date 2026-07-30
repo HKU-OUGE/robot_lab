@@ -1,0 +1,22 @@
+[Unit]
+Description=Highstep v1.12.3 paired FL reward geometry A/B supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_teacher_front_geometry_v1123_supervisor.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/lxq/Softwares/robot_lab
+Environment=HIGHSTEP_V1123_SPEC_SHA256=3e8fb10450fd1a1d76323c03bea68d5ef73cb012ebc4211af23610358488a161
+Environment=HIGHSTEP_V1123_PREREGISTRATION=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_geometry_v1123_20260716/preregistration_v1123_paired_ab.json
+Environment=HIGHSTEP_V1123_PREREGISTRATION_SHA256=70f18c938584827a7789e96e3ee61c9dfc2e20ebc352e6bf037e1aced851097f
+Environment=HIGHSTEP_V1123_RUNTIME_BINDING=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_front_geometry_v1123_20260716/runtime_binding_v1123_paired_ab.json
+Environment=HIGHSTEP_V1123_RUNTIME_BINDING_SHA256=47cbcf2a94f7544d61054bb594f79bff10470663815e2e709d379dea670bc75c
+Restart=no
+KillMode=mixed
+TimeoutStopSec=180
+
+[Install]
+WantedBy=default.target

@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 
 ENTITY = "xinqili551-the-university-of-hong-kong"
 PROJECT = "isaaclab"
-ROUTES = {"B", "R", "R5", "student_environment_curriculum"}
+ROUTES = {"B", "D", "R", "R5", "student_environment_curriculum"}
 REQUIRED_CONFIG = {
     "workflow_id", "route", "stage", "attempt", "spec_sha256",
     "preregistration_sha256", "start_checkpoint", "start_checkpoint_sha256",
@@ -231,11 +231,46 @@ def validate_contract(config: Mapping[str, Any]) -> dict[str, Any]:
     return dict(config)
 
 
+def _validated_aborted_non_dependency(path: Path, payload: Mapping[str, Any]) -> bool:
+    if payload.get("sync_status") != "aborted_preserved_not_dependency":
+        return False
+    abort_path = Path(str(payload.get("aborted_stage_manifest", ""))).resolve()
+    expected_sha = str(payload.get("aborted_stage_manifest_sha256", ""))
+    if not abort_path.is_file() or sha256_file(abort_path) != expected_sha:
+        raise RuntimeError(f"W&B aborted-stage binding changed: {path}")
+    abort = json.loads(abort_path.read_text())
+    if not (
+        abort.get("kind") == "highstep_wandb_stage_aborted_preserved_not_dependency"
+        and abort.get("workflow_id") == payload.get("workflow_id")
+        and abort.get("run_id") == payload.get("run_id")
+        and abort.get("stage") == payload.get("stage")
+        and abort.get("training_result_absent") is True
+        and abort.get("stage_checkpoint_is_recovery_source") is False
+        and abort.get("next_stage_may_ignore") is True
+        and abort.get("remote_run_deletion_authorized") is False
+    ):
+        raise RuntimeError(f"W&B aborted-stage contract mismatch: {path}")
+    source = Path(str(abort.get("source_stage_manifest", ""))).resolve()
+    pause = Path(str(abort.get("pause_manifest", ""))).resolve()
+    if (
+        not source.is_file()
+        or sha256_file(source) != abort.get("source_stage_manifest_sha256")
+        or not pause.is_file()
+        or sha256_file(pause) != abort.get("pause_manifest_sha256")
+    ):
+        raise RuntimeError(f"W&B aborted-stage evidence changed: {path}")
+    return True
+
+
 def assert_all_prior_synced(workflow_root: Path) -> None:
     pending = []
     for path in workflow_root.glob("wandb_stages/*/stage_manifest.json"):
         payload = json.loads(path.read_text())
-        if payload.get("sync_status") != "synced":
+        if payload.get("sync_status") == "synced":
+            continue
+        if _validated_aborted_non_dependency(path, payload):
+            continue
+        else:
             pending.append(str(path))
     if pending:
         raise RuntimeError(f"W&B sync gate blocks the next training stage: {pending}")

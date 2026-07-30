@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -63,6 +64,54 @@ def _optimizer_step(algorithm, gradient: float) -> None:
     for parameter in algorithm.policy.parameters():
         parameter.grad = torch.full_like(parameter, gradient)
     algorithm.vae_optimizer.step()
+
+
+def _make_verified_legacy_teacher(seed: int):
+    """Tiny Stage-1 analogue with 23 restored PPO states and an empty VAE Adam."""
+    torch.manual_seed(seed)
+    teacher_type = type("VAEPPO", (), {})
+    algorithm = teacher_type()
+    algorithm.policy = nn.ParameterList([nn.Parameter(torch.randn(())) for _ in range(23)])
+    algorithm.optimizer = torch.optim.Adam(algorithm.policy.parameters(), lr=1.0e-5)
+    algorithm.vae_parameter = nn.Parameter(torch.randn(()))
+    algorithm.vae_optimizer = torch.optim.Adam([algorithm.vae_parameter], lr=1.0e-4)
+    algorithm.distill_stage = 1
+    algorithm.student_recovery_stage = "NONE"
+    algorithm.extra_checkpoint_state_dict = lambda: {
+        "schema_version": 1,
+        "algorithm_class": "VAEPPO",
+        "distill_stage": 1,
+        "vae_optimizer_state_dict": algorithm.vae_optimizer.state_dict(),
+    }
+    algorithm.load_extra_checkpoint_state_dict = lambda state: algorithm.vae_optimizer.load_state_dict(
+        state["vae_optimizer_state_dict"]
+    )
+    algorithm.optimizer.zero_grad()
+    for parameter in algorithm.policy.parameters():
+        parameter.grad = torch.ones_like(parameter)
+    algorithm.optimizer.step()
+    return algorithm
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _teacher_contract(path: Path, *, iteration: int = 600) -> dict:
+    return {
+        "kind": "verified_legacy_teacher_algorithm_state_v1",
+        "algorithm_class": "VAEPPO",
+        "distill_stage": 1,
+        "student_recovery_stage": "NONE",
+        "checkpoint_path": str(path.resolve()),
+        "checkpoint_sha256": _sha256(path),
+        "checkpoint_iteration": iteration,
+        "stock_optimizer_state_entries": 23,
+        "stock_optimizer_param_groups": 1,
+        "vae_optimizer_state_entries": 0,
+        "vae_optimizer_param_groups": 1,
+        "stage1_update_contract": "super_ppo_only_no_vae_optimizer_step",
+    }
 
 
 def _assert_nested_equal(test_case: unittest.TestCase, left, right) -> None:
@@ -236,6 +285,87 @@ class VAEPPOCheckpointResumeTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 checkpoint_support.AlgorithmCheckpointError,
                 "already contains resumable algorithm state",
+            ):
+                restored_runner.load(str(checkpoint_path), map_location="cpu")
+
+    def test_verified_legacy_teacher_restores_ppo_adam_and_exact_empty_vae_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            checkpoint_path = Path(temporary_dir) / "legacy_teacher_600.pt"
+            source = _make_verified_legacy_teacher(seed=7)
+            source_runner = _StockLikeRunner(source)
+            source_runner.current_learning_iteration = 600
+            source_runner.save(str(checkpoint_path))
+
+            restored = _make_verified_legacy_teacher(seed=99)
+            # Reset the newly created PPO moments so runner.load must restore them.
+            restored.optimizer.state.clear()
+            restored_runner = _StockLikeRunner(restored)
+            messages: list[str] = []
+            checkpoint_support.install_algorithm_checkpoint_state_hook(
+                restored_runner,
+                verified_legacy_teacher_checkpoint=_teacher_contract(checkpoint_path),
+                log=messages.append,
+            )
+            restored_runner.load(str(checkpoint_path), map_location="cpu")
+
+            _assert_nested_equal(self, source.optimizer.state_dict(), restored.optimizer.state_dict())
+            self.assertEqual(0, len(restored.vae_optimizer.state))
+            self.assertEqual(1, len(messages))
+            self.assertIn("23-state PPO Adam", messages[0])
+
+    def test_verified_legacy_teacher_wrong_sha_fails_before_load(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            checkpoint_path = Path(temporary_dir) / "legacy_teacher_600.pt"
+            source_runner = _StockLikeRunner(_make_verified_legacy_teacher(seed=7))
+            source_runner.current_learning_iteration = 600
+            source_runner.save(str(checkpoint_path))
+            contract = _teacher_contract(checkpoint_path)
+            contract["checkpoint_sha256"] = "0" * 64
+            restored_runner = _StockLikeRunner(_make_verified_legacy_teacher(seed=99))
+            checkpoint_support.install_algorithm_checkpoint_state_hook(
+                restored_runner, verified_legacy_teacher_checkpoint=contract
+            )
+            with self.assertRaisesRegex(
+                checkpoint_support.AlgorithmCheckpointError, "SHA256 changed before runner.load"
+            ):
+                restored_runner.load(str(checkpoint_path), map_location="cpu")
+            self.assertEqual(0, restored_runner.current_learning_iteration)
+
+    def test_verified_legacy_teacher_rejects_nonempty_vae_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            checkpoint_path = Path(temporary_dir) / "legacy_teacher_600.pt"
+            source_runner = _StockLikeRunner(_make_verified_legacy_teacher(seed=7))
+            source_runner.current_learning_iteration = 600
+            source_runner.save(str(checkpoint_path))
+            restored = _make_verified_legacy_teacher(seed=99)
+            restored.vae_optimizer.zero_grad()
+            restored.vae_parameter.grad = torch.ones_like(restored.vae_parameter)
+            restored.vae_optimizer.step()
+            restored_runner = _StockLikeRunner(restored)
+            checkpoint_support.install_algorithm_checkpoint_state_hook(
+                restored_runner,
+                verified_legacy_teacher_checkpoint=_teacher_contract(checkpoint_path),
+            )
+            with self.assertRaisesRegex(
+                checkpoint_support.AlgorithmCheckpointError, "never-stepped empty state"
+            ):
+                restored_runner.load(str(checkpoint_path), map_location="cpu")
+
+    def test_verified_legacy_teacher_contract_is_not_valid_for_student(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            checkpoint_path = Path(temporary_dir) / "legacy_teacher_600.pt"
+            source_runner = _StockLikeRunner(_make_verified_legacy_teacher(seed=7))
+            source_runner.current_learning_iteration = 600
+            source_runner.save(str(checkpoint_path))
+            restored = _make_verified_legacy_teacher(seed=99)
+            restored.distill_stage = 2
+            restored_runner = _StockLikeRunner(restored)
+            checkpoint_support.install_algorithm_checkpoint_state_hook(
+                restored_runner,
+                verified_legacy_teacher_checkpoint=_teacher_contract(checkpoint_path),
+            )
+            with self.assertRaisesRegex(
+                checkpoint_support.AlgorithmCheckpointError, "runtime distill stage changed"
             ):
                 restored_runner.load(str(checkpoint_path), map_location="cpu")
 

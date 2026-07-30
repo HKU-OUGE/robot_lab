@@ -73,9 +73,18 @@ class VAEActorCriticCfg(RslRlPpoActorCriticCfg):
     student_post_prior_mode: str = "lateral"
     student_highstep_phase_loss_scale: float = 0.0
     student_highstep_rear_box_loss_scale: float = 0.0
+    student_highstep_diagonal_action_loss_scale: float = 0.0
+    student_critical_transition_balanced_sampling: bool = False
+    student_critical_transition_window_radius: int = 10
+    student_rl_preedge_sampling: bool = False
+    student_rl_preedge_pre_steps: int = 30
+    student_rl_preedge_post_steps: int = 10
+    student_front_diagonal_action_loss_scale: float = 0.0
+    student_rear_diagonal_action_loss_scale: float = 0.0
     student_highstep_rear_hip_loss_scale: float = 0.0
     student_highstep_rear_hip_min_abs: float = 0.0
     student_highstep_rear_hip_action_scale: float = 0.1
+    student_actor_latent_clamp_backward: str = "hard"
     # Approved 2026-07-12 highstep Student recovery.  "none" preserves the
     # legacy distillation path for unrelated tasks; stage B is enabled only by
     # the dedicated highstep ActionScore Student config below.
@@ -96,6 +105,10 @@ class VAEActorCriticCfg(RslRlPpoActorCriticCfg):
     student_recovery_0707_exact_preregistration_sha256: str = ""
     student_recovery_historical_0707_exact_preregistration_path: str = ""
     student_recovery_historical_0707_exact_preregistration_sha256: str = ""
+    student_recovery_be300_0707_preregistration_path: str = ""
+    student_recovery_be300_0707_preregistration_sha256: str = ""
+    student_recovery_b300_hybrid_preregistration_path: str = ""
+    student_recovery_b300_hybrid_preregistration_sha256: str = ""
     student_recovery_v18_preregistration_path: str = ""
     student_recovery_v18_preregistration_sha256: str = ""
 
@@ -290,6 +303,49 @@ class ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg(ArclabArcdogAdjus
         self.algorithm.learning_rate = 1.0e-4
         self.algorithm.desired_kl = 0.006
         super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepRearSupportV112PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """Long-run Teacher continuation for the v1.12 rear-support contract."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_rear_support_v112"
+    max_iterations = 6000
+    save_interval = 100
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepRearSupportV112PPORunnerCfg
+):
+    """Isolated output namespace for the v1.12.1 FL placement experiment."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_rear_support_front_placement_v1121"
+    )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepRearSupportFrontPlacementV1121PPORunnerCfg
+):
+    """Treatment namespace for the paired v1.12.3 reward-geometry experiment."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_treatment"
+    max_iterations = 300
+    save_interval = 100
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123ControlPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV1123PPORunnerCfg
+):
+    """Control namespace for the paired v1.12.3 reward-geometry experiment."""
+
+    experiment_name = "arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_control"
+    max_iterations = 100
 
 
 @configclass
@@ -553,6 +609,177 @@ class ArclabArcdogAdjustableLegHighstepActionScoreStudentNoPriorHistorical0707Ex
         self.algorithm.learning_rate = 1.0e-4
         self.algorithm.schedule = "adaptive"
         super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepActionScorePPORunnerCfg
+):
+    """v1.13.1: B-E300 fresh Student with the proven 0707 Stage-2 contract."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_student_no_prior"
+    )
+    max_iterations = 4000
+    save_interval = 100
+
+    def __post_init__(self):
+        self.policy.distill_stage = 2
+        self.policy.student_recovery_stage = "BE300_0707"
+        self.policy.student_recovery_be300_0707_preregistration_path = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_PATH", ""
+        )
+        self.policy.student_recovery_be300_0707_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_SHA256", ""
+        )
+        self.policy.student_recovery_source_checkpoint = (
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_treatment_Teacher/"
+            "2026-07-16_05-09-30_v1123_B-E300_20260716_050924/model_173499.pt"
+        )
+        self.policy.student_recovery_source_sha256 = (
+            "d97ad3ac886c419f59e31d1b30e69353d70ab294a1f890887358d9bc4efb5431"
+        )
+        self.policy.student_recovery_teacher_checkpoint = (
+            self.policy.student_recovery_source_checkpoint
+        )
+        self.policy.student_recovery_teacher_sha256 = (
+            self.policy.student_recovery_source_sha256
+        )
+        self.policy.student_actor_warmup_updates = 1400
+        self.policy.student_vae_epochs = 4
+        self.policy.student_vel_loss_coef = 10.0
+        self.policy.student_latent_loss_coef = 50.0
+        self.policy.student_teacher_action_loss_coef = 20.0
+        self.policy.student_prior_box_loss_coef = 5.0
+        self.policy.student_recon_loss_coef = 0.5
+        self.policy.student_kl_loss_coef = 0.1
+        self.policy.student_post_prior_mode = "highstep"
+        self.policy.student_highstep_phase_loss_scale = 2.0
+        self.policy.student_highstep_rear_box_loss_scale = 1.5
+        self.policy.student_highstep_rear_hip_loss_scale = 0.0
+        self.policy.student_highstep_rear_hip_min_abs = 0.0
+        self.algorithm.learning_rate = 1.0e-4
+        self.algorithm.schedule = "adaptive"
+        super().__post_init__()
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepFrontGeometryV114StudentNoPriorPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorPPORunnerCfg
+):
+    """v1.14: v1.13.1 contract with STE clamp backward as the sole change."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_front_geometry_v114_ste_student_no_prior"
+    )
+    max_iterations = 2500
+    save_interval = 100
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_actor_latent_clamp_backward = "straight_through"
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB3000707DerivedSingleRun7400PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV1123StudentNoPriorPPORunnerCfg
+):
+    """One uninterrupted 7400-update B300 -> 0707-derived Stage-2 run."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_b300_0707_derived_single_run_7400"
+    )
+    max_iterations = 7400
+    save_interval = 100
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_recovery_be300_0707_preregistration_path = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_PATH", ""
+        )
+        self.policy.student_recovery_be300_0707_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_BE300_0707_PREREGISTRATION_SHA256", ""
+        )
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300DiagonalImitationFresh7400PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepB3000707DerivedSingleRun7400PPORunnerCfg
+):
+    """Fresh B300 7400 run with the one preregistered diagonal loss scale."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_b300_diagonal_imitation_fresh_7400"
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_highstep_diagonal_action_loss_scale = 1.0
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedDiagonalFresh7400PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepB3000707DerivedSingleRun7400PPORunnerCfg
+):
+    """Fresh B300 7400 run with the approved transition sampler and phase loss."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_b300_critical_transition_balanced_"
+        "diagonal_fresh_7400"
+    )
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_highstep_diagonal_action_loss_scale = 0.0
+        self.policy.student_critical_transition_balanced_sampling = True
+        self.policy.student_critical_transition_window_radius = 10
+        self.policy.student_front_diagonal_action_loss_scale = 2.0
+        self.policy.student_rear_diagonal_action_loss_scale = 2.0
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300RLPreEdgeContinuationE7700PPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepB300CriticalTransitionBalancedDiagonalFresh7400PPORunnerCfg
+):
+    """Exact E5700 continuation with RL pre-edge sampling."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_b300_rl_preedge_continuation_e7700"
+    )
+    max_iterations = 2000
+    save_interval = 100
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_rl_preedge_sampling = True
+        self.policy.student_rl_preedge_pre_steps = 30
+        self.policy.student_rl_preedge_post_steps = 10
+
+
+@configclass
+class ArclabArcdogAdjustableLegHighstepB300CanonicalHybridStudentNoPriorPPORunnerCfg(
+    ArclabArcdogAdjustableLegHighstepFrontGeometryV114StudentNoPriorPPORunnerCfg
+):
+    """Independent canonical B300 mixed pre/post-prior latent distillation."""
+
+    experiment_name = (
+        "arclab_arcdog_adjustable_leg_highstep_b300_canonical_hybrid_student_no_prior"
+    )
+    max_iterations = 700
+    save_interval = 100
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.student_recovery_stage = "B300_CANONICAL_HYBRID"
+        self.policy.student_recovery_b300_hybrid_preregistration_path = os.environ.get(
+            "HIGHSTEP_B300_HYBRID_PREREGISTRATION_PATH", ""
+        )
+        self.policy.student_recovery_b300_hybrid_preregistration_sha256 = os.environ.get(
+            "HIGHSTEP_B300_HYBRID_PREREGISTRATION_SHA256", ""
+        )
+        # The last four rows and estimator learn from the first effective update.
+        self.policy.student_actor_warmup_updates = 0
 
 
 @configclass

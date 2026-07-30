@@ -1,5 +1,11 @@
 # 部署端笔记
 
+> **2026-07-30 更新：**最终 E7700 Student 已完成有人保护的真机整机上台。
+> 当前准确部署证据、TorchScript SHA、真机 bag 指纹和参考 gains 见
+> [highstep_stage_archive_20260730.md](highstep_stage_archive_20260730.md) 与
+> [config_e7700_real_test_20260723_reference.yaml](config_e7700_real_test_20260723_reference.yaml)。
+> 下文 model69998/E1600 等配置均为历史，不得作为当前 policy2 绑定。
+
 部署仓库：
 
 ```text

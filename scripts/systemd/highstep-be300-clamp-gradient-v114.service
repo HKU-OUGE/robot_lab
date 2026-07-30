@@ -1,0 +1,20 @@
+[Unit]
+Description=Highstep B-E300 v1.14 clamp-gradient repair supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=HIGHSTEP_V114_PREREGISTRATION_SHA256=ad52f376ea223292f686ea62dedbe5982ae43a2db0ae5b227632af35486d970e
+Environment=HIGHSTEP_V114_INFRASTRUCTURE_REPAIR_SHA256=64e8fa9d8f51b5a997e98d9b39982627cd3a887c5ecb3c83c6286233e965fc14
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_be300_clamp_gradient_v114_supervisor.py
+Restart=on-failure
+RestartPreventExitStatus=3 4
+RestartSec=30
+TimeoutStopSec=75
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

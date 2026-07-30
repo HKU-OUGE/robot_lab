@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
+from isaaclab.sensors import ContactSensor
+from isaaclab.utils import math as math_utils
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *  # noqa: F401, F403
 if TYPE_CHECKING:
@@ -239,5 +241,162 @@ class HighstepTeacherPriorContext(ManagerTermBase):
         # with the CPU on every control step.
         torch._assert_async(
             torch.isfinite(context).all(), "Teacher context output contains non-finite values"
+        )
+        return context.clone()
+
+
+class HighstepCriticalTransitionContext(ManagerTermBase):
+    """Training-only B300 phase/contact labels for balanced distillation.
+
+    The four output columns are permanently ordered as ``front_lift``,
+    ``front_support``, ``first_rear`` and ``second_rear``.  They are stored in
+    the rollout buffer only; none is routed into the 570-D Student history,
+    critic input, actor input, TorchScript export, or deployment contract.
+    """
+
+    _EXPECTED_SENSOR_NAME = "height_scanner"
+    _EXPECTED_CONTACT_SENSOR_NAME = "contact_forces"
+    _EXPECTED_COMMAND_NAME = "base_velocity"
+    _EXPECTED_FOOT_NAMES = ("FL_foot", "FR_foot", "RL_foot", "RR_foot")
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedEnv):
+        super().__init__(cfg, env)
+        params = cfg.params
+        sensor_cfg = params["sensor_cfg"]
+        contact_sensor_cfg = params["contact_sensor_cfg"]
+        foot_asset_cfg = params["foot_asset_cfg"]
+        command_name = str(params["command_name"])
+        if sensor_cfg.name != self._EXPECTED_SENSOR_NAME:
+            raise RuntimeError("critical-transition height scanner binding changed")
+        if contact_sensor_cfg.name != self._EXPECTED_CONTACT_SENSOR_NAME:
+            raise RuntimeError("critical-transition contact sensor binding changed")
+        if command_name != self._EXPECTED_COMMAND_NAME:
+            raise RuntimeError("critical-transition command binding changed")
+        if tuple(foot_asset_cfg.body_names or ()) != self._EXPECTED_FOOT_NAMES:
+            raise RuntimeError("critical-transition foot order changed")
+
+        self._height_sensor = env.scene[sensor_cfg.name]
+        self._contact_sensor: ContactSensor = env.scene.sensors[contact_sensor_cfg.name]
+        self._asset = env.scene[foot_asset_cfg.name]
+        self._command_name = command_name
+        self._foot_ids = tuple(int(index) for index in foot_asset_cfg.body_ids)
+        contact_ids = self._contact_sensor.find_bodies(list(self._EXPECTED_FOOT_NAMES))[0]
+        self._contact_ids = tuple(int(index) for index in contact_ids)
+        if len(self._foot_ids) != 4 or len(self._contact_ids) != 4:
+            raise RuntimeError("critical-transition foot/contact binding is incomplete")
+
+        ray_starts = self._height_sensor.ray_starts[0]
+        ray_x = ray_starts[:, 0]
+        ray_y = ray_starts[:, 1]
+        side = torch.abs(ray_y) <= 0.30
+        self._front_ray_mask = (ray_x >= 0.25) & side
+        self._rear_ray_mask = (ray_x <= -0.20) & side
+        if not bool(torch.any(self._front_ray_mask).item()) or not bool(
+            torch.any(self._rear_ray_mask).item()
+        ):
+            raise RuntimeError("critical-transition terrain ray masks are empty")
+
+    @staticmethod
+    def _masked_mean(values: torch.Tensor, mask: torch.Tensor, fallback: torch.Tensor) -> torch.Tensor:
+        selected = values[:, mask]
+        finite = torch.isfinite(selected) & (torch.abs(selected) < 1.0e6)
+        count = finite.float().sum(dim=1)
+        mean = torch.where(finite, selected, torch.zeros_like(selected)).sum(dim=1)
+        mean = mean / torch.clamp(count, min=1.0)
+        return torch.where(count > 0.0, mean, fallback)
+
+    def __call__(
+        self,
+        env: ManagerBasedEnv,
+        sensor_cfg: SceneEntityCfg,
+        contact_sensor_cfg: SceneEntityCfg,
+        foot_asset_cfg: SceneEntityCfg,
+        command_name: str,
+        include_rl_preedge: bool = False,
+        rl_preedge_vx_min: float = 0.65,
+        rl_preedge_platform_half_width: float = 1.5,
+        rl_preedge_outer_margin: float = 0.12,
+    ) -> torch.Tensor:
+        del sensor_cfg, contact_sensor_cfg, foot_asset_cfg, command_name
+        if env is not self._env:
+            raise RuntimeError("critical-transition context called with a different environment")
+
+        hits_z = self._height_sensor.data.ray_hits_w[..., 2]
+        sensor_z = self._height_sensor.data.pos_w[:, 2]
+        front_z = self._masked_mean(hits_z, self._front_ray_mask, sensor_z)
+        rear_z = self._masked_mean(hits_z, self._rear_ray_mask, front_z)
+        height_delta = front_z - rear_z
+        terrain_gate = torch.clamp((height_delta - 0.060) / 0.14, 0.0, 1.0)
+        terrain_gate = terrain_gate * terrain_gate * (3.0 - 2.0 * terrain_gate)
+
+        command_x = env.command_manager.get_command(self._command_name)[:, 0]
+        command_gate = torch.clamp((command_x - 0.08) / 0.25, 0.0, 1.0)
+        active = terrain_gate * command_gate
+
+        foot_z = self._asset.data.body_pos_w[:, self._foot_ids, 2]
+        force_z = torch.abs(
+            self._contact_sensor.data.net_forces_w[:, self._contact_ids, 2]
+        )
+        contact_score = torch.clamp((force_z - 5.0) / 40.0, 0.0, 1.0)
+
+        # Front lift is measured from the lower plane and shuts off once both
+        # front feet have established support on the upper plane.
+        front_lift_height = torch.max(foot_z[:, :2] - rear_z[:, None], dim=1).values
+        front_lift_score = torch.clamp((front_lift_height - 0.04) / 0.14, 0.0, 1.0)
+        front_top_score = torch.clamp((foot_z[:, :2] - front_z[:, None] + 0.05) / 0.10, 0.0, 1.0)
+        front_support_score = torch.min(front_top_score * contact_score[:, :2], dim=1).values
+        front_support = active * front_support_score
+        front_lift = active * front_lift_score * (1.0 - front_support_score)
+
+        # Rear gates exactly reuse the frozen rear-support clearance semantics.
+        rear_clearance_score = torch.clamp(
+            (foot_z[:, 2:] - front_z[:, None] + 0.18) / 0.18, 0.0, 1.0
+        )
+        first_score = torch.max(rear_clearance_score, dim=1).values
+        second_score = torch.min(rear_clearance_score, dim=1).values
+        first_rear = active * torch.clamp((first_score - 0.20) / 0.32, 0.0, 1.0)
+        second_rear = active * torch.clamp((second_score - 0.52) / 0.30, 0.0, 1.0)
+
+        columns = [front_lift, front_support, first_rear, second_rear]
+        if include_rl_preedge:
+            # Training-only causal label.  The first-rear pre-clearance
+            # boundary is spatial: RL has reached the outer 12 cm before the
+            # platform entry edge, while both front feet already carry load
+            # on the upper plane and RL itself has not established top
+            # support.  Do not approximate this with vertical foot clearance:
+            # that only becomes active after the pre-edge event.
+            rl_top_score = torch.clamp(
+                (foot_z[:, 2] - front_z + 0.05) / 0.10, 0.0, 1.0
+            )
+            front_supported = torch.all(
+                (front_top_score >= 0.5) & (force_z[:, :2] > 5.0), dim=1
+            )
+            unit_forward_b = torch.zeros_like(self._asset.data.root_pos_w)
+            unit_forward_b[:, 0] = 1.0
+            heading_w = math_utils.quat_apply_yaw(
+                self._asset.data.root_quat_w, unit_forward_b
+            )[:, :2]
+            heading_w = heading_w / torch.clamp(
+                torch.linalg.vector_norm(heading_w, dim=1, keepdim=True), min=1.0e-6
+            )
+            edge_distance = float(rl_preedge_platform_half_width) / torch.clamp(
+                torch.amax(torch.abs(heading_w), dim=1), min=1.0e-6
+            )
+            rl_xy = self._asset.data.body_pos_w[:, self._foot_ids[2], :2]
+            outward_distance = torch.sum(
+                (rl_xy - env.scene.env_origins[:, :2]) * (-heading_w), dim=1
+            )
+            rl_edge_margin = edge_distance - outward_distance
+            rl_preedge = (
+                (command_x >= float(rl_preedge_vx_min))
+                & front_supported
+                & (rl_top_score < 0.5)
+                & (rl_edge_margin >= -float(rl_preedge_outer_margin))
+            ).to(dtype=front_lift.dtype)
+            columns.append(rl_preedge)
+        context = torch.stack(columns, dim=-1)
+        torch._assert_async(
+            torch.isfinite(context).all(),
+            "critical-transition context contains non-finite values",
         )
         return context.clone()

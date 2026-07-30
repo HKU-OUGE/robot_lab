@@ -28,6 +28,80 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import cli_args
 from algorithm_checkpoint import install_algorithm_checkpoint_state_hook
 
+
+def _setup_hash_bound_wandb_config(logger: str) -> None:
+    """Load one supervisor-provided W&B config without an ambiguous env sequence.
+
+    W&B 0.22 validates ``config_paths`` as ``Sequence[str]`` but environment
+    variables are necessarily strings.  The workflow therefore transports a
+    non-W&B path plus SHA256 and supplies the required one-element sequence to
+    ``wandb.setup`` programmatically before RSL-RL calls ``wandb.init``.
+    """
+    path_text = os.environ.get("ROBOT_LAB_WANDB_CONFIG_PATH", "")
+    expected_sha = os.environ.get("ROBOT_LAB_WANDB_CONFIG_SHA256", "")
+    if not path_text and not expected_sha:
+        return
+    if logger != "wandb" or not path_text or not expected_sha:
+        raise RuntimeError("hash-bound W&B config transport is incomplete")
+    if not os.path.isabs(path_text):
+        raise RuntimeError("hash-bound W&B config path must be absolute")
+    config_path = os.path.realpath(path_text)
+    if not os.path.isfile(config_path):
+        raise RuntimeError("hash-bound W&B config file is missing")
+    if os.stat(config_path).st_mode & 0o222:
+        raise RuntimeError("hash-bound W&B config file must be read-only")
+    with open(config_path, "rb") as stream:
+        actual_sha = hashlib.sha256(stream.read()).hexdigest()
+    if actual_sha != expected_sha:
+        raise RuntimeError("hash-bound W&B config SHA mismatch")
+
+    import wandb
+
+    wandb.setup(settings=wandb.Settings(config_paths=[config_path]))
+    print(f"[INFO] Hash-bound W&B config installed: {config_path} sha256={actual_sha}")
+    if os.environ.get("ROBOT_LAB_WANDB_PREINITIALIZE", "") == "1":
+        required = {
+            "entity": os.environ.get("WANDB_ENTITY", ""),
+            "project": os.environ.get("WANDB_PROJECT", ""),
+            "name": os.environ.get("ROBOT_LAB_WANDB_RUN_NAME", ""),
+            "group": os.environ.get("WANDB_RUN_GROUP", ""),
+            "id": os.environ.get("WANDB_RUN_ID", ""),
+            "ready_path": os.environ.get("ROBOT_LAB_WANDB_READY_PATH", ""),
+        }
+        if any(not value for value in required.values()):
+            raise RuntimeError("single-run W&B preinitialization environment is incomplete")
+        run = wandb.init(
+            entity=required["entity"],
+            project=required["project"],
+            name=required["name"],
+            group=required["group"],
+            id=required["id"],
+            resume="never",
+        )
+        if run is None or run.id != required["id"] or not run.url:
+            raise RuntimeError("W&B online initialization returned no bound run id/URL")
+        ready_path = os.path.realpath(required["ready_path"])
+        if not os.path.isabs(ready_path):
+            raise RuntimeError("W&B ready witness path must be absolute")
+        temporary = ready_path + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as stream:
+            json.dump(
+                {
+                    "schema_version": 1,
+                    "run_id": run.id,
+                    "run_url": run.url,
+                    "run_name": required["name"],
+                    "group": required["group"],
+                    "online_initialized_before_first_optimizer_update": True,
+                },
+                stream,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.write("\n")
+        os.replace(temporary, ready_path)
+        print(f"[INFO] W&B online preinitialization passed: id={run.id} url={run.url}")
+
 # add obs&action dict
 obs_action_info = {
     "observation_groups": {},
@@ -105,6 +179,10 @@ parser.add_argument(
     default=None,
     help="Immutable preregistration JSON for --frozen_fc_mu_diagnostic_output.",
 )
+parser.add_argument("--v114_frozen_gate_dataset", type=str, default=None)
+parser.add_argument("--v114_frozen_gate_report", type=str, default=None)
+parser.add_argument("--v114_create_frozen_gate_dataset", action="store_true", default=False)
+parser.add_argument("--v114_expected_frozen_gate_dataset_sha256", type=str, default=None)
 parser.add_argument("--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes.")
 parser.add_argument(
     "--highstep_resume_mode",
@@ -142,6 +220,15 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--highstep_absolute_runner_step_origin",
+    type=int,
+    default=None,
+    help=(
+        "Exact absolute runner/W&B step origin for the preregistered B300 0707-derived "
+        "single-run route. It does not alter the relative Student distillation counter."
+    ),
+)
+parser.add_argument(
     "--allow_legacy_highstep_schedule_fallback",
     action="store_true",
     default=False,
@@ -168,6 +255,21 @@ parser.add_argument(
         "optimizer/count persistence. Only valid with a full checkpoint load. The unavailable VAE "
         "Adam moments remain fresh, so this is compatible but not a seamless resume."
     ),
+)
+parser.add_argument(
+    "--verified_legacy_teacher_algorithm_state_manifest",
+    type=str,
+    default=None,
+    help=(
+        "Read-only, SHA-bound proof that one exact legacy Stage-1 Teacher checkpoint has a fully "
+        "restorable PPO Adam and a provably never-stepped empty VAE Adam. This is not a generic override."
+    ),
+)
+parser.add_argument(
+    "--verified_legacy_teacher_algorithm_state_manifest_sha256",
+    type=str,
+    default=None,
+    help="Expected SHA256 for --verified_legacy_teacher_algorithm_state_manifest.",
 )
 
 # ==========================================
@@ -496,6 +598,53 @@ def _read_student_recovery_effective_update(checkpoint_path: str) -> int:
         del checkpoint
 
 
+def _load_verified_legacy_teacher_algorithm_state_contract(
+    *, manifest_path: str, manifest_sha256: str, checkpoint_path: str, task: str
+) -> dict:
+    """Load the one narrow Stage-1 Teacher legacy-state proof used by v1.12."""
+    resolved_manifest = os.path.realpath(str(manifest_path))
+    resolved_checkpoint = os.path.realpath(str(checkpoint_path))
+    if not os.path.isabs(resolved_manifest) or not os.path.isfile(resolved_manifest):
+        raise RuntimeError("Verified legacy Teacher algorithm-state manifest path is invalid")
+    if checkpoint_sha256(resolved_manifest) != str(manifest_sha256):
+        raise RuntimeError("Verified legacy Teacher algorithm-state manifest SHA256 mismatch")
+    with open(resolved_manifest, encoding="utf-8") as stream:
+        payload = json.load(stream)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Verified legacy Teacher algorithm-state manifest must contain one object")
+    if not (
+        payload.get("kind") == "highstep_v112_verified_legacy_teacher_algorithm_state_migration"
+        and payload.get("workflow_id") == "highstep_teacher_rear_support_v112_20260715"
+        and payload.get("authority_version") == "v1.12"
+        and payload.get("task") == task
+        and payload.get("training_semantics_changed") is False
+        and payload.get("weights_only") is False
+        and payload.get("fresh_ppo_optimizer") is False
+    ):
+        raise RuntimeError("Verified legacy Teacher algorithm-state authority contract mismatch")
+
+    contract = payload.get("algorithm_state_contract")
+    if not isinstance(contract, dict):
+        raise RuntimeError("Verified legacy Teacher manifest lacks algorithm_state_contract")
+    if os.path.realpath(str(contract.get("checkpoint_path", ""))) != resolved_checkpoint:
+        raise RuntimeError("Verified legacy Teacher manifest is bound to a different checkpoint path")
+    if checkpoint_sha256(resolved_checkpoint) != contract.get("checkpoint_sha256"):
+        raise RuntimeError("Verified legacy Teacher checkpoint SHA256 mismatch")
+
+    evidence = payload.get("source_evidence")
+    if not isinstance(evidence, list) or not evidence:
+        raise RuntimeError("Verified legacy Teacher manifest lacks source evidence")
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise RuntimeError("Verified legacy Teacher source evidence entry is invalid")
+        evidence_path = os.path.realpath(str(item.get("path", "")))
+        if not os.path.isabs(evidence_path) or not os.path.isfile(evidence_path):
+            raise RuntimeError("Verified legacy Teacher source evidence path is invalid")
+        if checkpoint_sha256(evidence_path) != item.get("sha256"):
+            raise RuntimeError("Verified legacy Teacher source evidence SHA256 changed")
+    return dict(contract)
+
+
 def _tensor_or_sequence_list(value) -> list[float]:
     if isinstance(value, torch.Tensor):
         value = value.detach().cpu().flatten().tolist()
@@ -525,7 +674,10 @@ def _stage_b_tensor_rows(label: str, value, expected, *, num_envs: int) -> list:
     return actual[0].tolist()
 
 
-def _assert_stage_b_runtime_contract(env, policy) -> dict:
+def _assert_stage_b_runtime_contract(
+    env, policy, *, allow_critical_transition_context: bool = False,
+    critical_transition_context_dim: int = 4,
+) -> dict:
     """Fail closed unless the initialized Stage B action/robot/observation contract is canonical."""
     expected_joint_order = [
         "FL_hip_joint", "FR_hip_joint", "RL_hip_joint", "RR_hip_joint",
@@ -619,6 +771,13 @@ def _assert_stage_b_runtime_contract(env, policy) -> dict:
             "group_dim": (162,),
         },
     }
+    if allow_critical_transition_context:
+        expected_observations["critical_transition"] = {
+            "terms": ["stage_contact_context"],
+            "dims": [(critical_transition_context_dim,)],
+            "history": [0],
+            "group_dim": (critical_transition_context_dim,),
+        }
     observation_manager = getattr(runtime_env, "observation_manager", None)
     if observation_manager is None:
         raise RuntimeError("Stage B runtime observation manager is unavailable")
@@ -680,6 +839,13 @@ def _assert_stage_b_runtime_contract(env, policy) -> dict:
             raise RuntimeError(f"Stage B runtime policy {attribute} changed: {actual_keys}")
     if int(getattr(policy, "policy_obs_dim", -1)) != 570:
         raise RuntimeError(f"Stage B runtime policy observation dimension changed: {policy.policy_obs_dim}")
+    actual_policy_groups = {
+        key: list(value) for key, value in getattr(policy, "obs_groups", {}).items()
+    }
+    if allow_critical_transition_context and any(
+        "critical_transition" in values for values in actual_policy_groups.values()
+    ):
+        raise RuntimeError("critical-transition labels leaked into a policy observation route")
 
     return {
         "validated": True,
@@ -1315,6 +1481,50 @@ def _highstep_reward_stage_definition(env_cfg) -> dict[str, dict[str, int]]:
     return dict(sorted(definition.items()))
 
 
+def _highstep_fresh_initial_terrain_distribution(env) -> dict:
+    """Fingerprint the fresh per-env terrain population used by paired training."""
+    terrain = getattr(getattr(env.unwrapped, "scene", None), "terrain", None)
+    levels = getattr(terrain, "terrain_levels", None)
+    types = getattr(terrain, "terrain_types", None)
+    if not isinstance(levels, torch.Tensor) or not isinstance(types, torch.Tensor):
+        raise ScheduleContinuityError(
+            "Paired v1.12.3 training requires runtime terrain_levels and terrain_types"
+        )
+
+    def record(name: str, value: torch.Tensor) -> dict:
+        cpu = value.detach().cpu().contiguous()
+        digest = hashlib.sha256()
+        digest.update(str(cpu.dtype).encode("utf-8"))
+        digest.update(json.dumps(list(cpu.shape)).encode("utf-8"))
+        digest.update(cpu.numpy().tobytes())
+        keys, counts = torch.unique(cpu, sorted=True, return_counts=True)
+        histogram = {
+            str(int(key.item())): int(count.item()) for key, count in zip(keys, counts, strict=True)
+        }
+        return {
+            "name": name,
+            "shape": list(cpu.shape),
+            "dtype": str(cpu.dtype),
+            "sha256": digest.hexdigest(),
+            "histogram": histogram,
+        }
+
+    levels_record = record("terrain_levels", levels)
+    types_record = record("terrain_types", types)
+    joint_sha = hashlib.sha256(
+        json.dumps(
+            {"levels": levels_record["sha256"], "types": types_record["sha256"]},
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "claim": "same_fresh_initial_training_distribution_not_process_exact_resume",
+        "terrain_levels": levels_record,
+        "terrain_types": types_record,
+        "joint_sha256": joint_sha,
+    }
+
+
 def _capture_highstep_command_state(env, *, enabled: bool) -> dict:
     if not enabled:
         return {"enabled": False}
@@ -1447,6 +1657,37 @@ def _install_highstep_checkpoint_state_hook(
         append_runtime_snapshot(runtime_state_path, snapshot)
 
     runner.save = save_with_runtime_state
+
+
+def _install_relative_student_checkpoint_cadence(
+    runner, *, absolute_origin: int, interval: int
+) -> None:
+    """Save on the relative Student clock while W&B uses an absolute runner clock."""
+    if absolute_origin < 0 or interval <= 0:
+        raise ValueError("invalid relative Student checkpoint cadence")
+    original_update = runner.alg.update
+    # Disable the stock absolute-iteration modulo saves. The final stock save
+    # remains active; relative checkpoints below call the fully wrapped save().
+    runner.save_interval = 10**12
+
+    def update_with_relative_checkpoint():
+        previous_relative_update = int(runner.alg.student_distill_update_count)
+        result = original_update()
+        relative_update = int(runner.alg.student_distill_update_count)
+        if (
+            relative_update > previous_relative_update
+            and relative_update % interval == 0
+        ):
+            expected_absolute = absolute_origin + relative_update - 1
+            previous_iteration = int(runner.current_learning_iteration)
+            runner.current_learning_iteration = expected_absolute
+            try:
+                runner.save(os.path.join(runner.log_dir, f"model_{expected_absolute}.pt"))
+            finally:
+                runner.current_learning_iteration = previous_iteration
+        return result
+
+    runner.alg.update = update_with_relative_checkpoint
 
 
 # --- CustomRecordVideo: PyAV + W&B---
@@ -1671,11 +1912,52 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         "RobotLab-Isaac-Velocity-HighstepActionScoreStudentNoPriorV15-ArcdogAdjustableLeg-v0",
         "RobotLab-Isaac-Velocity-HighstepActionScoreStudentNoPrior0707Exact-ArcdogAdjustableLeg-v0",
         "RobotLab-Isaac-Velocity-HighstepActionScoreStudentNoPriorHistorical0707Exact-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123StudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepFrontGeometryV114STEStudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300CanonicalHybridStudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300DiagonalImitationFresh7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300CriticalTransitionBalancedDiagonalFresh7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300RLPreEdgeContinuationE7700StudentNoPrior-ArcdogAdjustableLeg-v0",
     }
     is_highstep_schedule_task = (
         args_cli.task in highstep_resume_refine_tasks
         or "highstep" in str(args_cli.task or "").lower()
     )
+    v114_historical_baseline_capture = os.environ.get(
+        "HIGHSTEP_BE300_V114_HISTORICAL_BASELINE_CAPTURE", ""
+    ) == "1"
+    if v114_historical_baseline_capture:
+        expected_e4000 = os.path.realpath(
+            "/home/lxq/Softwares/robot_lab/logs/rsl_rl/"
+            "arclab_arcdog_adjustable_leg_highstep_front_geometry_v1123_student_no_prior_Student/"
+            "2026-07-16_16-03-20_highstep_be300_0707_distill_long_E4000_recovery_r3_model1000_20260716/"
+            "model_3998.pt"
+        )
+        expected_prereg = os.path.realpath(
+            "/home/lxq/Softwares/robot_lab/tmp/highstep_be300_0707_distill_20260716/"
+            "preregistration_v1131.json"
+        )
+        if not (
+            args_cli.task
+            == "RobotLab-Isaac-Velocity-HighstepFrontGeometryV1123StudentNoPrior-ArcdogAdjustableLeg-v0"
+            and args_cli.v114_create_frozen_gate_dataset
+            and args_cli.v114_frozen_gate_dataset
+            and args_cli.v114_frozen_gate_report
+            and not args_cli.v114_expected_frozen_gate_dataset_sha256
+            and args_cli.resume
+            and args_cli.highstep_checkpoint_load_mode == "full"
+            and args_cli.highstep_schedule_resume_mode == "preserve"
+            and os.path.realpath(str(args_cli.checkpoint or "")) == expected_e4000
+            and os.path.realpath(
+                os.environ.get("HIGHSTEP_BE300_0707_PREREGISTRATION_PATH", "")
+            ) == expected_prereg
+            and os.environ.get("HIGHSTEP_BE300_0707_PREREGISTRATION_SHA256", "")
+            == "2660ad2ba78719018c0d1ba1d926ee6fc6e997aebd8bfabdefcd1e18196b1cc6"
+        ):
+            raise RuntimeError(
+                "v1.14 historical baseline authority is restricted to one read-only E4000 "
+                "frozen-buffer capture"
+            )
     if agent_cfg.resume and is_highstep_schedule_task:
         highstep_resume_mode, highstep_resume_reason = _resolve_highstep_resume_mode(args_cli, agent_cfg)
         print(
@@ -1688,6 +1970,39 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     highstep_checkpoint_load_mode = args_cli.highstep_checkpoint_load_mode
     highstep_schedule_requested_mode = args_cli.highstep_schedule_resume_mode
     legacy_student_distill_update_count = args_cli.legacy_student_distill_update_count
+    absolute_runner_step_origin = args_cli.highstep_absolute_runner_step_origin
+    single_run_7400_tasks = {
+        "RobotLab-Isaac-Velocity-HighstepB3000707DerivedSingleRun7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300DiagonalImitationFresh7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+        "RobotLab-Isaac-Velocity-HighstepB300CriticalTransitionBalancedDiagonalFresh7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+    }
+    if absolute_runner_step_origin is not None and not (
+        args_cli.task in single_run_7400_tasks
+        and absolute_runner_step_origin == 173499
+        and args_cli.max_iterations == 7400
+        and agent_cfg.resume
+        and highstep_checkpoint_load_mode == "weights_only"
+        and highstep_schedule_requested_mode == "reset"
+    ):
+        raise RuntimeError("absolute runner step origin is outside the frozen single-run 7400 contract")
+    if args_cli.task in single_run_7400_tasks and absolute_runner_step_origin != 173499:
+        raise RuntimeError("single-run 7400 requires absolute runner step origin 173499")
+    verified_teacher_manifest = args_cli.verified_legacy_teacher_algorithm_state_manifest
+    verified_teacher_manifest_sha = args_cli.verified_legacy_teacher_algorithm_state_manifest_sha256
+    verified_legacy_teacher_checkpoint = None
+    if bool(verified_teacher_manifest) != bool(verified_teacher_manifest_sha):
+        raise ValueError(
+            "Verified legacy Teacher algorithm-state manifest path and SHA256 must be supplied together"
+        )
+    if verified_teacher_manifest:
+        if legacy_student_distill_update_count is not None:
+            raise ValueError("Legacy Student and verified legacy Teacher migrations are mutually exclusive")
+        if highstep_checkpoint_load_mode != "full" or not agent_cfg.resume:
+            raise ValueError("Verified legacy Teacher migration requires a full resumed checkpoint load")
+        if args_cli.task != (
+            "RobotLab-Isaac-Velocity-HighstepRearSupportV112-ArcdogAdjustableLeg-v0"
+        ):
+            raise ValueError("Verified legacy Teacher migration is only valid for the exact v1.12 Teacher task")
     if legacy_student_distill_update_count is not None:
         if legacy_student_distill_update_count < 0:
             raise ValueError("--legacy_student_distill_update_count must be non-negative")
@@ -1893,6 +2208,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("=================================================================\n")
         # =================================================================
 
+        if verified_teacher_manifest:
+            verified_legacy_teacher_checkpoint = (
+                _load_verified_legacy_teacher_algorithm_state_contract(
+                    manifest_path=verified_teacher_manifest,
+                    manifest_sha256=verified_teacher_manifest_sha,
+                    checkpoint_path=resume_path,
+                    task=str(args_cli.task),
+                )
+            )
+
     student_parent_lineage = None
     if is_highstep_schedule_task:
         lineage_source_manifest = None
@@ -1956,7 +2281,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         else:
             pre_schedule_update_at_anchor = pre_checkpoint_schedule_update
         pre_runner_iteration = (
-            0
+            int(absolute_runner_step_origin)
+            if highstep_checkpoint_load_mode == "weights_only"
+            and absolute_runner_step_origin is not None
+            else 0
             if highstep_checkpoint_load_mode == "weights_only"
             else int(pre_checkpoint_iteration or 0)
         )
@@ -1987,7 +2315,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     command_curriculum_enabled=highstep_command_curriculum_enabled,
                     reward_stage_definition=highstep_reward_stage_contract,
                 )
-                assert_schedule_definition_compatible(source_manifest, current_definition)
+                assert_schedule_definition_compatible(
+                    source_manifest,
+                    current_definition,
+                    allow_be300_teacher_prior_removal=(
+                        str(getattr(agent_cfg.policy, "student_recovery_stage", "")).upper()
+                        == "BE300_0707"
+                    ),
+                )
                 command_state_restored, moving_best_state_restored = _restore_highstep_runtime_snapshot(
                     env,
                     runtime_snapshot,
@@ -2064,6 +2399,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     install_algorithm_checkpoint_state_hook(
         runner,
         legacy_student_distill_update_count=legacy_student_distill_update_count,
+        verified_legacy_teacher_checkpoint=verified_legacy_teacher_checkpoint,
     )
 
     # write git state to logs
@@ -2086,10 +2422,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 schedule_resume_mode=highstep_schedule_resolved_mode,
                 allow_legacy_checkpoint_fallback=args_cli.allow_legacy_highstep_schedule_fallback,
             )
-            runner.current_learning_iteration = 0
+            runner.current_learning_iteration = int(absolute_runner_step_origin or 0)
             print(
                 "[INFO] Highstep clean resume: restored policy weights only; "
-                f"optimizer is fresh and learning iteration reset from {loaded_iteration} to 0."
+                "optimizer is fresh and learning iteration set from "
+                f"{loaded_iteration} to {runner.current_learning_iteration}."
             )
         else:
             runner.load(resume_path)
@@ -2274,13 +2611,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO] R3 immutable dual-anchor binding manifest: {r3_binding_manifest_path}")
 
     elif student_recovery_stage in {
-        "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18"
+        "V15", "0707_EXACT", "HISTORICAL_0707_EXACT", "ENV_CURRICULUM_V18",
+        "BE300_0707", "B300_CANONICAL_HYBRID",
     }:
         zero_scale_ablation = student_recovery_stage == "0707_EXACT"
         historical_0707_exact = student_recovery_stage == "HISTORICAL_0707_EXACT"
         environment_curriculum_v18 = student_recovery_stage == "ENV_CURRICULUM_V18"
+        be300_0707 = student_recovery_stage == "BE300_0707"
+        b300_hybrid = student_recovery_stage == "B300_CANONICAL_HYBRID"
         route_label = (
-            "v1.8 environment curriculum" if environment_curriculum_v18
+            "B300 canonical hybrid-prior latent distillation" if b300_hybrid
+            else "B-E300 0707 distillation" if be300_0707
+            else "v1.8 environment curriculum" if environment_curriculum_v18
             else "historical 0707 exact" if historical_0707_exact
             else "zero-scale ablation" if zero_scale_ablation
             else "v1.5"
@@ -2289,7 +2631,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             raise RuntimeError(f"{route_label} Stage-2 requires an explicit model_172300 checkpoint load")
         if legacy_student_distill_update_count is not None:
             raise RuntimeError(f"{route_label} forbids legacy Student count migration")
-        if not environment_curriculum_v18 and highstep_schedule_resolved_mode != "preserve":
+        if b300_hybrid:
+            allowed_b300_schedule = (
+                highstep_checkpoint_load_mode == "weights_only"
+                and highstep_schedule_resolved_mode == "reset"
+            ) or (
+                highstep_checkpoint_load_mode == "full"
+                and highstep_schedule_resolved_mode == "preserve"
+            )
+            if not allowed_b300_schedule:
+                raise RuntimeError(
+                    "B300 hybrid requires fresh weights-only/reset or full/preserve resume"
+                )
+        elif (
+            args_cli.task in single_run_7400_tasks
+            and not (
+                highstep_checkpoint_load_mode == "weights_only"
+                and highstep_schedule_resolved_mode == "reset"
+            )
+        ):
+            raise RuntimeError(
+                "single-run 7400 requires fresh weights-only load with frozen 0707 Student schedule reset"
+            )
+        elif (
+            args_cli.task not in single_run_7400_tasks
+            and not environment_curriculum_v18
+            and highstep_schedule_resolved_mode != "preserve"
+        ):
             raise RuntimeError(f"{route_label} requires checkpoint-paired schedule preserve")
         if environment_curriculum_v18:
             allowed_v18_schedule = (
@@ -2337,7 +2705,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if not bool(getattr(highstep_action_cfg, "preserve_order", False)):
             raise RuntimeError(f"{route_label} preserve_order contract is disabled")
         v15_runtime_contract = _assert_stage_b_runtime_contract(
-            runner.env, runner.alg.policy
+            runner.env,
+            runner.alg.policy,
+            allow_critical_transition_context=(
+                args_cli.task in {
+                    "RobotLab-Isaac-Velocity-HighstepB300CriticalTransitionBalancedDiagonalFresh7400StudentNoPrior-ArcdogAdjustableLeg-v0",
+                    "RobotLab-Isaac-Velocity-HighstepB300RLPreEdgeContinuationE7700StudentNoPrior-ArcdogAdjustableLeg-v0",
+                }
+            ),
+            critical_transition_context_dim=(
+                5
+                if args_cli.task == (
+                    "RobotLab-Isaac-Velocity-HighstepB300RLPreEdgeContinuationE7700StudentNoPrior-"
+                    "ArcdogAdjustableLeg-v0"
+                )
+                else 4
+            ),
         )
         v15_binding_manifest = runner.alg.bind_student_recovery_v15_checkpoints(
             loaded_student_checkpoint=resume_path,
@@ -2346,6 +2729,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         v15_binding_manifest.update(
             {
                 "workflow_id": (
+                    runner.alg._v15_preregistration.get("workflow_id")
+                    if be300_0707 or b300_hybrid else
                     "highstep_student_env_curriculum_v18_20260714"
                     if environment_curriculum_v18 else
                     "highstep_historical_0707_exact_new_teacher_20260714"
@@ -2355,10 +2740,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     "highstep_student_recovery_v15_20260713"
                 ),
                 "recovery_spec_path": (
+                    runner.alg._v15_preregistration.get("spec_path")
+                    if b300_hybrid else
                     "/home/lxq/Softwares/robot_lab/docs/robotlab_memory_zh/library/"
                     "highstep_student_recovery_spec_20260712.md"
                 ),
                 "recovery_spec_sha256": (
+                    runner.alg._v15_preregistration.get("authority", {}).get("spec_sha256")
+                    if be300_0707 or b300_hybrid else
                     "e9375189896e2f6a23b1b8018102c39813076dd048ec8242346b175bb1bc2ef4"
                     if environment_curriculum_v18 else
                     "140fd81d4f6877d25e72f3f1e05799cb6771dfdfc9775fe84a46ecf7d7a6a917"
@@ -2389,6 +2778,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 "params",
                 "highstep_historical_0707_exact_binding.json"
                 if historical_0707_exact else
+                "highstep_b300_canonical_hybrid_binding.json"
+                if b300_hybrid else
+                "highstep_be300_0707_binding.json"
+                if be300_0707 else
                 "highstep_student_environment_curriculum_v18_binding.json"
                 if environment_curriculum_v18 else
                 "highstep_zero_scale_ablation_binding.json"
@@ -2459,6 +2852,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             reward_stage_definition=highstep_reward_stage_contract,
             student_parent_lineage=student_parent_lineage,
         )
+        if any(
+            marker in str(args_cli.task)
+            for marker in ("HighstepFrontGeometryV1123", "HighstepFrontGeometryV114")
+        ):
+            schedule_manifest["fresh_initial_training_distribution"] = (
+                _highstep_fresh_initial_terrain_distribution(env)
+            )
         schedule_manifest_path = write_manifest(
             os.path.join(log_dir, "params", SCHEDULE_MANIFEST_NAME), schedule_manifest
         )
@@ -2489,6 +2889,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 command_curriculum_enabled=highstep_command_curriculum_enabled,
                 moving_best_required=highstep_moving_best_required,
             )
+            if args_cli.task in single_run_7400_tasks:
+                _install_relative_student_checkpoint_cadence(
+                    runner,
+                    absolute_origin=int(absolute_runner_step_origin),
+                    interval=100,
+                )
+            # The sparse RL-pre-edge continuation uses its own effective-update
+            # driver below.  Installing the generic update wrapper here would
+            # reintroduce stock learn(1) final-save path collisions.
 
     if args_cli.debug:
         import time
@@ -2589,6 +2998,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env.close()
         return
 
+    if args_cli.v114_frozen_gate_report:
+        if not args_cli.v114_frozen_gate_dataset:
+            raise RuntimeError("v1.14 frozen gate requires --v114_frozen_gate_dataset")
+        from highstep_v114_frozen_gate import run_v114_frozen_gate
+
+        run_v114_frozen_gate(
+            runner=runner,
+            checkpoint_path=resume_path,
+            dataset_path=args_cli.v114_frozen_gate_dataset,
+            report_path=args_cli.v114_frozen_gate_report,
+            create_dataset=args_cli.v114_create_frozen_gate_dataset,
+            burn_in_steps=args_cli.frozen_diagnostic_burn_in_steps,
+            expected_dataset_sha256=args_cli.v114_expected_frozen_gate_dataset_sha256,
+        )
+        env.close()
+        return
+
     if args_cli.frozen_diagnostic_output:
         from frozen_training_buffer_diagnostic import run_frozen_training_buffer_diagnostic
 
@@ -2667,7 +3093,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # run training
     ac = runner.alg.policy  # 某些版本也叫 runner.alg.actor_critic
     # print(">> Actor type:", ac.actor.__class__.__name__)  # 期望看到 _MoEActor
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    _setup_hash_bound_wandb_config(agent_cfg.logger)
+    if args_cli.task == (
+        "RobotLab-Isaac-Velocity-HighstepB300RLPreEdgeContinuationE7700StudentNoPrior-"
+        "ArcdogAdjustableLeg-v0"
+    ):
+        from highstep_effective_update_driver import run_sparse_effective_update_continuation
+
+        run_sparse_effective_update_continuation(
+            runner,
+            target_effective_update=7700,
+            checkpoint_interval=100,
+            checkpoint_absolute_origin=173499,
+            progress_path=os.environ.get("HIGHSTEP_EFFECTIVE_PROGRESS_PATH"),
+        )
+    else:
+        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
     # Optional: Force commit
     try:
         import wandb

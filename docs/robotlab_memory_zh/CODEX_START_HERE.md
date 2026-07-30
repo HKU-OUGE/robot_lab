@@ -1,5 +1,12 @@
 # RobotLab Codex 起点
 
+> **2026-07-30 Highstep 阶段归档：**
+> E7700 Student 已在有人保护的真机实验中完成整机上高台，并在用户切换
+> `Fixed Down` 前保持站立。当前阶段已归档，无自动训练、评估或部署任务。
+> 继续工作前先读
+> [`library/highstep_stage_archive_20260730.md`](library/highstep_stage_archive_20260730.md)。
+> 下文 v1.11 和更早“当前”描述均为历史快照。
+
 这是把 `dev_lxq_new` 分支交给另一台电脑或一个全新 Codex 会话时的稳定入口。
 
 可直接转发给协作者的中文 PDF 手册：`deliverables/highstep_collaborator_handoff_20260715.pdf`。
@@ -38,13 +45,14 @@ Git 不包含原工作站的 `tmp/`、`logs/`、`wandb/`、checkpoint、rosbag �
 6. `INDEX.md`
 7. 按问题读取 `failure_modes_and_lessons.md`、0707 真机数据报告和其它历史记忆
 
-## 当前分支的真实性边界
+## 当前分支的真实性边界（2026-07-30）
 
 - 分支：`dev_lxq_new`
 - GitHub：`HKU-OUGE/robot_lab`
-- 当前最高规范版本：v1.11
-- 当前工作：旧/新 Teacher 的零训练、同快照鲁棒性 A/B；不是 Student/Teacher 训练
-- v1.10 及更早路线：历史证据，不得自动恢复
+- 当前归档入口：`library/highstep_stage_archive_20260730.md`
+- 当前结果：E7700 Student 已完成有人保护的真机整机上台
+- 当前工作：阶段归档；没有活动的 Student/Teacher 训练、评估或自动部署
+- 2026-07-30 以前的训练路线和旧“当前”描述：历史证据，不得自动恢复
 - GitHub 内的 runtime snapshot：只代表写入时刻，不会伪装成实时 heartbeat
 
 如果未来正式 authority 更新，应新增带日期的 handoff，并更新本文件和两个 memory index；不要删除旧证据或悄悄改写旧结果。

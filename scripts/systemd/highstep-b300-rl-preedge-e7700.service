@@ -1,0 +1,12 @@
+[Unit]
+Description=Highstep B300 E5700 to E7700 RL pre-edge continuation
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_b300_rl_preedge_e7700_launcher.py
+Restart=no
+
+[Install]
+WantedBy=default.target

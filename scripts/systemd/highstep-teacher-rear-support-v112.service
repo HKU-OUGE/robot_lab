@@ -1,0 +1,23 @@
+[Unit]
+Description=Highstep v1.12 rear-support Teacher long training supervisor
+After=default.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lxq/Softwares/robot_lab
+Environment=PYTHONUNBUFFERED=1
+Environment=HIGHSTEP_V112_SPEC_SHA256=70996262cfe10b092a149600771ef4c49111076087cc5a0b37c70c8e3617f766
+Environment=HIGHSTEP_V112_PREREGISTRATION=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_rear_support_v112_20260715/preregistration_v112_rebinding3.json
+Environment=HIGHSTEP_V112_PREREGISTRATION_SHA256=10e19d0bfe9611f952601394c74e59bf16f209e1465eb9c4e636be0f6025e640
+Environment=HIGHSTEP_V112_RUNTIME_BINDING=/home/lxq/Softwares/robot_lab/tmp/highstep_teacher_rear_support_v112_20260715/manifests/runtime_rebinding_v112_3.json
+Environment=HIGHSTEP_V112_RUNTIME_BINDING_SHA256=57868653761ce14afdee4b09331a941e1d88f0929751c076f41cd3ac6529765e
+ExecStart=/home/lxq/miniconda3/envs/env_isaaclab/bin/python -u /home/lxq/Softwares/robot_lab/tools/highstep_teacher_rear_support_v112_supervisor.py
+Restart=on-failure
+RestartSec=20
+TimeoutStopSec=300
+KillMode=mixed
+
+[Install]
+WantedBy=default.target
